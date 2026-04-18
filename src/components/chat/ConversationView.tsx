@@ -1,4 +1,4 @@
-import { ArrowUp, Shield, Lock, Bot, FileText, Zap, Check } from "lucide-react";
+import { ArrowUp, Shield, Unlock, Bot, FileText, Zap, Check, Pencil } from "lucide-react";
 import { useMemo, useState, useRef, useEffect } from "react";
 import type { ChatSession, WorkspaceRecord } from "../../domains/types";
 import { useAppStore } from "../../state/useAppStore";
@@ -17,6 +17,7 @@ export function ConversationView({
   const [isFocused, setIsFocused] = useState(false);
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
   const [approvalDropdownOpen, setApprovalDropdownOpen] = useState(false);
+  const [effortDropdownOpen, setEffortDropdownOpen] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const timelineRef = useRef<HTMLDivElement>(null);
   
@@ -68,6 +69,15 @@ export function ConversationView({
 
   const activeProvider = state?.providers.find((p) => p.id === workspace.providerId);
   const activeModel = activeProvider?.models.find((m) => m.id === workspace.modelId);
+
+  const effortLabels: Record<string, string> = {
+    'extra-high': 'Extra High',
+    'high': 'High (default)',
+    'medium': 'Medium',
+    'low': 'Low'
+  };
+
+  const currentEffortLabel = effortLabels[workspace.effort] || 'High';
 
   return (
     <div className="conversation-view" style={{ padding: '0 24px 24px', display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, background: 'var(--bg)' }}>
@@ -140,14 +150,15 @@ export function ConversationView({
                 {modelDropdownOpen && (
                   <>
                     <div 
-                      style={{ position: 'fixed', inset: 0, zIndex: 30 }} 
+                      style={{ position: 'fixed', inset: 0, zIndex: 100 }} 
                       onClick={(e) => { e.stopPropagation(); setModelDropdownOpen(false); }} 
                     />
-                    <div className="custom-dropdown">
+                    <div className="custom-dropdown" style={{ minWidth: '200px' }}>
                       {activeProvider?.models.map(m => (
                         <div 
                           key={m.id} 
                           className="custom-dropdown-item" 
+                          style={{ justifyContent: 'space-between' }}
                           onClick={(e) => {
                             e.stopPropagation();
                             setModelDropdownOpen(false);
@@ -160,10 +171,8 @@ export function ConversationView({
                             });
                           }}
                         >
-                          <div style={{ width: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                            {workspace.modelId === m.id && <Check size={14} />}
-                          </div>
                           <span>{m.label}</span>
+                          {workspace.modelId === m.id && <Check size={14} />}
                         </div>
                       ))}
                     </div>
@@ -173,9 +182,70 @@ export function ConversationView({
 
               <div style={{ width: '1px', height: '12px', background: '#333' }} />
 
-              <div className="composer-select-wrapper pointer">
-                <span style={{ paddingRight: '4px' }}>High</span>
+              <div className="composer-select-wrapper pointer" onClick={() => setEffortDropdownOpen(!effortDropdownOpen)}>
+                <span style={{ paddingRight: '4px' }}>{currentEffortLabel.split(' ')[0]}</span>
                 <ChevronIcon />
+                {effortDropdownOpen && (
+                  <>
+                    <div 
+                      style={{ position: 'fixed', inset: 0, zIndex: 100 }} 
+                      onClick={(e) => { e.stopPropagation(); setEffortDropdownOpen(false); }} 
+                    />
+                    <div className="custom-dropdown" style={{ minWidth: '160px' }}>
+                      <div className="dropdown-section-label">Effort</div>
+                      {Object.entries(effortLabels).map(([id, label]) => (
+                        <div 
+                          key={id} 
+                          className="custom-dropdown-item" 
+                          style={{ justifyContent: 'space-between' }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setEffortDropdownOpen(false);
+                            void updateWorkspaceSettings({
+                              workspaceId: workspace.id,
+                              approvalMode: workspace.approvalMode,
+                              providerId: workspace.providerId,
+                              modelId: workspace.modelId,
+                              effort: id,
+                              policy: workspace.policy,
+                            });
+                          }}
+                        >
+                          <span>{label}</span>
+                          {workspace.effort === id && <Check size={14} />}
+                        </div>
+                      ))}
+                      
+                      <div style={{ height: '1px', background: '#333', margin: '4px 0' }} />
+                      <div className="dropdown-section-label">Fast Mode</div>
+                      {[
+                        { id: false, label: 'off' },
+                        { id: true, label: 'on' }
+                      ].map(opt => (
+                        <div 
+                          key={opt.label} 
+                          className="custom-dropdown-item" 
+                          style={{ justifyContent: 'space-between' }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setEffortDropdownOpen(false);
+                            void updateWorkspaceSettings({
+                              workspaceId: workspace.id,
+                              approvalMode: workspace.approvalMode,
+                              providerId: workspace.providerId,
+                              modelId: workspace.modelId,
+                              fastMode: opt.id,
+                              policy: workspace.policy,
+                            });
+                          }}
+                        >
+                          <span>{opt.label}</span>
+                          {workspace.fastMode === opt.id && <Check size={14} />}
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
               </div>
 
               <div style={{ width: '1px', height: '12px', background: '#333' }} />
@@ -192,40 +262,51 @@ export function ConversationView({
               <div style={{ width: '1px', height: '12px', background: '#333' }} />
 
               <div className="composer-select-wrapper pointer" onClick={() => setApprovalDropdownOpen(!approvalDropdownOpen)}>
-                <Lock size={14} />
-                <span style={{ paddingRight: '4px' }}>{workspace.approvalMode === 'ask-first' ? 'Ask first' : 'Full access'}</span>
+                {workspace.approvalMode === 'supervised' ? <Shield size={14} /> : 
+                 workspace.approvalMode === 'auto-accept-edits' ? <Pencil size={14} /> : <Unlock size={14} />}
+                <span style={{ paddingRight: '4px' }}>
+                  {workspace.approvalMode === 'supervised' ? 'Supervised' : 
+                   workspace.approvalMode === 'auto-accept-edits' ? 'Auto-accept edits' : 'Full access'}
+                </span>
                 <ChevronIcon />
                 
                 {approvalDropdownOpen && (
                   <>
                     <div 
-                      style={{ position: 'fixed', inset: 0, zIndex: 30 }} 
+                      style={{ position: 'fixed', inset: 0, zIndex: 100 }} 
                       onClick={(e) => { e.stopPropagation(); setApprovalDropdownOpen(false); }} 
                     />
-                    <div className="custom-dropdown">
+                    <div className="custom-dropdown" style={{ minWidth: '280px', left: 'auto', right: '-8px' }}>
                       {[
-                        { id: 'ask-first', label: 'Ask first' },
-                        { id: 'full-access', label: 'Full access' }
+                        { id: 'supervised', label: 'Supervised', desc: 'Ask before commands and file changes.' },
+                        { id: 'auto-accept-edits', label: 'Auto-accept edits', desc: 'Auto-approve edits, ask before other actions.' },
+                        { id: 'full-access', label: 'Full access', desc: 'Allow commands and edits without prompts.' }
                       ].map(m => (
                         <div 
                           key={m.id} 
-                          className="custom-dropdown-item" 
+                          className="custom-dropdown-item multi-line" 
                           onClick={(e) => {
                             e.stopPropagation();
                             setApprovalDropdownOpen(false);
                             void updateWorkspaceSettings({
                               workspaceId: workspace.id,
-                              approvalMode: m.id as any,
+                                approvalMode: m.id as any,
                               providerId: workspace.providerId,
                               modelId: workspace.modelId,
                               policy: workspace.policy,
                             });
                           }}
                         >
-                          <div style={{ width: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          <div style={{ width: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                             {workspace.approvalMode === m.id && <Check size={14} />}
                           </div>
-                          <span>{m.label}</span>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#eee', fontWeight: 500 }}>
+                              {m.id === 'supervised' ? <Shield size={14} /> : m.id === 'auto-accept-edits' ? <Pencil size={14} /> : <Unlock size={14} />}
+                              {m.label}
+                            </div>
+                            <div style={{ fontSize: '0.75rem', color: '#666' }}>{m.desc}</div>
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -318,6 +399,18 @@ export function ConversationView({
         .custom-dropdown-item:hover {
           background: #2563eb;
           color: white;
+        }
+        .custom-dropdown-item.multi-line {
+          align-items: flex-start;
+          padding: 10px 12px;
+        }
+        .dropdown-section-label {
+          padding: 4px 12px;
+          font-size: 0.7rem;
+          font-weight: 700;
+          color: #444;
+          text-transform: uppercase;
+          letter-spacing: 0.05em;
         }
       `}</style>
     </div>

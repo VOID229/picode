@@ -6,7 +6,7 @@ export type ThemeId =
   | "gruvbox"
   | "solarized";
 
-export type ApprovalMode = "ask-first" | "full-access";
+export type ApprovalMode = "supervised" | "auto-accept-edits" | "full-access";
 
 export type TimelineItemKind =
   | "user-message"
@@ -127,6 +127,8 @@ export interface WorkspaceRecord {
   policy: ApprovalPolicy;
   providerId: string;
   modelId: string;
+  effort: string;
+  fastMode: boolean;
   sessions: ChatSession[];
 }
 
@@ -159,6 +161,8 @@ export interface AppPreferences {
   providerId: string;
   modelId: string;
   approvalMode: ApprovalMode;
+  effort: string;
+  fastMode: boolean;
   layout: LayoutPreferences;
 }
 

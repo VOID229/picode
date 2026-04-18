@@ -5,9 +5,10 @@ mod storage;
 
 use crate::models::{
     ApprovalDecision, ApprovalState, BootstrapPayload, CreateSessionPayload,
-    CreateWorkspacePayload, PersistedAppState, RefreshGitPayload, ResolveApprovalPayload,
+    CreateWorkspacePayload, DeleteSessionPayload, PersistedAppState, RefreshGitPayload,
+    RemoveWorkspacePayload, RenameSessionPayload, RenameWorkspacePayload, ResolveApprovalPayload,
     SelectWorkspaceSessionPayload, SendPromptPayload, TimelineItem, UpdateWorkspaceSettingsPayload,
-    now_iso,
+    normalize_state, now_iso,
 };
 use anyhow::Context;
 use models::{GitSnapshot, default_state, new_session};
@@ -146,6 +147,8 @@ async fn update_workspace_settings(
     workspace.approval_mode = payload.approval_mode;
     workspace.provider_id = payload.provider_id;
     workspace.model_id = payload.model_id;
+    workspace.effort = payload.effort.unwrap_or(workspace.effort.clone());
+    workspace.fast_mode = payload.fast_mode.unwrap_or(workspace.fast_mode);
     workspace.policy = payload.policy;
     storage::save(&app, &state).map_err(|error| error.to_string())?;
     Ok(state.clone())
@@ -245,16 +248,15 @@ async fn resolve_approval(
 async fn rename_workspace(
     app: AppHandle,
     shared: State<'_, AppState>,
-    workspace_id: String,
-    name: String,
+    payload: RenameWorkspacePayload,
 ) -> Result<PersistedAppState, String> {
     let mut state = shared.state.lock().await;
     if let Some(workspace) = state
         .workspaces
         .iter_mut()
-        .find(|w| w.id == workspace_id)
+        .find(|w| w.id == payload.workspace_id)
     {
-        workspace.name = name;
+        workspace.name = payload.name;
     }
     storage::save(&app, &state).map_err(|error| error.to_string())?;
     Ok(state.clone())
@@ -264,13 +266,17 @@ async fn rename_workspace(
 async fn remove_workspace(
     app: AppHandle,
     shared: State<'_, AppState>,
-    workspace_id: String,
+    payload: RemoveWorkspacePayload,
 ) -> Result<PersistedAppState, String> {
     let mut state = shared.state.lock().await;
-    state.workspaces.retain(|w| w.id != workspace_id);
-    if state.active_workspace_id.as_ref() == Some(&workspace_id) {
+    state.workspaces.retain(|w| w.id != payload.workspace_id);
+    if state.active_workspace_id.as_ref() == Some(&payload.workspace_id) {
         state.active_workspace_id = state.workspaces.first().map(|w| w.id.clone());
-        state.active_session_id = state.workspaces.first().and_then(|w| w.sessions.first()).map(|s| s.id.clone());
+        state.active_session_id = state
+            .workspaces
+            .first()
+            .and_then(|w| w.sessions.first())
+            .map(|s| s.id.clone());
     }
     storage::save(&app, &state).map_err(|error| error.to_string())?;
     Ok(state.clone())
@@ -280,18 +286,20 @@ async fn remove_workspace(
 async fn rename_session(
     app: AppHandle,
     shared: State<'_, AppState>,
-    workspace_id: String,
-    session_id: String,
-    title: String,
+    payload: RenameSessionPayload,
 ) -> Result<PersistedAppState, String> {
     let mut state = shared.state.lock().await;
     if let Some(workspace) = state
         .workspaces
         .iter_mut()
-        .find(|w| w.id == workspace_id)
+        .find(|w| w.id == payload.workspace_id)
     {
-        if let Some(session) = workspace.sessions.iter_mut().find(|s| s.id == session_id) {
-            session.title = title;
+        if let Some(session) = workspace
+            .sessions
+            .iter_mut()
+            .find(|s| s.id == payload.session_id)
+        {
+            session.title = payload.title;
         }
     }
     storage::save(&app, &state).map_err(|error| error.to_string())?;
@@ -302,26 +310,101 @@ async fn rename_session(
 async fn delete_session(
     app: AppHandle,
     shared: State<'_, AppState>,
-    workspace_id: String,
-    session_id: String,
+    payload: DeleteSessionPayload,
 ) -> Result<PersistedAppState, String> {
     let mut state = shared.state.lock().await;
     if let Some(workspace) = state
         .workspaces
         .iter_mut()
-        .find(|w| w.id == workspace_id)
+        .find(|w| w.id == payload.workspace_id)
     {
-        workspace.sessions.retain(|s| s.id != session_id);
+        workspace.sessions.retain(|s| s.id != payload.session_id);
     }
-    if state.active_session_id.as_ref() == Some(&session_id) {
-        state.active_session_id = state.workspaces.iter().find(|w| w.id == workspace_id).and_then(|w| w.sessions.first()).map(|s| s.id.clone());
+    if state.active_session_id.as_ref() == Some(&payload.session_id) {
+        state.active_session_id = state
+            .workspaces
+            .iter()
+            .find(|w| w.id == payload.workspace_id)
+            .and_then(|w| w.sessions.first())
+            .map(|s| s.id.clone());
     }
     storage::save(&app, &state).map_err(|error| error.to_string())?;
     Ok(state.clone())
 }
 
+#[tauri::command]
+async fn read_dir(path: String) -> Result<Vec<String>, String> {
+    let expanded_path = if path.starts_with("~/") {
+        let home = std::env::var("HOME").map_err(|e| e.to_string())?;
+        path.replacen("~/", &format!("{}/", home), 1)
+    } else if path == "~" {
+        std::env::var("HOME").map_err(|e| e.to_string())?
+    } else {
+        path
+    };
+
+    let entries = std::fs::read_dir(expanded_path).map_err(|e| e.to_string())?;
+    let mut dirs = Vec::new();
+
+    for entry in entries {
+        if let Ok(entry) = entry {
+            let path = entry.path();
+            if path.is_dir() || path.extension().and_then(|e| e.to_str()) == Some("app") {
+                if let Some(name) = entry.file_name().to_str() {
+                    if !name.starts_with('.') {
+                        dirs.push(name.to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    dirs.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()));
+    Ok(dirs)
+}
+
+#[tauri::command]
+async fn open_path(path: String) -> Result<(), String> {
+    let expanded_path = if path.starts_with("~/") {
+        let home = std::env::var("HOME").map_err(|e| e.to_string())?;
+        path.replacen("~/", &format!("{}/", home), 1)
+    } else if path == "~" {
+        std::env::var("HOME").map_err(|e| e.to_string())?
+    } else {
+        path
+    };
+
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(expanded_path)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(expanded_path)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer")
+            .arg(expanded_path)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+
+    Ok(())
+}
+
 fn load_initial_state(app: &AppHandle) -> anyhow::Result<PersistedAppState> {
     if let Some(state) = storage::load(app)? {
+        let state = normalize_state(state);
+        storage::save(app, &state)?;
         return Ok(state);
     }
 
@@ -355,7 +438,9 @@ fn main() {
             rename_workspace,
             remove_workspace,
             rename_session,
-            delete_session
+            delete_session,
+            read_dir,
+            open_path
         ])
         .run(tauri::generate_context!())
         .expect("error while running picode");

@@ -18,6 +18,7 @@ import type { PersistedAppState, WorkspaceRecord, ChatSession } from "../../doma
 import { cn } from "../../lib/cn";
 import { useAppStore } from "../../state/useAppStore";
 import { ContextMenu, type ContextMenuItem } from "../layout/ContextMenu";
+import { ProjectPicker } from "./ProjectPicker";
 
 interface SidebarProps {
   state: PersistedAppState;
@@ -25,6 +26,7 @@ interface SidebarProps {
 
 export function Sidebar({ state }: SidebarProps) {
   const [query, setQuery] = useState("");
+  const [isPickerOpen, setIsPickerOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
   const createWorkspace = useAppStore((store) => store.createWorkspace);
 
@@ -83,7 +85,7 @@ export function Sidebar({ state }: SidebarProps) {
           <span style={{ fontSize: '0.7rem', fontWeight: 600, color: '#666', letterSpacing: '0.05em' }}>PROJECTS</span>
           <div style={{ display: 'flex', gap: '12px', color: '#666' }}>
             <ArrowDownUp size={12} style={{ cursor: 'pointer' }} />
-            <Plus size={14} style={{ cursor: 'pointer' }} onClick={() => void createWorkspace(`${state.workspaces[0]?.path ?? "~"}/new-workspace`, "New Workspace")} />
+            <Plus size={14} style={{ cursor: 'pointer' }} onClick={() => setIsPickerOpen(true)} />
           </div>
         </div>
 
@@ -100,6 +102,16 @@ export function Sidebar({ state }: SidebarProps) {
           Settings
         </Link>
       </div>
+
+      {isPickerOpen && (
+        <ProjectPicker 
+          onClose={() => setIsPickerOpen(false)} 
+          onSelect={(path) => {
+            void createWorkspace(path);
+            setIsPickerOpen(false);
+          }}
+        />
+      )}
     </aside>
   );
 }

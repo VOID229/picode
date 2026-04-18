@@ -46,6 +46,8 @@ export async function updateWorkspaceSettings(payload: {
   approvalMode: WorkspaceRecord["approvalMode"];
   providerId: string;
   modelId: string;
+  effort?: string;
+  fastMode?: boolean;
   policy: WorkspaceRecord["policy"];
 }) {
   return normalize(
@@ -83,13 +85,17 @@ export async function selectWorkspaceSession(payload: {
 
 export async function renameWorkspace(workspaceId: string, name: string) {
   return normalize(
-    await invoke<PersistedAppState>("rename_workspace", { workspaceId, name }),
+    await invoke<PersistedAppState>("rename_workspace", {
+      payload: { workspaceId, name },
+    }),
   );
 }
 
 export async function removeWorkspace(workspaceId: string) {
   return normalize(
-    await invoke<PersistedAppState>("remove_workspace", { workspaceId }),
+    await invoke<PersistedAppState>("remove_workspace", {
+      payload: { workspaceId },
+    }),
   );
 }
 
@@ -100,9 +106,7 @@ export async function renameSession(
 ) {
   return normalize(
     await invoke<PersistedAppState>("rename_session", {
-      workspaceId,
-      sessionId,
-      title,
+      payload: { workspaceId, sessionId, title },
     }),
   );
 }
@@ -110,10 +114,17 @@ export async function renameSession(
 export async function deleteSession(workspaceId: string, sessionId: string) {
   return normalize(
     await invoke<PersistedAppState>("delete_session", {
-      workspaceId,
-      sessionId,
+      payload: { workspaceId, sessionId },
     }),
   );
+}
+
+export async function readDir(path: string) {
+  return await invoke<string[]>("read_dir", { path });
+}
+
+export async function openPath(path: string) {
+  return await invoke<void>("open_path", { path });
 }
 
 export async function listenToPiEvents(
