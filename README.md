@@ -60,9 +60,9 @@ The app uses a Tauri shell with a typed Rust command layer. The frontend invokes
 The process model is sidecar-first:
 
 - `src-tauri` owns lifecycle, persistence, and OS integration.
-- a Pi adapter sidecar is launched for prompts
-- the current scaffold includes `src-tauri/bin/pi-sidecar`, a mock transport-compatible adapter for local bring-up
-- production packaging swaps that binary for the real bundled Pi executable without changing the UI contract
+- a bundled Pi runtime sidecar is launched for prompts
+- `pi-runtime/` contains the Bun/TypeScript integration layer that talks to the Pi SDK directly
+- `src-tauri/bin/pi-runtime` is built before `tauri dev` and `tauri build`, then launched by Rust over a JSONL stdio protocol
 
 ## Storage
 

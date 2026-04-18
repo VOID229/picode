@@ -7,6 +7,14 @@ export type ThemeId =
   | "solarized";
 
 export type ApprovalMode = "supervised" | "auto-accept-edits" | "full-access";
+export type ProviderStatus =
+  | "ready"
+  | "requires_oauth"
+  | "requires_api_key"
+  | "requires_local_runtime"
+  | "unavailable"
+  | "error";
+export type ProviderAuthKind = "oauth" | "api-key" | "local";
 
 export type TimelineItemKind =
   | "user-message"
@@ -21,6 +29,10 @@ export type TimelineItemKind =
 export interface ProviderOption {
   id: string;
   label: string;
+  status: ProviderStatus;
+  authKind: ProviderAuthKind;
+  available: boolean;
+  reason?: string;
   models: ModelOption[];
 }
 
@@ -29,6 +41,8 @@ export interface ModelOption {
   label: string;
   providerId: string;
   contextWindow: string;
+  available: boolean;
+  providerSource: string;
 }
 
 export interface ApprovalPolicy {
@@ -114,7 +128,16 @@ export interface ChatSession {
   createdAt: string;
   updatedAt: string;
   status: "idle" | "streaming" | "awaiting-approval" | "error";
+  runtime: SessionRuntimeMetadata;
   timeline: TimelineItem[];
+}
+
+export interface SessionRuntimeMetadata {
+  providerId?: string;
+  modelId?: string;
+  piSessionFile?: string;
+  lastKnownReady: boolean;
+  lastError?: string;
 }
 
 export interface WorkspaceRecord {
@@ -180,12 +203,34 @@ export interface BootstrapPayload {
   git: Record<string, GitSnapshot>;
 }
 
+export interface RuntimeBootstrapPayload {
+  piHome: string;
+  version?: string;
+  providers: ProviderOption[];
+}
+
+export interface RuntimeHealthPayload {
+  ready: boolean;
+  version?: string;
+  piHome?: string;
+}
+
 export type PiRuntimeEvent =
+  | {
+      type: "runtime-ready";
+      piHome: string;
+      version?: string;
+    }
+  | {
+      type: "catalog";
+      providers: ProviderOption[];
+    }
   | {
       type: "token";
       workspaceId: string;
       sessionId: string;
       delta: string;
+      metadata?: SessionRuntimeMetadata;
     }
   | {
       type: "tool-start";
@@ -217,20 +262,46 @@ export type PiRuntimeEvent =
     }
   | {
       type: "status";
-      workspaceId: string;
-      sessionId: string;
+      workspaceId?: string;
+      sessionId?: string;
       label: string;
       detail?: string;
     }
   | {
       type: "error";
-      workspaceId: string;
-      sessionId: string;
+      workspaceId?: string;
+      sessionId?: string;
       message: string;
+      metadata?: SessionRuntimeMetadata;
     }
   | {
       type: "done";
       workspaceId: string;
       sessionId: string;
       content: string;
+      metadata?: SessionRuntimeMetadata;
+    }
+  | {
+      type: "auth-browser-open";
+      providerId: string;
+      url: string;
+      instructions?: string;
+    }
+  | {
+      type: "auth-manual-input-requested";
+      providerId: string;
+      requestId: string;
+      title: string;
+      message: string;
+      placeholder?: string;
+      kind: "prompt" | "manual-code";
+    }
+  | {
+      type: "auth-completed";
+      providerId: string;
+    }
+  | {
+      type: "auth-failed";
+      providerId: string;
+      message: string;
     };

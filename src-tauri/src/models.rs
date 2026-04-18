@@ -2,7 +2,7 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-pub const SCHEMA_VERSION: u32 = 1;
+pub const SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -27,6 +27,14 @@ pub struct ApprovalPolicy {
 pub struct ProviderOption {
     pub id: String,
     pub label: String,
+    #[serde(default = "default_provider_status")]
+    pub status: ProviderStatus,
+    #[serde(default = "default_provider_auth_kind")]
+    pub auth_kind: ProviderAuthKind,
+    #[serde(default)]
+    pub available: bool,
+    #[serde(default)]
+    pub reason: Option<String>,
     pub models: Vec<ModelOption>,
 }
 
@@ -37,6 +45,29 @@ pub struct ModelOption {
     pub label: String,
     pub provider_id: String,
     pub context_window: String,
+    #[serde(default)]
+    pub available: bool,
+    #[serde(default = "default_provider_source")]
+    pub provider_source: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderStatus {
+    Ready,
+    RequiresOauth,
+    RequiresApiKey,
+    RequiresLocalRuntime,
+    Unavailable,
+    Error,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ProviderAuthKind {
+    Oauth,
+    ApiKey,
+    Local,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -155,7 +186,24 @@ pub struct ChatSession {
     pub created_at: String,
     pub updated_at: String,
     pub status: SessionStatus,
+    #[serde(default)]
+    pub runtime: SessionRuntimeMetadata,
     pub timeline: Vec<TimelineItem>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionRuntimeMetadata {
+    #[serde(default)]
+    pub provider_id: Option<String>,
+    #[serde(default)]
+    pub model_id: Option<String>,
+    #[serde(default)]
+    pub pi_session_file: Option<String>,
+    #[serde(default)]
+    pub last_known_ready: bool,
+    #[serde(default)]
+    pub last_error: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -254,6 +302,22 @@ pub struct BootstrapPayload {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct RuntimeBootstrapPayload {
+    pub pi_home: String,
+    pub version: Option<String>,
+    pub providers: Vec<ProviderOption>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeHealthPayload {
+    pub ready: bool,
+    pub version: Option<String>,
+    pub pi_home: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CreateWorkspacePayload {
     pub path: String,
     pub name: Option<String>,
@@ -336,12 +400,49 @@ pub struct RefreshGitPayload {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderAuthPayload {
+    pub provider_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveApiKeyPayload {
+    pub provider_id: String,
+    pub api_key: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubmitRuntimeInputPayload {
+    pub request_id: String,
+    pub value: Option<String>,
+    pub confirmed: Option<bool>,
+    pub cancelled: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AbortPromptPayload {
+    pub workspace_id: String,
+    pub session_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "kebab-case")]
 pub enum PiRuntimeEvent {
+    RuntimeReady {
+        pi_home: String,
+        version: Option<String>,
+    },
+    Catalog {
+        providers: Vec<ProviderOption>,
+    },
     Token {
         workspace_id: String,
         session_id: String,
         delta: String,
+        metadata: Option<SessionRuntimeMetadata>,
     },
     ToolStart {
         workspace_id: String,
@@ -368,37 +469,43 @@ pub enum PiRuntimeEvent {
         summary: String,
     },
     Status {
-        workspace_id: String,
-        session_id: String,
+        workspace_id: Option<String>,
+        session_id: Option<String>,
         label: String,
         detail: Option<String>,
     },
     Error {
-        workspace_id: String,
-        session_id: String,
+        workspace_id: Option<String>,
+        session_id: Option<String>,
         message: String,
+        metadata: Option<SessionRuntimeMetadata>,
     },
     Done {
         workspace_id: String,
         session_id: String,
         content: String,
+        metadata: Option<SessionRuntimeMetadata>,
     },
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SidecarLineEvent {
-    #[serde(rename = "type")]
-    pub event_type: String,
-    pub delta: Option<String>,
-    pub label: Option<String>,
-    pub detail: Option<String>,
-    pub activity: Option<ToolActivity>,
-    pub activity_id: Option<String>,
-    pub output: Option<String>,
-    pub status: Option<ToolStatus>,
-    pub approval: Option<ApprovalRequest>,
-    pub content: Option<String>,
+    AuthBrowserOpen {
+        provider_id: String,
+        url: String,
+        instructions: Option<String>,
+    },
+    AuthManualInputRequested {
+        provider_id: String,
+        request_id: String,
+        title: String,
+        message: String,
+        placeholder: Option<String>,
+        kind: String,
+    },
+    AuthCompleted {
+        provider_id: String,
+    },
+    AuthFailed {
+        provider_id: String,
+        message: String,
+    },
 }
 
 pub fn now_iso() -> String {
@@ -406,7 +513,7 @@ pub fn now_iso() -> String {
 }
 
 fn default_provider_id() -> String {
-    "pi-core".to_string()
+    "openai-codex".to_string()
 }
 
 fn default_model_id() -> String {
@@ -421,43 +528,104 @@ fn default_fast_mode() -> bool {
     false
 }
 
+fn default_provider_status() -> ProviderStatus {
+    ProviderStatus::Unavailable
+}
+
+fn default_provider_auth_kind() -> ProviderAuthKind {
+    ProviderAuthKind::ApiKey
+}
+
+fn default_provider_source() -> String {
+    "built-in".to_string()
+}
+
 pub fn default_providers() -> Vec<ProviderOption> {
-    vec![ProviderOption {
-        id: default_provider_id(),
-        label: "GPT Series".to_string(),
-        models: vec![
-            ModelOption {
-                id: default_model_id(),
-                label: "GPT-5.4".to_string(),
-                provider_id: "pi-core".to_string(),
-                context_window: "256k".to_string(),
-            },
-            ModelOption {
-                id: "gpt-5.4-mini".to_string(),
-                label: "GPT-5.4 Mini".to_string(),
-                provider_id: "pi-core".to_string(),
+    vec![
+        ProviderOption {
+            id: "openai-codex".to_string(),
+            label: "Codex".to_string(),
+            status: ProviderStatus::RequiresOauth,
+            auth_kind: ProviderAuthKind::Oauth,
+            available: false,
+            reason: Some("Codex login is required.".to_string()),
+            models: vec![
+                ModelOption {
+                    id: default_model_id(),
+                    label: "GPT-5.4".to_string(),
+                    provider_id: "openai-codex".to_string(),
+                    context_window: "256k".to_string(),
+                    available: false,
+                    provider_source: default_provider_source(),
+                },
+                ModelOption {
+                    id: "gpt-5.4-mini".to_string(),
+                    label: "GPT-5.4 Mini".to_string(),
+                    provider_id: "openai-codex".to_string(),
+                    context_window: "128k".to_string(),
+                    available: false,
+                    provider_source: default_provider_source(),
+                },
+            ],
+        },
+        ProviderOption {
+            id: "anthropic".to_string(),
+            label: "Claude".to_string(),
+            status: ProviderStatus::RequiresOauth,
+            auth_kind: ProviderAuthKind::Oauth,
+            available: false,
+            reason: Some("Claude login is required.".to_string()),
+            models: vec![ModelOption {
+                id: "claude-opus-4-6".to_string(),
+                label: "Claude Opus 4.6".to_string(),
+                provider_id: "anthropic".to_string(),
+                context_window: "200k".to_string(),
+                available: false,
+                provider_source: default_provider_source(),
+            }],
+        },
+        ProviderOption {
+            id: "opencode".to_string(),
+            label: "OpenCode".to_string(),
+            status: ProviderStatus::RequiresApiKey,
+            auth_kind: ProviderAuthKind::ApiKey,
+            available: false,
+            reason: Some("OpenCode API key is required.".to_string()),
+            models: vec![ModelOption {
+                id: "claude-opus-4-6".to_string(),
+                label: "Claude Opus 4.6".to_string(),
+                provider_id: "opencode".to_string(),
+                context_window: "200k".to_string(),
+                available: false,
+                provider_source: default_provider_source(),
+            }],
+        },
+        ProviderOption {
+            id: "opencode-go".to_string(),
+            label: "OpenCode Go".to_string(),
+            status: ProviderStatus::RequiresApiKey,
+            auth_kind: ProviderAuthKind::ApiKey,
+            available: false,
+            reason: Some("OpenCode API key is required.".to_string()),
+            models: vec![ModelOption {
+                id: "kimi-k2.5".to_string(),
+                label: "Kimi K2.5".to_string(),
+                provider_id: "opencode-go".to_string(),
                 context_window: "128k".to_string(),
-            },
-            ModelOption {
-                id: "gpt-5.3-codex".to_string(),
-                label: "GPT-5.3 Codex".to_string(),
-                provider_id: "pi-core".to_string(),
-                context_window: "128k".to_string(),
-            },
-            ModelOption {
-                id: "gpt-5.2-codex".to_string(),
-                label: "GPT-5.2 Codex".to_string(),
-                provider_id: "pi-core".to_string(),
-                context_window: "64k".to_string(),
-            },
-            ModelOption {
-                id: "gpt-5.2".to_string(),
-                label: "GPT-5.2".to_string(),
-                provider_id: "pi-core".to_string(),
-                context_window: "64k".to_string(),
-            },
-        ],
-    }]
+                available: false,
+                provider_source: default_provider_source(),
+            }],
+        },
+        ProviderOption {
+            id: "ollama".to_string(),
+            label: "Ollama".to_string(),
+            status: ProviderStatus::RequiresLocalRuntime,
+            auth_kind: ProviderAuthKind::Local,
+            available: false,
+            reason: Some("Start Ollama locally to enable this provider.".to_string()),
+            models: vec![],
+        },
+    ]
 }
 
 pub fn default_preferences() -> AppPreferences {
@@ -485,6 +653,7 @@ pub fn new_session(title: impl Into<String>) -> ChatSession {
         created_at: now.clone(),
         updated_at: now.clone(),
         status: SessionStatus::Idle,
+        runtime: SessionRuntimeMetadata::default(),
         timeline: vec![TimelineItem::SystemNotice {
             id: Uuid::new_v4().to_string(),
             created_at: now,
@@ -722,11 +891,11 @@ mod tests {
 
         let normalized = normalize_state(parsed);
 
-        assert_eq!(normalized.preferences.provider_id, "pi-core");
+        assert_eq!(normalized.preferences.provider_id, "openai-codex");
         assert_eq!(normalized.preferences.model_id, "gpt-5.4");
-        assert_eq!(normalized.workspaces[0].provider_id, "pi-core");
+        assert_eq!(normalized.workspaces[0].provider_id, "openai-codex");
         assert_eq!(normalized.workspaces[0].model_id, "gpt-5.4-mini");
-        assert_eq!(normalized.providers[0].id, "pi-core");
+        assert_eq!(normalized.providers[0].id, "openai-codex");
         assert_eq!(normalized.providers[0].models[0].id, "gpt-5.4");
     }
 }

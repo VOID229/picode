@@ -27,7 +27,8 @@
   },
   "bundle": {
     "active": true,
+    "resources": ["bin/package.json"],
     "targets": ["dmg", "appimage", "deb", "rpm"],
-    "externalBin": ["bin/pi-sidecar"]
+    "externalBin": ["bin/pi-runtime"]
   }
 }

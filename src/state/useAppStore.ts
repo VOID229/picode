@@ -1,6 +1,7 @@
 import { startTransition } from "react";
 import { create } from "zustand";
 import type {
+  ChatSession,
   GitSnapshot,
   PersistedAppState,
   PiRuntimeEvent,
@@ -8,13 +9,20 @@ import type {
   WorkspaceRecord,
 } from "../domains/types";
 import {
+  abortPrompt as abortPromptCommand,
   bootstrapState,
+  bootstrapRuntime,
   createSession as createSessionCommand,
   createWorkspace as createWorkspaceCommand,
+  logoutProvider as logoutProviderCommand,
   refreshGit as refreshGitCommand,
+  refreshRuntimeCatalog as refreshRuntimeCatalogCommand,
   resolveApproval as resolveApprovalCommand,
+  saveProviderApiKey as saveProviderApiKeyCommand,
   selectWorkspaceSession as selectWorkspaceSessionCommand,
   sendPrompt as sendPromptCommand,
+  startProviderLogin as startProviderLoginCommand,
+  submitRuntimeInput as submitRuntimeInputCommand,
   updatePreferences as updatePreferencesCommand,
   updateWorkspaceSettings as updateWorkspaceSettingsCommand,
   renameWorkspace as renameWorkspaceCommand,
@@ -39,12 +47,36 @@ interface AppStoreState {
   git: Record<string, GitSnapshot>;
   customActions: Record<string, CustomAction[]>; // workspaceId -> CustomAction[]
   currentMode: "plan" | "build";
+  runtimePiHome?: string;
+  runtimeVersion?: string;
+  runtimeGlobalStatus?: string;
+  runtimeGlobalError?: string;
+  pendingRuntimeInput?: {
+    providerId: string;
+    requestId: string;
+    title: string;
+    message: string;
+    placeholder?: string;
+    kind: "prompt" | "manual-code";
+  } | null;
+  pendingBrowserAuth?: {
+    providerId: string;
+    url: string;
+    instructions?: string;
+  } | null;
   initialize: () => Promise<void>;
   setConnectionReady: (ready: boolean) => void;
   setCommandPaletteOpen: (open: boolean) => void;
   setCurrentMode: (mode: "plan" | "build") => void;
-  addCustomAction: (workspaceId: string, action: Omit<CustomAction, "id">) => void;
-  updateCustomAction: (workspaceId: string, actionId: string, action: Omit<CustomAction, "id">) => void;
+  addCustomAction: (
+    workspaceId: string,
+    action: Omit<CustomAction, "id">,
+  ) => void;
+  updateCustomAction: (
+    workspaceId: string,
+    actionId: string,
+    action: Omit<CustomAction, "id">,
+  ) => void;
   removeCustomAction: (workspaceId: string, actionId: string) => void;
   selectWorkspaceSession: (
     workspaceId: string,
@@ -61,19 +93,35 @@ interface AppStoreState {
   refreshGit: (workspaceId: string) => Promise<void>;
   renameWorkspace: (workspaceId: string, name: string) => Promise<void>;
   removeWorkspace: (workspaceId: string) => Promise<void>;
-  renameSession: (workspace_id: string, session_id: string, title: string) => Promise<void>;
+  renameSession: (
+    workspace_id: string,
+    session_id: string,
+    title: string,
+  ) => Promise<void>;
   deleteSession: (workspace_id: string, session_id: string) => Promise<void>;
   sendPrompt: (
     workspaceId: string,
     sessionId: string,
     prompt: string,
   ) => Promise<void>;
+  abortPrompt: (workspaceId: string, sessionId: string) => Promise<void>;
   resolveApproval: (
     workspaceId: string,
     sessionId: string,
     approvalId: string,
     decision: "approved" | "rejected",
   ) => Promise<void>;
+  refreshRuntimeCatalog: () => Promise<void>;
+  startProviderLogin: (providerId: string) => Promise<void>;
+  saveProviderApiKey: (providerId: string, apiKey: string) => Promise<void>;
+  logoutProvider: (providerId: string) => Promise<void>;
+  submitRuntimeInput: (payload: {
+    requestId: string;
+    value?: string;
+    confirmed?: boolean;
+    cancelled?: boolean;
+  }) => Promise<void>;
+  clearRuntimeUi: () => void;
   applyRuntimeEvent: (event: PiRuntimeEvent) => void;
 }
 
@@ -102,6 +150,20 @@ function pushOrReplaceTimelineItem(
   session.updatedAt = item.createdAt;
 }
 
+function applyRuntimeMetadata(
+  session: WorkspaceRecord["sessions"][number],
+  metadata?: ChatSession["runtime"],
+) {
+  if (!metadata) {
+    return;
+  }
+
+  session.runtime = {
+    ...session.runtime,
+    ...metadata,
+  };
+}
+
 export const useAppStore = create<AppStoreState>((set, get) => ({
   isBootstrapping: true,
   connectionReady: false,
@@ -110,14 +172,34 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
   git: {},
   customActions: {},
   currentMode: "build",
+  pendingRuntimeInput: null,
+  pendingBrowserAuth: null,
   async initialize() {
     set({ isBootstrapping: true });
     const payload = await bootstrapState();
+    let runtimePayload:
+      | Awaited<ReturnType<typeof bootstrapRuntime>>
+      | undefined;
+    let runtimeGlobalError: string | undefined;
+
+    try {
+      runtimePayload = await bootstrapRuntime();
+    } catch (error) {
+      runtimeGlobalError =
+        error instanceof Error ? error.message : String(error);
+    }
+
     set({
       isBootstrapping: false,
-      state: payload.state,
+      state: {
+        ...payload.state,
+        providers: runtimePayload?.providers ?? payload.state.providers,
+      },
       git: payload.git,
       connectionReady: true,
+      runtimePiHome: runtimePayload?.piHome,
+      runtimeVersion: runtimePayload?.version,
+      runtimeGlobalError,
     });
   },
   setConnectionReady(connectionReady) {
@@ -146,7 +228,9 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
       return {
         customActions: {
           ...store.customActions,
-          [workspaceId]: actions.map((a) => a.id === actionId ? { ...updatedAction, id: actionId } : a),
+          [workspaceId]: actions.map((a) =>
+            a.id === actionId ? { ...updatedAction, id: actionId } : a,
+          ),
         },
       };
     });
@@ -166,7 +250,7 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
     const state = await selectWorkspaceSessionCommand({
       workspaceId,
       sessionId,
-      });
+    });
     set({ state });
   },
   async createWorkspace(path, name) {
@@ -234,6 +318,10 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
     const state = await sendPromptCommand({ workspaceId, sessionId, prompt });
     set({ state });
   },
+  async abortPrompt(workspaceId, sessionId) {
+    const state = await abortPromptCommand({ workspaceId, sessionId });
+    set({ state });
+  },
   async resolveApproval(workspaceId, sessionId, approvalId, decision) {
     const state = await resolveApprovalCommand({
       workspaceId,
@@ -243,25 +331,86 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
     });
     set({ state });
   },
+  async refreshRuntimeCatalog() {
+    const payload = await refreshRuntimeCatalogCommand();
+    set((store) => ({
+      state: store.state
+        ? { ...store.state, providers: payload.providers }
+        : store.state,
+      runtimePiHome: payload.piHome || store.runtimePiHome,
+      runtimeVersion: payload.version || store.runtimeVersion,
+    }));
+  },
+  async startProviderLogin(providerId) {
+    const payload = await startProviderLoginCommand({ providerId });
+    set((store) => ({
+      state: store.state
+        ? { ...store.state, providers: payload.providers }
+        : store.state,
+      pendingRuntimeInput: null,
+    }));
+  },
+  async saveProviderApiKey(providerId, apiKey) {
+    const payload = await saveProviderApiKeyCommand({ providerId, apiKey });
+    set((store) => ({
+      state: store.state
+        ? { ...store.state, providers: payload.providers }
+        : store.state,
+    }));
+  },
+  async logoutProvider(providerId) {
+    const payload = await logoutProviderCommand({ providerId });
+    set((store) => ({
+      state: store.state
+        ? { ...store.state, providers: payload.providers }
+        : store.state,
+    }));
+  },
+  async submitRuntimeInput(payload) {
+    await submitRuntimeInputCommand(payload);
+    set({ pendingRuntimeInput: null });
+  },
+  clearRuntimeUi() {
+    set({ pendingRuntimeInput: null, pendingBrowserAuth: null });
+  },
   applyRuntimeEvent(event) {
     set((store) => {
       if (!store.state) {
+        if (event.type === "runtime-ready") {
+          return {
+            ...store,
+            runtimePiHome: event.piHome,
+            runtimeVersion: event.version,
+          };
+        }
         return store;
       }
 
       const state = structuredClone(store.state);
-      const { session } = findSession(
-        state,
-        event.workspaceId,
-        event.sessionId,
-      );
-
-      if (!session) {
-        return store;
-      }
 
       switch (event.type) {
+        case "runtime-ready": {
+          return {
+            ...store,
+            runtimePiHome: event.piHome,
+            runtimeVersion: event.version,
+          };
+        }
+        case "catalog": {
+          return {
+            ...store,
+            state: { ...state, providers: event.providers },
+          };
+        }
         case "token": {
+          const { session } = findSession(
+            state,
+            event.workspaceId,
+            event.sessionId,
+          );
+          if (!session) {
+            return store;
+          }
           const existing = [...session.timeline]
             .reverse()
             .find(
@@ -282,9 +431,18 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
           }
 
           session.status = "streaming";
+          applyRuntimeMetadata(session, event.metadata);
           break;
         }
         case "tool-start": {
+          const { session } = findSession(
+            state,
+            event.workspaceId,
+            event.sessionId,
+          );
+          if (!session) {
+            return store;
+          }
           pushOrReplaceTimelineItem(session, {
             id: event.activity.id,
             kind: "tool-activity",
@@ -294,6 +452,14 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
           break;
         }
         case "tool-output": {
+          const { session } = findSession(
+            state,
+            event.workspaceId,
+            event.sessionId,
+          );
+          if (!session) {
+            return store;
+          }
           const item = session.timeline.find(
             (entry) =>
               entry.kind === "tool-activity" &&
@@ -308,6 +474,14 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
           break;
         }
         case "approval-requested": {
+          const { session } = findSession(
+            state,
+            event.workspaceId,
+            event.sessionId,
+          );
+          if (!session) {
+            return store;
+          }
           pushOrReplaceTimelineItem(session, {
             id: event.approval.id,
             kind: "approval-request",
@@ -318,6 +492,14 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
           break;
         }
         case "approval-resolved": {
+          const { session } = findSession(
+            state,
+            event.workspaceId,
+            event.sessionId,
+          );
+          if (!session) {
+            return store;
+          }
           const existing = session.timeline.find(
             (entry) =>
               entry.kind === "approval-request" &&
@@ -340,6 +522,22 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
           break;
         }
         case "status": {
+          if (!event.workspaceId || !event.sessionId) {
+            return {
+              ...store,
+              runtimeGlobalStatus: event.detail
+                ? `${event.label}: ${event.detail}`
+                : event.label,
+            };
+          }
+          const { session } = findSession(
+            state,
+            event.workspaceId,
+            event.sessionId,
+          );
+          if (!session) {
+            return store;
+          }
           session.timeline.push({
             id: crypto.randomUUID(),
             kind: "system-notice",
@@ -350,6 +548,20 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
           break;
         }
         case "error": {
+          if (!event.workspaceId || !event.sessionId) {
+            return {
+              ...store,
+              runtimeGlobalError: event.message,
+            };
+          }
+          const { session } = findSession(
+            state,
+            event.workspaceId,
+            event.sessionId,
+          );
+          if (!session) {
+            return store;
+          }
           session.timeline.push({
             id: crypto.randomUUID(),
             kind: "error",
@@ -358,9 +570,18 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
             createdAt: new Date().toISOString(),
           });
           session.status = "error";
+          applyRuntimeMetadata(session, event.metadata);
           break;
         }
         case "done": {
+          const { session } = findSession(
+            state,
+            event.workspaceId,
+            event.sessionId,
+          );
+          if (!session) {
+            return store;
+          }
           const existing = [...session.timeline]
             .reverse()
             .find(
@@ -379,11 +600,51 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
             });
           }
           session.status = "idle";
+          applyRuntimeMetadata(session, event.metadata);
           break;
+        }
+        case "auth-browser-open": {
+          return {
+            ...store,
+            pendingBrowserAuth: {
+              providerId: event.providerId,
+              url: event.url,
+              instructions: event.instructions,
+            },
+            runtimeGlobalStatus: `Continue ${event.providerId} login in the browser.`,
+          };
+        }
+        case "auth-manual-input-requested": {
+          return {
+            ...store,
+            pendingRuntimeInput: {
+              providerId: event.providerId,
+              requestId: event.requestId,
+              title: event.title,
+              message: event.message,
+              placeholder: event.placeholder,
+              kind: event.kind,
+            },
+          };
+        }
+        case "auth-completed": {
+          return {
+            ...store,
+            pendingBrowserAuth: null,
+            pendingRuntimeInput: null,
+            runtimeGlobalStatus: `${event.providerId} is ready.`,
+          };
+        }
+        case "auth-failed": {
+          return {
+            ...store,
+            pendingRuntimeInput: null,
+            runtimeGlobalError: event.message,
+          };
         }
       }
 
-      return { state };
+      return { ...store, state };
     });
   },
 }));

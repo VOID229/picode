@@ -4,28 +4,30 @@ mod pi;
 mod storage;
 
 use crate::models::{
-    ApprovalDecision, ApprovalState, BootstrapPayload, CreateSessionPayload,
-    CreateWorkspacePayload, DeleteSessionPayload, PersistedAppState, RefreshGitPayload,
+    AbortPromptPayload, BootstrapPayload, CreateSessionPayload, CreateWorkspacePayload,
+    DeleteSessionPayload, PersistedAppState, ProviderAuthPayload, RefreshGitPayload,
     RemoveWorkspacePayload, RenameSessionPayload, RenameWorkspacePayload, ResolveApprovalPayload,
-    SelectWorkspaceSessionPayload, SendPromptPayload, TimelineItem, UpdateWorkspaceSettingsPayload,
-    normalize_state, now_iso,
+    RuntimeBootstrapPayload, RuntimeHealthPayload, SaveApiKeyPayload,
+    SelectWorkspaceSessionPayload, SendPromptPayload, SubmitRuntimeInputPayload,
+    UpdateWorkspaceSettingsPayload, normalize_state,
 };
 use anyhow::Context;
 use models::{GitSnapshot, default_state, new_session};
 use std::{collections::HashMap, sync::Arc};
 use tauri::{AppHandle, Manager, State};
 use tokio::sync::Mutex;
-use uuid::Uuid;
 
 #[derive(Clone)]
 struct AppState {
     state: Arc<Mutex<PersistedAppState>>,
+    runtime: pi::PiRuntimeHandle,
 }
 
 impl AppState {
     fn new(state: PersistedAppState) -> Self {
         Self {
             state: Arc::new(Mutex::new(state)),
+            runtime: pi::PiRuntimeHandle::new(),
         }
     }
 }
@@ -151,7 +153,10 @@ async fn update_workspace_settings(
     workspace.fast_mode = payload.fast_mode.unwrap_or(workspace.fast_mode);
     workspace.policy = payload.policy;
     storage::save(&app, &state).map_err(|error| error.to_string())?;
-    Ok(state.clone())
+    let workspace_id = payload.workspace_id.clone();
+    drop(state);
+    let _ = pi::sync_workspace_policy(&app, shared.inner().clone(), &workspace_id).await;
+    Ok(shared.state.lock().await.clone())
 }
 
 #[tauri::command]
@@ -189,59 +194,95 @@ async fn resolve_approval(
     shared: State<'_, AppState>,
     payload: ResolveApprovalPayload,
 ) -> Result<PersistedAppState, String> {
-    {
-        let mut state = shared.state.lock().await;
-        if let Some(workspace) = state
-            .workspaces
-            .iter_mut()
-            .find(|workspace| workspace.id == payload.workspace_id)
-        {
-            if let Some(session) = workspace
-                .sessions
-                .iter_mut()
-                .find(|session| session.id == payload.session_id)
-            {
-                for item in &mut session.timeline {
-                    if let TimelineItem::ApprovalRequest { approval, .. } = item {
-                        if approval.id == payload.approval_id {
-                            approval.status = match payload.decision {
-                                ApprovalDecision::Approved => ApprovalState::Approved,
-                                ApprovalDecision::Rejected => ApprovalState::Rejected,
-                            };
-                        }
-                    }
-                }
-
-                session.timeline.push(TimelineItem::ApprovalResolution {
-                    id: Uuid::new_v4().to_string(),
-                    created_at: now_iso(),
-                    approval_id: payload.approval_id.clone(),
-                    decision: payload.decision.clone(),
-                    summary: match payload.decision {
-                        ApprovalDecision::Approved => {
-                            "User approved the requested action.".to_string()
-                        }
-                        ApprovalDecision::Rejected => {
-                            "User rejected the requested action.".to_string()
-                        }
-                    },
-                });
-                session.updated_at = now_iso();
-            }
-        }
-        storage::save(&app, &state).map_err(|error| error.to_string())?;
-    }
-
-    pi::resolve_approval_event(
-        &app,
-        &payload.workspace_id,
-        &payload.session_id,
-        &payload.approval_id,
-        payload.decision.clone(),
-    )
-    .await;
-
+    pi::resolve_approval(app, shared.inner().clone(), payload)
+        .await
+        .map_err(|error| error.to_string())?;
     Ok(shared.state.lock().await.clone())
+}
+
+#[tauri::command]
+async fn bootstrap_runtime(
+    app: AppHandle,
+    shared: State<'_, AppState>,
+) -> Result<RuntimeBootstrapPayload, String> {
+    pi::bootstrap_runtime(app, shared.inner().clone())
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn refresh_runtime_catalog(
+    app: AppHandle,
+    shared: State<'_, AppState>,
+) -> Result<RuntimeBootstrapPayload, String> {
+    pi::refresh_runtime_catalog(app, shared.inner().clone())
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn start_provider_login(
+    app: AppHandle,
+    shared: State<'_, AppState>,
+    payload: ProviderAuthPayload,
+) -> Result<RuntimeBootstrapPayload, String> {
+    pi::start_provider_login(app, shared.inner().clone(), payload)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn save_provider_api_key(
+    app: AppHandle,
+    shared: State<'_, AppState>,
+    payload: SaveApiKeyPayload,
+) -> Result<RuntimeBootstrapPayload, String> {
+    pi::save_provider_api_key(app, shared.inner().clone(), payload)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn logout_provider(
+    app: AppHandle,
+    shared: State<'_, AppState>,
+    payload: ProviderAuthPayload,
+) -> Result<RuntimeBootstrapPayload, String> {
+    pi::logout_provider(app, shared.inner().clone(), payload)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn submit_runtime_input(
+    app: AppHandle,
+    shared: State<'_, AppState>,
+    payload: SubmitRuntimeInputPayload,
+) -> Result<(), String> {
+    pi::submit_runtime_input(app, shared.inner().clone(), payload)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn abort_prompt(
+    app: AppHandle,
+    shared: State<'_, AppState>,
+    payload: AbortPromptPayload,
+) -> Result<PersistedAppState, String> {
+    pi::abort_prompt(app, shared.inner().clone(), payload)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn runtime_healthcheck(
+    app: AppHandle,
+    shared: State<'_, AppState>,
+) -> Result<RuntimeHealthPayload, String> {
+    pi::healthcheck(app, shared.inner().clone())
+        .await
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -420,6 +461,7 @@ fn load_initial_state(app: &AppHandle) -> anyhow::Result<PersistedAppState> {
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_shell::init())
         .setup(|app| {
             let state = load_initial_state(app.handle())?;
             app.manage(AppState::new(state));
@@ -435,6 +477,14 @@ fn main() {
             refresh_git_snapshot,
             send_prompt,
             resolve_approval,
+            bootstrap_runtime,
+            refresh_runtime_catalog,
+            start_provider_login,
+            save_provider_api_key,
+            logout_provider,
+            submit_runtime_input,
+            abort_prompt,
+            runtime_healthcheck,
             rename_workspace,
             remove_workspace,
             rename_session,

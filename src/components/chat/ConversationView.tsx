@@ -1,4 +1,13 @@
-import { ArrowUp, Shield, Unlock, Bot, FileText, Zap, Check, Pencil } from "lucide-react";
+import {
+  ArrowUp,
+  Shield,
+  Unlock,
+  Bot,
+  FileText,
+  Zap,
+  Check,
+  Pencil,
+} from "lucide-react";
 import { useMemo, useState, useRef, useEffect } from "react";
 import type { ChatSession, WorkspaceRecord } from "../../domains/types";
 import { useAppStore } from "../../state/useAppStore";
@@ -20,23 +29,41 @@ export function ConversationView({
   const [effortDropdownOpen, setEffortDropdownOpen] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const timelineRef = useRef<HTMLDivElement>(null);
-  
+
   const state = useAppStore((store) => store.state);
   const currentMode = useAppStore((store) => store.currentMode);
   const setCurrentMode = useAppStore((store) => store.setCurrentMode);
   const sendPrompt = useAppStore((state) => state.sendPrompt);
+  const abortPrompt = useAppStore((state) => state.abortPrompt);
   const resolveApproval = useAppStore((state) => state.resolveApproval);
-  const updateWorkspaceSettings = useAppStore((store) => store.updateWorkspaceSettings);
+  const updateWorkspaceSettings = useAppStore(
+    (store) => store.updateWorkspaceSettings,
+  );
+
+  const closeComposerMenus = () => {
+    setModelDropdownOpen(false);
+    setApprovalDropdownOpen(false);
+    setEffortDropdownOpen(false);
+  };
+
+  const toggleComposerMenu = (menu: "model" | "effort" | "approval") => {
+    setModelDropdownOpen((current) => (menu === "model" ? !current : false));
+    setEffortDropdownOpen((current) => (menu === "effort" ? !current : false));
+    setApprovalDropdownOpen((current) =>
+      menu === "approval" ? !current : false,
+    );
+  };
 
   const handleSubmit = async () => {
     const value = draft.trim();
     if (!workspace || !session || !value) {
       return;
     }
+    closeComposerMenus();
     await sendPrompt(workspace.id, session.id, value);
     setDraft("");
     if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto';
+      textareaRef.current.style.height = "auto";
     }
   };
 
@@ -44,7 +71,7 @@ export function ConversationView({
   useEffect(() => {
     const textarea = textareaRef.current;
     if (textarea) {
-      textarea.style.height = 'auto';
+      textarea.style.height = "auto";
       textarea.style.height = `${textarea.scrollHeight}px`;
     }
   }, [draft]);
@@ -58,36 +85,72 @@ export function ConversationView({
 
   if (!workspace || !session) {
     return (
-      <div className="empty-state" style={{ color: '#555' }}>
+      <div className="empty-state" style={{ color: "#555" }}>
         Send a message to start the conversation.
       </div>
     );
   }
 
-  const hasUserMessage = session.timeline.some((item) => item.kind === "user-message");
+  const hasUserMessage = session.timeline.some(
+    (item) => item.kind === "user-message",
+  );
   const isEmptySpace = !hasUserMessage;
 
-  const activeProvider = state?.providers.find((p) => p.id === workspace.providerId);
-  const activeModel = activeProvider?.models.find((m) => m.id === workspace.modelId);
+  const activeProvider = state?.providers.find(
+    (p) => p.id === workspace.providerId,
+  );
+  const activeModel = activeProvider?.models.find(
+    (m) => m.id === workspace.modelId,
+  );
 
   const effortLabels: Record<string, string> = {
-    'extra-high': 'Extra High',
-    'high': 'High (default)',
-    'medium': 'Medium',
-    'low': 'Low'
+    "extra-high": "Extra High",
+    high: "High (default)",
+    medium: "Medium",
+    low: "Low",
   };
 
-  const currentEffortLabel = effortLabels[workspace.effort] || 'High';
+  const currentEffortLabel = effortLabels[workspace.effort] || "High";
 
   return (
-    <div className="conversation-view" style={{ padding: '0 24px 24px', display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, background: 'var(--bg)' }}>
+    <div
+      className="conversation-view"
+      style={{
+        padding: "0 24px 24px",
+        display: "flex",
+        flexDirection: "column",
+        flex: 1,
+        minHeight: 0,
+        background: "var(--bg)",
+      }}
+    >
       {isEmptySpace ? (
-        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#555' }}>
+        <div
+          style={{
+            flex: 1,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            color: "#555",
+          }}
+        >
           Send a message to start the conversation.
         </div>
       ) : (
-        <div className="timeline" ref={timelineRef} style={{ flex: 1, minHeight: 0, overflowY: 'auto', paddingBottom: '24px' }}>
-          <div className="message-outer" style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
+        <div
+          className="timeline"
+          ref={timelineRef}
+          style={{
+            flex: 1,
+            minHeight: 0,
+            overflowY: "auto",
+            paddingBottom: "24px",
+          }}
+        >
+          <div
+            className="message-outer"
+            style={{ display: "flex", flexDirection: "column", gap: "32px" }}
+          >
             {session.timeline.map((item) => (
               <TimelineItemView
                 key={item.id}
@@ -101,18 +164,25 @@ export function ConversationView({
         </div>
       )}
 
-      <div style={{ position: 'relative', width: '100%', maxWidth: '800px', margin: '0 auto' }}>
-        <div 
+      <div
+        style={{
+          position: "relative",
+          width: "100%",
+          maxWidth: "800px",
+          margin: "0 auto",
+        }}
+      >
+        <div
           style={{
-            background: '#18181A',
-            border: `1px solid ${isFocused ? '#2563eb' : '#333'}`,
-            borderRadius: '12px',
-            padding: '12px 16px',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '12px',
-            transition: 'border-color 0.2s',
-            boxShadow: isFocused ? '0 0 0 1px #2563eb' : 'none'
+            background: "#18181A",
+            border: `1px solid ${isFocused ? "#2563eb" : "#333"}`,
+            borderRadius: "12px",
+            padding: "12px 16px",
+            display: "flex",
+            flexDirection: "column",
+            gap: "12px",
+            transition: "border-color 0.2s",
+            boxShadow: isFocused ? "0 0 0 1px #2563eb" : "none",
           }}
         >
           <textarea
@@ -130,38 +200,68 @@ export function ConversationView({
             }}
             rows={1}
             style={{
-              background: 'transparent',
-              border: 'none',
-              resize: 'none',
-              color: '#eaeaea',
-              fontSize: '0.95rem',
-              outline: 'none',
-              maxHeight: '200px'
+              background: "transparent",
+              border: "none",
+              resize: "none",
+              color: "#eaeaea",
+              fontSize: "0.95rem",
+              outline: "none",
+              maxHeight: "200px",
             }}
           />
-          
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '4px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '16px', color: '#666', fontSize: '0.8rem' }}>
-              
-              <div className="composer-select-wrapper pointer" onClick={() => setModelDropdownOpen(!modelDropdownOpen)}>
+
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              marginTop: "4px",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "16px",
+                color: "#666",
+                fontSize: "0.8rem",
+              }}
+            >
+              <div
+                className="composer-select-wrapper pointer"
+                onClick={() => toggleComposerMenu("model")}
+              >
                 <Bot size={14} />
-                <span style={{ paddingRight: '4px' }}>{activeModel?.label || "Select Model"}</span>
+                <span style={{ paddingRight: "4px" }}>
+                  {activeModel?.label || "Select Model"}
+                </span>
                 <ChevronIcon />
                 {modelDropdownOpen && (
                   <>
-                    <div 
-                      style={{ position: 'fixed', inset: 0, zIndex: 100 }} 
-                      onClick={(e) => { e.stopPropagation(); setModelDropdownOpen(false); }} 
+                    <div
+                      style={{
+                        position: "fixed",
+                        inset: 0,
+                        zIndex: 10,
+                        cursor: "default",
+                      }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        closeComposerMenus();
+                      }}
                     />
-                    <div className="custom-dropdown" style={{ minWidth: '200px' }}>
-                      {activeProvider?.models.map(m => (
-                        <div 
-                          key={m.id} 
-                          className="custom-dropdown-item" 
-                          style={{ justifyContent: 'space-between' }}
+                    <div
+                      className="custom-dropdown"
+                      style={{ minWidth: "200px" }}
+                    >
+                      {activeProvider?.models.map((m) => (
+                        <div
+                          key={m.id}
+                          className="custom-dropdown-item"
+                          style={{ justifyContent: "space-between" }}
                           onClick={(e) => {
                             e.stopPropagation();
-                            setModelDropdownOpen(false);
+                            closeComposerMenus();
                             void updateWorkspaceSettings({
                               workspaceId: workspace.id,
                               approvalMode: workspace.approvalMode,
@@ -180,27 +280,45 @@ export function ConversationView({
                 )}
               </div>
 
-              <div style={{ width: '1px', height: '12px', background: '#333' }} />
+              <div
+                style={{ width: "1px", height: "12px", background: "#333" }}
+              />
 
-              <div className="composer-select-wrapper pointer" onClick={() => setEffortDropdownOpen(!effortDropdownOpen)}>
-                <span style={{ paddingRight: '4px' }}>{currentEffortLabel.split(' ')[0]}</span>
+              <div
+                className="composer-select-wrapper pointer"
+                onClick={() => toggleComposerMenu("effort")}
+              >
+                <span style={{ paddingRight: "4px" }}>
+                  {currentEffortLabel.split(" ")[0]}
+                </span>
                 <ChevronIcon />
                 {effortDropdownOpen && (
                   <>
-                    <div 
-                      style={{ position: 'fixed', inset: 0, zIndex: 100 }} 
-                      onClick={(e) => { e.stopPropagation(); setEffortDropdownOpen(false); }} 
+                    <div
+                      style={{
+                        position: "fixed",
+                        inset: 0,
+                        zIndex: 10,
+                        cursor: "default",
+                      }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        closeComposerMenus();
+                      }}
                     />
-                    <div className="custom-dropdown" style={{ minWidth: '160px' }}>
+                    <div
+                      className="custom-dropdown"
+                      style={{ minWidth: "160px" }}
+                    >
                       <div className="dropdown-section-label">Effort</div>
                       {Object.entries(effortLabels).map(([id, label]) => (
-                        <div 
-                          key={id} 
-                          className="custom-dropdown-item" 
-                          style={{ justifyContent: 'space-between' }}
+                        <div
+                          key={id}
+                          className="custom-dropdown-item"
+                          style={{ justifyContent: "space-between" }}
                           onClick={(e) => {
                             e.stopPropagation();
-                            setEffortDropdownOpen(false);
+                            closeComposerMenus();
                             void updateWorkspaceSettings({
                               workspaceId: workspace.id,
                               approvalMode: workspace.approvalMode,
@@ -215,20 +333,26 @@ export function ConversationView({
                           {workspace.effort === id && <Check size={14} />}
                         </div>
                       ))}
-                      
-                      <div style={{ height: '1px', background: '#333', margin: '4px 0' }} />
+
+                      <div
+                        style={{
+                          height: "1px",
+                          background: "#333",
+                          margin: "4px 0",
+                        }}
+                      />
                       <div className="dropdown-section-label">Fast Mode</div>
                       {[
-                        { id: false, label: 'off' },
-                        { id: true, label: 'on' }
-                      ].map(opt => (
-                        <div 
-                          key={opt.label} 
-                          className="custom-dropdown-item" 
-                          style={{ justifyContent: 'space-between' }}
+                        { id: false, label: "off" },
+                        { id: true, label: "on" },
+                      ].map((opt) => (
+                        <div
+                          key={opt.label}
+                          className="custom-dropdown-item"
+                          style={{ justifyContent: "space-between" }}
                           onClick={(e) => {
                             e.stopPropagation();
-                            setEffortDropdownOpen(false);
+                            closeComposerMenus();
                             void updateWorkspaceSettings({
                               workspaceId: workspace.id,
                               approvalMode: workspace.approvalMode,
@@ -248,64 +372,143 @@ export function ConversationView({
                 )}
               </div>
 
-              <div style={{ width: '1px', height: '12px', background: '#333' }} />
+              <div
+                style={{ width: "1px", height: "12px", background: "#333" }}
+              />
 
-              <div 
-                className="composer-select-wrapper pointer" 
-                onClick={() => setCurrentMode(currentMode === "plan" ? "build" : "plan")}
+              <div
+                className="composer-select-wrapper pointer"
+                onClick={() =>
+                  setCurrentMode(currentMode === "plan" ? "build" : "plan")
+                }
                 title="Switch between Plan and Build mode"
               >
-                {currentMode === "plan" ? <FileText size={14} /> : <Zap size={14} />}
+                {currentMode === "plan" ? (
+                  <FileText size={14} />
+                ) : (
+                  <Zap size={14} />
+                )}
                 <span>{currentMode === "plan" ? "Plan" : "Build"}</span>
               </div>
 
-              <div style={{ width: '1px', height: '12px', background: '#333' }} />
+              <div
+                style={{ width: "1px", height: "12px", background: "#333" }}
+              />
 
-              <div className="composer-select-wrapper pointer" onClick={() => setApprovalDropdownOpen(!approvalDropdownOpen)}>
-                {workspace.approvalMode === 'supervised' ? <Shield size={14} /> : 
-                 workspace.approvalMode === 'auto-accept-edits' ? <Pencil size={14} /> : <Unlock size={14} />}
-                <span style={{ paddingRight: '4px' }}>
-                  {workspace.approvalMode === 'supervised' ? 'Supervised' : 
-                   workspace.approvalMode === 'auto-accept-edits' ? 'Auto-accept edits' : 'Full access'}
+              <div
+                className="composer-select-wrapper pointer"
+                onClick={() => toggleComposerMenu("approval")}
+              >
+                {workspace.approvalMode === "supervised" ? (
+                  <Shield size={14} />
+                ) : workspace.approvalMode === "auto-accept-edits" ? (
+                  <Pencil size={14} />
+                ) : (
+                  <Unlock size={14} />
+                )}
+                <span style={{ paddingRight: "4px" }}>
+                  {workspace.approvalMode === "supervised"
+                    ? "Supervised"
+                    : workspace.approvalMode === "auto-accept-edits"
+                      ? "Auto-accept edits"
+                      : "Full access"}
                 </span>
                 <ChevronIcon />
-                
+
                 {approvalDropdownOpen && (
                   <>
-                    <div 
-                      style={{ position: 'fixed', inset: 0, zIndex: 100 }} 
-                      onClick={(e) => { e.stopPropagation(); setApprovalDropdownOpen(false); }} 
+                    <div
+                      style={{
+                        position: "fixed",
+                        inset: 0,
+                        zIndex: 10,
+                        cursor: "default",
+                      }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        closeComposerMenus();
+                      }}
                     />
-                    <div className="custom-dropdown" style={{ minWidth: '280px', left: 'auto', right: '-8px' }}>
+                    <div
+                      className="custom-dropdown"
+                      style={{ minWidth: "280px", left: "auto", right: "-8px" }}
+                    >
                       {[
-                        { id: 'supervised', label: 'Supervised', desc: 'Ask before commands and file changes.' },
-                        { id: 'auto-accept-edits', label: 'Auto-accept edits', desc: 'Auto-approve edits, ask before other actions.' },
-                        { id: 'full-access', label: 'Full access', desc: 'Allow commands and edits without prompts.' }
-                      ].map(m => (
-                        <div 
-                          key={m.id} 
-                          className="custom-dropdown-item multi-line" 
+                        {
+                          id: "supervised",
+                          label: "Supervised",
+                          desc: "Ask before commands and file changes.",
+                        },
+                        {
+                          id: "auto-accept-edits",
+                          label: "Auto-accept edits",
+                          desc: "Auto-approve edits, ask before other actions.",
+                        },
+                        {
+                          id: "full-access",
+                          label: "Full access",
+                          desc: "Allow commands and edits without prompts.",
+                        },
+                      ].map((m) => (
+                        <div
+                          key={m.id}
+                          className="custom-dropdown-item multi-line"
                           onClick={(e) => {
                             e.stopPropagation();
-                            setApprovalDropdownOpen(false);
+                            closeComposerMenus();
                             void updateWorkspaceSettings({
                               workspaceId: workspace.id,
-                                approvalMode: m.id as any,
+                              approvalMode: m.id as any,
                               providerId: workspace.providerId,
                               modelId: workspace.modelId,
                               policy: workspace.policy,
                             });
                           }}
                         >
-                          <div style={{ width: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                            {workspace.approvalMode === m.id && <Check size={14} />}
+                          <div
+                            style={{
+                              width: "20px",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              flexShrink: 0,
+                            }}
+                          >
+                            {workspace.approvalMode === m.id && (
+                              <Check size={14} />
+                            )}
                           </div>
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#eee', fontWeight: 500 }}>
-                              {m.id === 'supervised' ? <Shield size={14} /> : m.id === 'auto-accept-edits' ? <Pencil size={14} /> : <Unlock size={14} />}
+                          <div
+                            style={{
+                              display: "flex",
+                              flexDirection: "column",
+                              gap: "2px",
+                            }}
+                          >
+                            <div
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: "8px",
+                                color: "#eee",
+                                fontWeight: 500,
+                              }}
+                            >
+                              {m.id === "supervised" ? (
+                                <Shield size={14} />
+                              ) : m.id === "auto-accept-edits" ? (
+                                <Pencil size={14} />
+                              ) : (
+                                <Unlock size={14} />
+                              )}
                               {m.label}
                             </div>
-                            <div style={{ fontSize: '0.75rem', color: '#666' }}>{m.desc}</div>
+                            <div
+                              className="item-description"
+                              style={{ fontSize: "0.75rem", color: "#666" }}
+                            >
+                              {m.desc}
+                            </div>
                           </div>
                         </div>
                       ))}
@@ -313,32 +516,48 @@ export function ConversationView({
                   </>
                 )}
               </div>
-
             </div>
 
             <button
               style={{
-                width: '28px',
-                height: '28px',
-                borderRadius: '50%',
-                background: draft.trim() ? '#2563eb' : '#333',
-                color: draft.trim() ? '#fff' : '#666',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                border: 'none',
-                cursor: draft.trim() ? 'pointer' : 'default',
-                transition: 'background 0.2s, color 0.2s'
+                width: "28px",
+                height: "28px",
+                borderRadius: "50%",
+                background:
+                  session.status === "streaming"
+                    ? "#ef4444"
+                    : draft.trim()
+                      ? "#2563eb"
+                      : "#333",
+                color:
+                  session.status === "streaming"
+                    ? "#fff"
+                    : draft.trim()
+                      ? "#fff"
+                      : "#666",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                border: "none",
+                cursor:
+                  session.status === "streaming" || draft.trim()
+                    ? "pointer"
+                    : "default",
+                transition: "background 0.2s, color 0.2s",
               }}
-              disabled={!draft.trim() || session.status === "streaming"}
-              onClick={() => void handleSubmit()}
+              disabled={!draft.trim() && session.status !== "streaming"}
+              onClick={() =>
+                session.status === "streaming"
+                  ? void abortPrompt(workspace.id, session.id)
+                  : void handleSubmit()
+              }
             >
               <ArrowUp size={16} />
             </button>
           </div>
         </div>
       </div>
-      
+
       <style>{`
         .composer-select-wrapper {
           display: flex;
@@ -350,7 +569,7 @@ export function ConversationView({
           border-radius: 6px;
           transition: background 0.15s ease, color 0.15s ease;
         }
-        .composer-select-wrapper.pointer {
+        .composer-select-wrapper.pointer:hover {
           cursor: pointer;
         }
         .composer-select-wrapper.pointer:hover {
@@ -363,7 +582,6 @@ export function ConversationView({
           border: none;
           color: inherit;
           font-size: inherit;
-          cursor: pointer;
           outline: none;
           padding-right: 4px;
         }
@@ -380,7 +598,7 @@ export function ConversationView({
           border-radius: 12px;
           padding: 8px;
           min-width: 180px;
-          z-index: 40;
+          z-index: 20;
           box-shadow: 0 12px 30px rgba(0,0,0,0.5);
           display: flex;
           flex-direction: column;
@@ -392,13 +610,16 @@ export function ConversationView({
           gap: 8px;
           padding: 8px 12px;
           border-radius: 6px;
-          cursor: pointer;
           color: #ccc;
           font-size: 0.9rem;
         }
         .custom-dropdown-item:hover {
+          cursor: pointer;
           background: #2563eb;
           color: white;
+        }
+        .custom-dropdown-item:hover .item-description {
+          color: rgba(255, 255, 255, 0.8) !important;
         }
         .custom-dropdown-item.multi-line {
           align-items: flex-start;
@@ -419,8 +640,18 @@ export function ConversationView({
 
 function ChevronIcon() {
   return (
-    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginTop: '2px' }}>
-      <path d="m6 9 6 6 6-6"/>
+    <svg
+      width="10"
+      height="10"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      style={{ marginTop: "2px" }}
+    >
+      <path d="m6 9 6 6 6-6" />
     </svg>
   );
 }

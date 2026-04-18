@@ -5,6 +5,8 @@ import type {
   GitSnapshot,
   PersistedAppState,
   PiRuntimeEvent,
+  RuntimeBootstrapPayload,
+  RuntimeHealthPayload,
   WorkspaceRecord,
 } from "../domains/types";
 
@@ -61,6 +63,59 @@ export async function sendPrompt(payload: {
   prompt: string;
 }) {
   return normalize(await invoke<PersistedAppState>("send_prompt", { payload }));
+}
+
+export async function bootstrapRuntime() {
+  return normalize(await invoke<RuntimeBootstrapPayload>("bootstrap_runtime"));
+}
+
+export async function refreshRuntimeCatalog() {
+  return normalize(
+    await invoke<RuntimeBootstrapPayload>("refresh_runtime_catalog"),
+  );
+}
+
+export async function startProviderLogin(payload: { providerId: string }) {
+  return normalize(
+    await invoke<RuntimeBootstrapPayload>("start_provider_login", { payload }),
+  );
+}
+
+export async function saveProviderApiKey(payload: {
+  providerId: string;
+  apiKey: string;
+}) {
+  return normalize(
+    await invoke<RuntimeBootstrapPayload>("save_provider_api_key", { payload }),
+  );
+}
+
+export async function logoutProvider(payload: { providerId: string }) {
+  return normalize(
+    await invoke<RuntimeBootstrapPayload>("logout_provider", { payload }),
+  );
+}
+
+export async function submitRuntimeInput(payload: {
+  requestId: string;
+  value?: string;
+  confirmed?: boolean;
+  cancelled?: boolean;
+}) {
+  return await invoke<void>("submit_runtime_input", { payload });
+}
+
+export async function abortPrompt(payload: {
+  workspaceId: string;
+  sessionId: string;
+}) {
+  return normalize(
+    await invoke<PersistedAppState>("abort_prompt", { payload }),
+  );
+}
+
+export async function runtimeHealthcheck() {
+  return normalize(await invoke<RuntimeHealthPayload>("runtime_healthcheck"));
 }
 
 export async function resolveApproval(payload: {

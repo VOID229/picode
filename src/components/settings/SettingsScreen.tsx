@@ -1,5 +1,7 @@
 import { ArrowLeft, Monitor, Shield, Zap, Globe } from "lucide-react";
+import { useState } from "react";
 import { Link } from "react-router-dom";
+import { openPath } from "../../lib/tauri";
 import { useAppStore } from "../../state/useAppStore";
 import { cn } from "../../lib/cn";
 import type { ApprovalMode } from "../../domains/types";
@@ -14,11 +16,25 @@ const themes = [
 ] as const;
 
 export function SettingsScreen() {
+  const [apiKeys, setApiKeys] = useState<Record<string, string>>({});
+  const [runtimeInputValue, setRuntimeInputValue] = useState("");
   const state = useAppStore((store) => store.state);
   const updatePreferences = useAppStore((store) => store.updatePreferences);
   const updateWorkspaceSettings = useAppStore(
     (store) => store.updateWorkspaceSettings,
   );
+  const refreshRuntimeCatalog = useAppStore(
+    (store) => store.refreshRuntimeCatalog,
+  );
+  const startProviderLogin = useAppStore((store) => store.startProviderLogin);
+  const saveProviderApiKey = useAppStore((store) => store.saveProviderApiKey);
+  const logoutProvider = useAppStore((store) => store.logoutProvider);
+  const submitRuntimeInput = useAppStore((store) => store.submitRuntimeInput);
+  const clearRuntimeUi = useAppStore((store) => store.clearRuntimeUi);
+  const pendingRuntimeInput = useAppStore((store) => store.pendingRuntimeInput);
+  const pendingBrowserAuth = useAppStore((store) => store.pendingBrowserAuth);
+  const runtimeGlobalStatus = useAppStore((store) => store.runtimeGlobalStatus);
+  const runtimeGlobalError = useAppStore((store) => store.runtimeGlobalError);
 
   if (!state) {
     return null;
@@ -48,6 +64,12 @@ export function SettingsScreen() {
     outline: "none",
     width: "100%",
   };
+
+  const activeProvider = activeWorkspace
+    ? state.providers.find(
+        (provider) => provider.id === activeWorkspace.providerId,
+      )
+    : null;
 
   return (
     <div
@@ -139,6 +161,410 @@ export function SettingsScreen() {
                 marginBottom: "4px",
               }}
             >
+              <Zap size={18} />
+              <h2 style={{ fontSize: "1rem", margin: 0, color: "var(--text)" }}>
+                Runtime Providers
+              </h2>
+            </div>
+
+            {(runtimeGlobalStatus || runtimeGlobalError) && (
+              <div
+                style={{
+                  display: "grid",
+                  gap: "8px",
+                  padding: "14px 16px",
+                  borderRadius: "10px",
+                  background: "var(--surface-elevated)",
+                  border: "1px solid var(--line)",
+                }}
+              >
+                {runtimeGlobalStatus && (
+                  <div
+                    style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}
+                  >
+                    {runtimeGlobalStatus}
+                  </div>
+                )}
+                {runtimeGlobalError && (
+                  <div style={{ fontSize: "0.85rem", color: "#f87171" }}>
+                    {runtimeGlobalError}
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr",
+                gap: "20px",
+              }}
+            >
+              <label style={{ display: "grid", gap: "8px" }}>
+                <span style={{ fontSize: "0.85rem", fontWeight: 600 }}>
+                  Active Provider
+                </span>
+                <select
+                  style={inputStyle}
+                  value={activeWorkspace.providerId}
+                  onChange={(event) => {
+                    const provider = state.providers.find(
+                      (item) => item.id === event.target.value,
+                    );
+                    void updateWorkspaceSettings({
+                      workspaceId: activeWorkspace.id,
+                      approvalMode: activeWorkspace.approvalMode,
+                      providerId: event.target.value,
+                      modelId:
+                        provider?.models.find((model) => model.available)?.id ??
+                        provider?.models[0]?.id ??
+                        activeWorkspace.modelId,
+                      effort: activeWorkspace.effort,
+                      fastMode: activeWorkspace.fastMode,
+                      policy: activeWorkspace.policy,
+                    });
+                  }}
+                >
+                  {state.providers.map((provider) => (
+                    <option key={provider.id} value={provider.id}>
+                      {provider.label}
+                      {provider.available ? "" : " (setup required)"}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label style={{ display: "grid", gap: "8px" }}>
+                <span style={{ fontSize: "0.85rem", fontWeight: 600 }}>
+                  Active Model
+                </span>
+                <select
+                  style={inputStyle}
+                  value={activeWorkspace.modelId}
+                  onChange={(event) =>
+                    void updateWorkspaceSettings({
+                      workspaceId: activeWorkspace.id,
+                      approvalMode: activeWorkspace.approvalMode,
+                      providerId: activeWorkspace.providerId,
+                      modelId: event.target.value,
+                      effort: activeWorkspace.effort,
+                      fastMode: activeWorkspace.fastMode,
+                      policy: activeWorkspace.policy,
+                    })
+                  }
+                >
+                  {(activeProvider?.models ?? []).map((model) => (
+                    <option key={model.id} value={model.id}>
+                      {model.label}
+                      {model.available ? "" : " (unavailable)"}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+
+            <div style={{ display: "grid", gap: "16px" }}>
+              {state.providers.map((provider) => {
+                const isActiveProvider =
+                  activeWorkspace.providerId === provider.id;
+                const browserStep =
+                  pendingBrowserAuth?.providerId === provider.id;
+                const inputStep =
+                  pendingRuntimeInput?.providerId === provider.id;
+
+                return (
+                  <div
+                    key={provider.id}
+                    style={{
+                      display: "grid",
+                      gap: "14px",
+                      padding: "18px",
+                      borderRadius: "12px",
+                      background: "var(--surface-elevated)",
+                      border: `1px solid ${
+                        isActiveProvider ? "var(--accent)" : "var(--line)"
+                      }`,
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        gap: "12px",
+                      }}
+                    >
+                      <div style={{ display: "grid", gap: "6px" }}>
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "10px",
+                          }}
+                        >
+                          <div style={{ fontWeight: 600 }}>
+                            {provider.label}
+                          </div>
+                          <span
+                            style={{
+                              fontSize: "0.72rem",
+                              textTransform: "uppercase",
+                              letterSpacing: "0.08em",
+                              color: provider.available
+                                ? "#4ade80"
+                                : "var(--text-muted)",
+                            }}
+                          >
+                            {provider.status.replaceAll("_", " ")}
+                          </span>
+                        </div>
+                        {provider.reason && (
+                          <div
+                            style={{
+                              fontSize: "0.82rem",
+                              color: "var(--text-muted)",
+                            }}
+                          >
+                            {provider.reason}
+                          </div>
+                        )}
+                      </div>
+                      <button
+                        className="nav-item"
+                        style={{ justifyContent: "center" }}
+                        onClick={() => void refreshRuntimeCatalog()}
+                      >
+                        Refresh
+                      </button>
+                    </div>
+
+                    <div
+                      style={{
+                        display: "flex",
+                        flexWrap: "wrap",
+                        gap: "8px",
+                      }}
+                    >
+                      {provider.models.map((model) => (
+                        <span
+                          key={model.id}
+                          style={{
+                            padding: "6px 10px",
+                            borderRadius: "999px",
+                            fontSize: "0.78rem",
+                            border: "1px solid var(--line)",
+                            color: model.available
+                              ? "var(--text)"
+                              : "var(--text-muted)",
+                          }}
+                        >
+                          {model.label}
+                        </span>
+                      ))}
+                    </div>
+
+                    {provider.authKind === "oauth" && (
+                      <div
+                        style={{
+                          display: "flex",
+                          gap: "10px",
+                          flexWrap: "wrap",
+                        }}
+                      >
+                        <button
+                          className="nav-item"
+                          style={{ justifyContent: "center" }}
+                          onClick={() => void startProviderLogin(provider.id)}
+                        >
+                          {provider.available ? "Reconnect" : "Connect"}
+                        </button>
+                        {provider.available && (
+                          <button
+                            className="nav-item"
+                            style={{ justifyContent: "center" }}
+                            onClick={() => void logoutProvider(provider.id)}
+                          >
+                            Disconnect
+                          </button>
+                        )}
+                      </div>
+                    )}
+
+                    {provider.authKind === "api-key" && (
+                      <div
+                        style={{
+                          display: "flex",
+                          gap: "10px",
+                          flexWrap: "wrap",
+                        }}
+                      >
+                        <input
+                          style={{ ...inputStyle, flex: 1, minWidth: "240px" }}
+                          type="password"
+                          placeholder={`${provider.label} API key`}
+                          value={apiKeys[provider.id] ?? ""}
+                          onChange={(event) =>
+                            setApiKeys((current) => ({
+                              ...current,
+                              [provider.id]: event.target.value,
+                            }))
+                          }
+                        />
+                        <button
+                          className="nav-item"
+                          style={{ justifyContent: "center" }}
+                          onClick={() =>
+                            void saveProviderApiKey(
+                              provider.id,
+                              apiKeys[provider.id] ?? "",
+                            )
+                          }
+                        >
+                          Save Key
+                        </button>
+                        {provider.available && (
+                          <button
+                            className="nav-item"
+                            style={{ justifyContent: "center" }}
+                            onClick={() => void logoutProvider(provider.id)}
+                          >
+                            Remove Key
+                          </button>
+                        )}
+                      </div>
+                    )}
+
+                    {browserStep && (
+                      <div
+                        style={{
+                          display: "grid",
+                          gap: "10px",
+                          padding: "14px",
+                          borderRadius: "10px",
+                          border: "1px solid var(--line)",
+                        }}
+                      >
+                        <div
+                          style={{
+                            fontSize: "0.85rem",
+                            color: "var(--text-muted)",
+                          }}
+                        >
+                          {pendingBrowserAuth.instructions ??
+                            `Open the ${provider.label} login flow in your browser.`}
+                        </div>
+                        <div
+                          style={{
+                            display: "flex",
+                            gap: "10px",
+                            flexWrap: "wrap",
+                          }}
+                        >
+                          <button
+                            className="nav-item"
+                            style={{ justifyContent: "center" }}
+                            onClick={() =>
+                              void openPath(pendingBrowserAuth.url)
+                            }
+                          >
+                            Open Browser
+                          </button>
+                          <button
+                            className="nav-item"
+                            style={{ justifyContent: "center" }}
+                            onClick={() => clearRuntimeUi()}
+                          >
+                            Hide
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {inputStep && (
+                      <div
+                        style={{
+                          display: "grid",
+                          gap: "10px",
+                          padding: "14px",
+                          borderRadius: "10px",
+                          border: "1px solid var(--line)",
+                        }}
+                      >
+                        <div style={{ display: "grid", gap: "6px" }}>
+                          <div style={{ fontWeight: 600 }}>
+                            {pendingRuntimeInput.title}
+                          </div>
+                          <div
+                            style={{
+                              fontSize: "0.85rem",
+                              color: "var(--text-muted)",
+                            }}
+                          >
+                            {pendingRuntimeInput.message}
+                          </div>
+                        </div>
+                        <input
+                          style={inputStyle}
+                          placeholder={pendingRuntimeInput.placeholder}
+                          value={runtimeInputValue}
+                          onChange={(event) =>
+                            setRuntimeInputValue(event.target.value)
+                          }
+                        />
+                        <div
+                          style={{
+                            display: "flex",
+                            gap: "10px",
+                            flexWrap: "wrap",
+                          }}
+                        >
+                          <button
+                            className="nav-item"
+                            style={{ justifyContent: "center" }}
+                            onClick={() => {
+                              void submitRuntimeInput({
+                                requestId: pendingRuntimeInput.requestId,
+                                value: runtimeInputValue,
+                              });
+                              setRuntimeInputValue("");
+                            }}
+                          >
+                            Submit
+                          </button>
+                          <button
+                            className="nav-item"
+                            style={{ justifyContent: "center" }}
+                            onClick={() => {
+                              void submitRuntimeInput({
+                                requestId: pendingRuntimeInput.requestId,
+                                cancelled: true,
+                              });
+                              setRuntimeInputValue("");
+                            }}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        )}
+
+        {activeWorkspace && (
+          <section style={cardStyle}>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "10px",
+                color: "var(--text-dim)",
+                marginBottom: "4px",
+              }}
+            >
               <Shield size={18} />
               <h2 style={{ fontSize: "1rem", margin: 0, color: "var(--text)" }}>
                 Workspace Policy: {activeWorkspace.name}
@@ -164,6 +590,7 @@ export function SettingsScreen() {
                   }
                 >
                   <option value="supervised">Supervised (Recommended)</option>
+                  <option value="auto-accept-edits">Auto-Accept Edits</option>
                   <option value="full-access">Full Access (Aventurous)</option>
                 </select>
               </label>
