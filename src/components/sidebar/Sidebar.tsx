@@ -579,13 +579,6 @@ function ProjectNode({
                 .archive-btn:hover {
                   color: #fff !important;
                 }
-                .action-icon {
-                  transition: color 0.2s, filter 0.2s;
-                }
-                .action-icon:hover {
-                  color: #fff !important;
-                  filter: drop-shadow(0 0 4px rgba(255, 255, 255, 0.4));
-                }
               `}</style>
     </div>
   );
@@ -768,11 +761,10 @@ function SessionItem({
           </span>
           <Archive 
             size={14} 
-            className="archive-btn"
+            className="archive-btn action-icon"
             style={{ 
               color: "#666", 
               display: "none",
-              cursor: "pointer"
             }} 
             onClick={(e) => {
               e.stopPropagation();
