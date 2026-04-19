@@ -53,18 +53,35 @@ export function Sidebar({ state }: SidebarProps) {
       <div
         className="sidebar__header"
         style={{
-          padding: "16px 16px 8px",
+          height: "54px",
+          width: "100%",
+          WebkitAppRegion: "drag",
           display: "flex",
           alignItems: "center",
-          borderBottom: "none",
-        }}
+          justifyContent: "flex-start",
+          paddingLeft: "88px",
+        } as React.CSSProperties}
       >
-        <div style={{ fontWeight: 600, color: "#fafafa", fontSize: "0.95rem" }}>
-          picode
+        <div style={{ display: "flex", alignItems: "center", gap: "6px", marginTop: "-16px" }}>
+          <span style={{ fontWeight: 600, color: "#fff", fontSize: "1.05rem" }}>
+            picode
+          </span>
+          <span style={{ 
+            fontSize: "0.6rem", 
+            fontWeight: 700, 
+            letterSpacing: "0.05em",
+            color: "#888", 
+            background: "rgba(255,255,255,0.08)", 
+            padding: "2px 6px", 
+            borderRadius: "10px",
+            marginTop: "1px"
+          }}>
+            ALPHA
+          </span>
         </div>
       </div>
 
-      <div style={{ padding: "0 16px", marginBottom: "24px" }}>
+      <div style={{ padding: "0 16px", marginBottom: "24px", display: "flex", flexDirection: "column", gap: "12px" }}>
         <label
           style={{
             display: "flex",

@@ -13,12 +13,17 @@
     "windows": [
       {
         "label": "main",
-        "title": "picode",
+        "title": "",
         "width": 1540,
         "height": 980,
         "minWidth": 1180,
         "minHeight": 760,
-        "resizable": true
+        "resizable": true,
+        "titleBarStyle": "Overlay",
+        "trafficLightPosition": {
+          "x": 16,
+          "y": 21
+        }
       }
     ],
     "security": {

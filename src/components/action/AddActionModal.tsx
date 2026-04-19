@@ -1,4 +1,4 @@
-import { Play, X } from "lucide-react";
+import { Play, X, FlaskConical, ListChecks, Wrench, Hammer, Bug } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useAppStore } from "../../state/useAppStore";
 import type { CustomAction } from "../../state/useAppStore";
@@ -22,6 +22,17 @@ export function AddActionModal({ workspaceId, editingActionId, onClose }: AddAct
   const [name, setName] = useState(existingAction?.name || "");
   const [command, setCommand] = useState(existingAction?.command || "");
   const [keybinding, setKeybinding] = useState(existingAction?.keybinding || "");
+  const [selectedIcon, setSelectedIcon] = useState<string>(existingAction?.icon || "Play");
+  const [showIconPicker, setShowIconPicker] = useState(false);
+
+  const iconsMap: Record<string, React.ReactNode> = {
+    Play: <Play size={18} strokeWidth={1.5} />,
+    Test: <FlaskConical size={18} strokeWidth={1.5} />,
+    Lint: <ListChecks size={18} strokeWidth={1.5} />,
+    Configure: <Wrench size={18} strokeWidth={1.5} />,
+    Build: <Hammer size={18} strokeWidth={1.5} />,
+    Debug: <Bug size={18} strokeWidth={1.5} />
+  };
 
   const handleSave = () => {
     if (!name.trim() || !command.trim()) return;
@@ -31,14 +42,14 @@ export function AddActionModal({ workspaceId, editingActionId, onClose }: AddAct
         name,
         command,
         keybinding: keybinding || undefined,
-        icon: "Play"
+        icon: selectedIcon
       });
     } else {
       addCustomAction(workspaceId, {
         name,
         command,
         keybinding: keybinding || undefined,
-        icon: "Play"
+        icon: selectedIcon
       });
     }
     onClose();
@@ -90,14 +101,68 @@ export function AddActionModal({ workspaceId, editingActionId, onClose }: AddAct
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             <label style={{ fontSize: '0.9rem', fontWeight: 500, color: '#ccc' }}>Name</label>
             <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-              <div style={{ 
-                width: '40px', height: '40px', 
-                borderRadius: '8px', 
-                background: '#2A2A2C', 
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                border: '1px solid #333'
-              }}>
-                <Play size={18} color="#888" strokeWidth={1.5} />
+              <div style={{ position: 'relative' }}>
+                <div 
+                  onClick={() => setShowIconPicker(!showIconPicker)}
+                  style={{ 
+                    width: '40px', height: '40px', 
+                    borderRadius: '8px', 
+                    background: '#2A2A2C', 
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    border: showIconPicker ? '1px solid #2563eb' : '1px solid #333',
+                    cursor: 'pointer',
+                    color: showIconPicker ? '#fff' : '#888',
+                    transition: 'border-color 0.15s, color 0.15s'
+                  }}>
+                  {iconsMap[selectedIcon] || iconsMap['Play']}
+                </div>
+
+                {showIconPicker && (
+                  <>
+                    <div style={{ position: 'fixed', inset: 0, zIndex: 10 }} onClick={(e) => { e.stopPropagation(); setShowIconPicker(false); }} />
+                    <div style={{ 
+                      position: 'absolute', 
+                      top: '100%', left: 0, marginTop: '8px',
+                      background: '#1C1C1E', border: '1px solid #333',
+                      borderRadius: '12px', padding: '12px',
+                      display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)',
+                      gap: '8px', zIndex: 20, boxShadow: '0 10px 30px rgba(0,0,0,0.5)',
+                      width: '260px'
+                    }}>
+                      {Object.entries(iconsMap).map(([key, iconNode]) => (
+                        <button 
+                          key={key} 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedIcon(key);
+                            setShowIconPicker(false);
+                          }}
+                          style={{
+                            display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px',
+                            background: selectedIcon === key ? 'rgba(59, 130, 246, 0.15)' : 'transparent',
+                            border: selectedIcon === key ? '1px solid #3b82f6' : '1px solid transparent',
+                            color: selectedIcon === key ? '#fff' : '#ccc',
+                            padding: '12px 8px', borderRadius: '8px', cursor: 'pointer',
+                            transition: 'all 0.15s ease'
+                          }}
+                          onMouseEnter={(e) => {
+                            if (selectedIcon !== key) {
+                              e.currentTarget.style.background = '#2A2A2C';
+                            }
+                          }}
+                          onMouseLeave={(e) => {
+                            if (selectedIcon !== key) {
+                              e.currentTarget.style.background = 'transparent';
+                            }
+                          }}
+                        >
+                          <div style={{ pointerEvents: 'none' }}>{iconNode}</div>
+                          <span style={{ fontSize: '0.75rem', fontWeight: 500, pointerEvents: 'none' }}>{key}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
               </div>
               <input 
                 type="text" 
