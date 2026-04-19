@@ -159,6 +159,7 @@ export function Sidebar({ state }: SidebarProps) {
         >
           <Search size={14} color="#666" />
           <input
+            id="sidebar-search-input"
             value={query}
             onChange={(e) => startTransition(() => setQuery(e.target.value))}
             placeholder="Search"
