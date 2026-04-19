@@ -1,6 +1,6 @@
-# picode
+# Picode
 
-`picode` is a minimal web GUI for coding agents using Pi
+Picode is a minimal web GUI for coding agents using Pi
 
 Built with Tauri v2, React, and TypeScript, it provides a native shell for managing projects, sessions, approvals, and provider-backed agent runs from one interface.
 
@@ -14,7 +14,7 @@ Built with Tauri v2, React, and TypeScript, it provides a native shell for manag
 
 ## Providers
 
-`picode` uses Pi as the backend which can connect to:
+Picode uses Pi as the backend which can connect to:
 
 - Codex
 - Claude
@@ -68,6 +68,6 @@ Current packaging targets:
 
 ## Notes
 
-`picode` is still early. Expect rough edges.
+Picode is still early. Expect rough edges.
 
 App state is stored locally in the platform app-data directory.
