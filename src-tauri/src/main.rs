@@ -4,7 +4,7 @@ mod pi;
 mod storage;
 
 use crate::models::{
-    AbortPromptPayload, BootstrapPayload, CreateSessionPayload, CreateWorkspacePayload,
+    AbortPromptPayload, ArchiveSessionPayload, BootstrapPayload, CreateSessionPayload, CreateWorkspacePayload,
     DeleteSessionPayload, PersistedAppState, ProviderAuthPayload, RefreshGitPayload,
     RemoveWorkspacePayload, RenameSessionPayload, RenameWorkspacePayload, ResolveApprovalPayload,
     RuntimeBootstrapPayload, RuntimeHealthPayload, SaveApiKeyPayload,
@@ -348,6 +348,62 @@ async fn rename_session(
 }
 
 #[tauri::command]
+async fn archive_session(
+    app: AppHandle,
+    shared: State<'_, AppState>,
+    payload: models::ArchiveSessionPayload,
+) -> Result<PersistedAppState, String> {
+    let mut state = shared.state.lock().await;
+    if let Some(workspace) = state
+        .workspaces
+        .iter_mut()
+        .find(|w| w.id == payload.workspace_id)
+    {
+        if let Some(session) = workspace
+            .sessions
+            .iter_mut()
+            .find(|s| s.id == payload.session_id)
+        {
+            session.archived_at = Some(models::now_iso());
+        }
+    }
+    if state.active_session_id.as_ref() == Some(&payload.session_id) {
+        state.active_session_id = state
+            .workspaces
+            .iter()
+            .find(|w| w.id == payload.workspace_id)
+            .and_then(|w| w.sessions.iter().find(|s| s.archived_at.is_none()))
+            .map(|s| s.id.clone());
+    }
+    storage::save(&app, &state).map_err(|error| error.to_string())?;
+    Ok(state.clone())
+}
+
+#[tauri::command]
+async fn restore_session(
+    app: AppHandle,
+    shared: State<'_, AppState>,
+    payload: models::ArchiveSessionPayload,
+) -> Result<PersistedAppState, String> {
+    let mut state = shared.state.lock().await;
+    if let Some(workspace) = state
+        .workspaces
+        .iter_mut()
+        .find(|w| w.id == payload.workspace_id)
+    {
+        if let Some(session) = workspace
+            .sessions
+            .iter_mut()
+            .find(|s| s.id == payload.session_id)
+        {
+            session.archived_at = None;
+        }
+    }
+    storage::save(&app, &state).map_err(|error| error.to_string())?;
+    Ok(state.clone())
+}
+
+#[tauri::command]
 async fn delete_session(
     app: AppHandle,
     shared: State<'_, AppState>,
@@ -366,7 +422,7 @@ async fn delete_session(
             .workspaces
             .iter()
             .find(|w| w.id == payload.workspace_id)
-            .and_then(|w| w.sessions.first())
+            .and_then(|w| w.sessions.iter().find(|s| s.archived_at.is_none()))
             .map(|s| s.id.clone());
     }
     storage::save(&app, &state).map_err(|error| error.to_string())?;
@@ -488,6 +544,8 @@ fn main() {
             rename_workspace,
             remove_workspace,
             rename_session,
+            archive_session,
+            restore_session,
             delete_session,
             read_dir,
             open_path

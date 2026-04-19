@@ -5,12 +5,27 @@ import { ConversationView } from "../chat/ConversationView";
 import { CommandPalette } from "../command/CommandPalette";
 import { Sidebar } from "../sidebar/Sidebar";
 import { AddActionModal } from "../action/AddActionModal";
-import { usePiBridge } from "../../services/piBridge";
 import { useAppStore } from "../../state/useAppStore";
-import { Plus, Play, ChevronDown, SquareTerminal, GitCompare, GitCommit, CloudUpload, GitPullRequest, AppWindow, Folder, FlaskConical, ListChecks, Wrench, Hammer, Bug, Settings } from "lucide-react";
+import {
+  Plus,
+  Play,
+  ChevronDown,
+  SquareTerminal,
+  GitCompare,
+  GitCommit,
+  CloudUpload,
+  GitPullRequest,
+  AppWindow,
+  Folder,
+  FlaskConical,
+  ListChecks,
+  Wrench,
+  Hammer,
+  Bug,
+  Settings,
+} from "lucide-react";
 
 export function AppShell() {
-  const initialize = useAppStore((state) => state.initialize);
   const isBootstrapping = useAppStore((state) => state.isBootstrapping);
   const state = useAppStore((store) => store.state);
   const customActions = useAppStore((store) => store.customActions);
@@ -18,16 +33,12 @@ export function AppShell() {
   const navigate = useNavigate();
   const [showActionModal, setShowActionModal] = useState(false);
   const [showActionDropdown, setShowActionDropdown] = useState(false);
-  const [editingActionId, setEditingActionId] = useState<string | undefined>(undefined);
+  const [editingActionId, setEditingActionId] = useState<string | undefined>(
+    undefined,
+  );
   const [forceGitRef, setForceGitRef] = useState(false); // Local simulation
   const [showGitDropdown, setShowGitDropdown] = useState(false);
   const [showOpenDropdown, setShowOpenDropdown] = useState(false);
-
-  usePiBridge();
-
-  useEffect(() => {
-    void initialize();
-  }, [initialize]);
 
   useEffect(() => {
     const handleShortcut = (event: KeyboardEvent) => {
@@ -62,31 +73,34 @@ export function AppShell() {
   );
 
   const activeWorkspaceActions = useMemo(
-    () => (activeWorkspace ? customActions[activeWorkspace.id] ?? [] : []),
-    [activeWorkspace, customActions]
+    () => (activeWorkspace ? (customActions[activeWorkspace.id] ?? []) : []),
+    [activeWorkspace, customActions],
   );
 
   const deferredSession = useDeferredValue(activeSession);
 
   const getIcon = (iconName: string, size = 14) => {
     switch (iconName) {
-      case 'Test': return <FlaskConical size={size} />;
-      case 'Lint': return <ListChecks size={size} />;
-      case 'Configure': return <Wrench size={size} />;
-      case 'Build': return <Hammer size={size} />;
-      case 'Debug': return <Bug size={size} />;
-      case 'Play': default: return <Play size={size} />;
+      case "Test":
+        return <FlaskConical size={size} />;
+      case "Lint":
+        return <ListChecks size={size} />;
+      case "Configure":
+        return <Wrench size={size} />;
+      case "Build":
+        return <Hammer size={size} />;
+      case "Debug":
+        return <Bug size={size} />;
+      case "Play":
+      default:
+        return <Play size={size} />;
     }
   };
 
   if (isBootstrapping || !state) {
     return (
-      <div className="boot-shell">
+      <div className="boot-shell" aria-hidden="true">
         <div className="boot-shell__mark">Pi</div>
-        <div className="boot-shell__copy">
-          <p>Loading workspace registry</p>
-          <span>Rehydrating sessions, themes, and approval policy.</span>
-        </div>
       </div>
     );
   }
@@ -94,40 +108,79 @@ export function AppShell() {
   return (
     <div className="app-shell">
       <Sidebar state={state} />
-      
-      <main className="main-pane" style={{ background: 'var(--bg)' }}>
-        <header className="main-pane__header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 16px', height: '54px', borderBottom: 'none', background: 'var(--bg)', backdropFilter: 'none' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <span style={{ fontWeight: 600, fontSize: '0.9rem', color: '#fff' }}>
+
+      <main className="main-pane" style={{ background: "var(--bg)" }}>
+        <header
+          className="main-pane__header"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            padding: "0 16px",
+            height: "54px",
+            borderBottom: "none",
+            background: "var(--bg)",
+            backdropFilter: "none",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+            <span
+              style={{ fontWeight: 600, fontSize: "0.9rem", color: "#fff" }}
+            >
               {deferredSession ? deferredSession.title : "New thread"}
             </span>
             {activeWorkspace && (
-              <span style={{ padding: '2px 8px', borderRadius: '12px', border: '1px solid #333', fontSize: '0.75rem', color: '#ccc' }}>
+              <span
+                style={{
+                  padding: "2px 8px",
+                  borderRadius: "12px",
+                  border: "1px solid #333",
+                  fontSize: "0.75rem",
+                  color: "#ccc",
+                }}
+              >
                 {activeWorkspace.name}
               </span>
             )}
             {!forceGitRef && (
-              <span style={{ padding: '2px 8px', borderRadius: '12px', border: '1px solid #422', fontSize: '0.75rem', color: '#f80', background: 'rgba(255,136,0,0.05)' }}>
+              <span
+                style={{
+                  padding: "2px 8px",
+                  borderRadius: "12px",
+                  border: "1px solid #422",
+                  fontSize: "0.75rem",
+                  color: "#f80",
+                  background: "rgba(255,136,0,0.05)",
+                }}
+              >
                 No Git
               </span>
             )}
           </div>
-          
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            
+
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
             {activeWorkspaceActions.length > 0 ? (
-              <div style={{ position: 'relative' }}>
-                <div style={{ display: 'flex', alignItems: 'center' }}>
-                  <button 
-                    className="topbar-btn" 
-                    style={{ borderTopRightRadius: 0, borderBottomRightRadius: 0, borderRight: 'none' }}
+              <div style={{ position: "relative" }}>
+                <div style={{ display: "flex", alignItems: "center" }}>
+                  <button
+                    className="topbar-btn"
+                    style={{
+                      borderTopRightRadius: 0,
+                      borderBottomRightRadius: 0,
+                      borderRight: "none",
+                    }}
                     title={activeWorkspaceActions[0].command}
                   >
-                    {getIcon(activeWorkspaceActions[0].icon)} {activeWorkspaceActions[0].name}
+                    {getIcon(activeWorkspaceActions[0].icon)}{" "}
+                    {activeWorkspaceActions[0].name}
                   </button>
-                  <button 
-                    className="topbar-btn" 
-                    style={{ borderTopLeftRadius: 0, borderBottomLeftRadius: 0, padding: '6px 4px' }}
+                  <button
+                    className="topbar-btn"
+                    style={{
+                      borderTopLeftRadius: 0,
+                      borderBottomLeftRadius: 0,
+                      padding: "6px 4px",
+                    }}
                     onClick={() => setShowActionDropdown(!showActionDropdown)}
                   >
                     <ChevronDown size={14} />
@@ -136,56 +189,67 @@ export function AppShell() {
 
                 {showActionDropdown && (
                   <>
-                    <div className="click-away-layer" onClick={() => setShowActionDropdown(false)} />
-                    <div style={{
-                      position: 'absolute',
-                      top: '100%',
-                      right: 0,
-                      marginTop: '8px',
-                      background: '#1C1C1E',
-                      border: '1px solid #333',
-                      borderRadius: '12px',
-                      padding: '8px',
-                      minWidth: '200px',
-                      zIndex: 40,
-                      boxShadow: '0 12px 30px rgba(0,0,0,0.5)',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: '2px'
-                    }}>
-                      {activeWorkspaceActions.map(action => (
+                    <div
+                      className="click-away-layer"
+                      onClick={() => setShowActionDropdown(false)}
+                    />
+                    <div
+                      style={{
+                        position: "absolute",
+                        top: "100%",
+                        right: 0,
+                        marginTop: "8px",
+                        background: "#1C1C1E",
+                        border: "1px solid #333",
+                        borderRadius: "12px",
+                        padding: "8px",
+                        minWidth: "200px",
+                        zIndex: 40,
+                        boxShadow: "0 12px 30px rgba(0,0,0,0.5)",
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: "2px",
+                      }}
+                    >
+                      {activeWorkspaceActions.map((action) => (
                         <div
                           key={action.id}
                           className="dropdown-item group"
-                          style={{ display: 'flex', alignItems: 'center', gap: '10px' }}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "10px",
+                          }}
                         >
-                          <button 
+                          <button
                             onClick={() => {
                               // TODO: Run action
                               setShowActionDropdown(false);
                             }}
                             style={{
-                              background: 'transparent', border: 'none', color: 'inherit',
-                              display: 'flex', alignItems: 'center', gap: '10px', flex: 1,
-                              cursor: 'pointer', fontSize: '0.9rem', textAlign: 'left',
-                              padding: 0
+                              background: "transparent",
+                              border: "none",
+                              color: "inherit",
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "10px",
+                              flex: 1,
+                              cursor: "pointer",
+                              fontSize: "0.9rem",
+                              textAlign: "left",
+                              padding: 0,
                             }}
                           >
-                            {getIcon(action.icon)} <span style={{ flex: 1 }}>{action.name}</span>
+                            {getIcon(action.icon)}{" "}
+                            <span style={{ flex: 1 }}>{action.name}</span>
                           </button>
-                          
+
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
                               setEditingActionId(action.id);
                               setShowActionModal(true);
                               setShowActionDropdown(false);
-                            }}
-                            style={{
-                              background: 'rgba(255,255,255,0.1)', border: 'none', color: '#ccc',
-                              borderRadius: '6px', width: '24px', height: '24px',
-                              display: 'flex', alignItems: 'center', justifyContent: 'center',
-                              cursor: 'pointer', padding: 0
                             }}
                             title="Edit action"
                             className="edit-action-btn"
@@ -194,7 +258,13 @@ export function AppShell() {
                           </button>
                         </div>
                       ))}
-                      <div style={{ height: '1px', background: '#333', margin: '6px 0' }} />
+                      <div
+                        style={{
+                          height: "1px",
+                          background: "#333",
+                          margin: "6px 0",
+                        }}
+                      />
                       <button
                         className="dropdown-item"
                         onClick={() => {
@@ -210,8 +280,8 @@ export function AppShell() {
                 )}
               </div>
             ) : (
-              <button 
-                className="topbar-btn" 
+              <button
+                className="topbar-btn"
                 onClick={() => {
                   setEditingActionId(undefined);
                   setShowActionModal(true);
@@ -221,48 +291,77 @@ export function AppShell() {
               </button>
             )}
 
-            <div style={{ display: 'flex', alignItems: 'center', position: 'relative' }}>
-              <button 
-                className="topbar-btn" 
-                style={{ borderTopRightRadius: 0, borderBottomRightRadius: 0, borderRight: 'none' }}
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                position: "relative",
+              }}
+            >
+              <button
+                className="topbar-btn"
+                style={{
+                  borderTopRightRadius: 0,
+                  borderBottomRightRadius: 0,
+                  borderRight: "none",
+                }}
                 title="Open in default editor"
               >
                 <AppWindow size={14} /> Open
               </button>
-              <button 
-                className="topbar-btn" 
-                style={{ borderTopLeftRadius: 0, borderBottomLeftRadius: 0, padding: '6px 4px' }}
+              <button
+                className="topbar-btn"
+                style={{
+                  borderTopLeftRadius: 0,
+                  borderBottomLeftRadius: 0,
+                  padding: "6px 4px",
+                }}
                 title="Change editor"
                 onClick={() => setShowOpenDropdown(!showOpenDropdown)}
               >
                 <ChevronDown size={14} />
               </button>
-              
+
               {showOpenDropdown && (
                 <>
-                  <div className="click-away-layer" onClick={() => setShowOpenDropdown(false)} />
-                  <div style={{
-                    position: 'absolute',
-                    top: '100%',
-                    right: 0,
-                    marginTop: '8px',
-                    background: '#1C1C1E',
-                    border: '1px solid #333',
-                    borderRadius: '12px',
-                    padding: '8px',
-                    minWidth: '180px',
-                    zIndex: 40,
-                    boxShadow: '0 12px 30px rgba(0,0,0,0.5)',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '2px'
-                  }}>
-                    <button className="dropdown-item" onClick={() => setShowOpenDropdown(false)}>
-                      <AppWindow size={14} /> <span style={{ flex: 1 }}>Zed</span>
-                      <span style={{ fontSize: '0.7rem', color: '#666' }}>⌘O</span>
+                  <div
+                    className="click-away-layer"
+                    onClick={() => setShowOpenDropdown(false)}
+                  />
+                  <div
+                    style={{
+                      position: "absolute",
+                      top: "100%",
+                      right: 0,
+                      marginTop: "8px",
+                      background: "#1C1C1E",
+                      border: "1px solid #333",
+                      borderRadius: "12px",
+                      padding: "8px",
+                      minWidth: "180px",
+                      zIndex: 40,
+                      boxShadow: "0 12px 30px rgba(0,0,0,0.5)",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "2px",
+                    }}
+                  >
+                    <button
+                      className="dropdown-item"
+                      onClick={() => setShowOpenDropdown(false)}
+                    >
+                      <AppWindow size={14} />{" "}
+                      <span style={{ flex: 1 }}>Zed</span>
+                      <span style={{ fontSize: "0.7rem", color: "#666" }}>
+                        ⌘O
+                      </span>
                     </button>
-                    <button className="dropdown-item" onClick={() => setShowOpenDropdown(false)}>
-                      <Folder size={14} /> <span style={{ flex: 1 }}>Finder</span>
+                    <button
+                      className="dropdown-item"
+                      onClick={() => setShowOpenDropdown(false)}
+                    >
+                      <Folder size={14} />{" "}
+                      <span style={{ flex: 1 }}>Finder</span>
                     </button>
                   </div>
                 </>
@@ -270,21 +369,32 @@ export function AppShell() {
             </div>
 
             {!forceGitRef ? (
-              <button className="topbar-btn" onClick={() => setForceGitRef(true)}>
+              <button
+                className="topbar-btn"
+                onClick={() => setForceGitRef(true)}
+              >
                 Initialize Git
               </button>
             ) : (
-              <div style={{ position: 'relative' }}>
-                <div style={{ display: 'flex', alignItems: 'center' }}>
-                  <button 
-                    className="topbar-btn" 
-                    style={{ borderTopRightRadius: 0, borderBottomRightRadius: 0, borderRight: 'none' }}
+              <div style={{ position: "relative" }}>
+                <div style={{ display: "flex", alignItems: "center" }}>
+                  <button
+                    className="topbar-btn"
+                    style={{
+                      borderTopRightRadius: 0,
+                      borderBottomRightRadius: 0,
+                      borderRight: "none",
+                    }}
                   >
                     <CloudUpload size={14} /> Commit & push
                   </button>
-                  <button 
-                    className="topbar-btn" 
-                    style={{ borderTopLeftRadius: 0, borderBottomLeftRadius: 0, padding: '6px 4px' }}
+                  <button
+                    className="topbar-btn"
+                    style={{
+                      borderTopLeftRadius: 0,
+                      borderBottomLeftRadius: 0,
+                      padding: "6px 4px",
+                    }}
                     onClick={() => setShowGitDropdown(!showGitDropdown)}
                   >
                     <ChevronDown size={14} />
@@ -293,30 +403,44 @@ export function AppShell() {
 
                 {showGitDropdown && (
                   <>
-                    <div className="click-away-layer" onClick={() => setShowGitDropdown(false)} />
-                    <div style={{
-                      position: 'absolute',
-                      top: '100%',
-                      right: 0,
-                      marginTop: '8px',
-                      background: '#1C1C1E',
-                      border: '1px solid #333',
-                      borderRadius: '12px',
-                      padding: '8px',
-                      minWidth: '160px',
-                      zIndex: 40,
-                      boxShadow: '0 12px 30px rgba(0,0,0,0.5)',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: '2px'
-                    }}>
-                      <button className="dropdown-item" onClick={() => setShowGitDropdown(false)}>
+                    <div
+                      className="click-away-layer"
+                      onClick={() => setShowGitDropdown(false)}
+                    />
+                    <div
+                      style={{
+                        position: "absolute",
+                        top: "100%",
+                        right: 0,
+                        marginTop: "8px",
+                        background: "#1C1C1E",
+                        border: "1px solid #333",
+                        borderRadius: "12px",
+                        padding: "8px",
+                        minWidth: "160px",
+                        zIndex: 40,
+                        boxShadow: "0 12px 30px rgba(0,0,0,0.5)",
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: "2px",
+                      }}
+                    >
+                      <button
+                        className="dropdown-item"
+                        onClick={() => setShowGitDropdown(false)}
+                      >
                         <GitCommit size={14} /> Commit
                       </button>
-                      <button className="dropdown-item" onClick={() => setShowGitDropdown(false)}>
+                      <button
+                        className="dropdown-item"
+                        onClick={() => setShowGitDropdown(false)}
+                      >
                         <CloudUpload size={14} /> Push
                       </button>
-                      <button className="dropdown-item" onClick={() => setShowGitDropdown(false)}>
+                      <button
+                        className="dropdown-item"
+                        onClick={() => setShowGitDropdown(false)}
+                      >
                         <GitPullRequest size={14} /> Create PR
                       </button>
                     </div>
@@ -324,15 +448,12 @@ export function AppShell() {
                 )}
               </div>
             )}
-            
+
             <button className="topbar-btn icon-only" title="Terminal">
               <SquareTerminal size={14} />
             </button>
             <button className="topbar-btn icon-only" title="Diff">
               <GitCompare size={14} />
-            </button>
-            <button className="topbar-btn icon-only" onClick={() => state.activeWorkspaceId && void createSession(state.activeWorkspaceId)} title="New Session">
-              <Plus size={14} />
             </button>
           </div>
         </header>
@@ -346,13 +467,13 @@ export function AppShell() {
       </main>
 
       {showActionModal && activeWorkspace && (
-        <AddActionModal 
-          workspaceId={activeWorkspace.id} 
+        <AddActionModal
+          workspaceId={activeWorkspace.id}
           editingActionId={editingActionId}
           onClose={() => {
             setShowActionModal(false);
             setEditingActionId(undefined);
-          }} 
+          }}
         />
       )}
 
@@ -408,8 +529,26 @@ export function AppShell() {
           background: #2A2A2C;
           color: white;
         }
-        .edit-action-btn:hover {
-          background: rgba(255,255,255,0.2) !important;
+        .dropdown-item.group .edit-action-btn {
+          opacity: 0;
+          background: transparent;
+          border: none;
+          color: #ccc;
+          border-radius: 6px;
+          width: 24px;
+          height: 24px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          cursor: pointer;
+          padding: 0;
+          transition: opacity 0.1s ease, background 0.1s ease, color 0.1s ease;
+        }
+        .dropdown-item.group:hover .edit-action-btn {
+          opacity: 1;
+        }
+        .dropdown-item.group .edit-action-btn:hover {
+          background: rgba(255,255,255,0.15) !important;
           color: #fff !important;
         }
       `}</style>

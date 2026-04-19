@@ -254,48 +254,62 @@ export function AddActionModal({ workspaceId, editingActionId, onClose }: AddAct
           borderBottomRightRadius: '12px'
         }}>
           {isEditing && (
-            <button onClick={handleDelete} style={{ 
-              background: 'transparent', 
-              border: '1px solid currentColor', 
-              color: '#ef4444', 
-              padding: '8px 16px', 
-              borderRadius: '20px',
-              fontSize: '0.9rem',
-              fontWeight: 500,
-              cursor: 'pointer'
-            }}>
+            <button onClick={handleDelete} className="action-modal-btn delete-btn">
               Delete
             </button>
           )}
 
           <div style={{ display: 'flex', gap: '12px' }}>
-            <button onClick={onClose} style={{ 
-              background: 'transparent', 
-              border: '1px solid #444', 
-              color: '#ccc', 
-              padding: '8px 16px', 
-              borderRadius: '20px',
-              fontSize: '0.9rem',
-              fontWeight: 500,
-              cursor: 'pointer'
-            }}>
+            <button onClick={onClose} className="action-modal-btn cancel-btn">
               Cancel
             </button>
-            <button onClick={handleSave} style={{ 
-              background: '#3b82f6', 
-              border: 'none', 
-              color: '#fff', 
-              padding: '8px 16px', 
-              borderRadius: '20px',
-              fontSize: '0.9rem',
-              fontWeight: 500,
-              cursor: 'pointer'
-            }}>
+            <button onClick={handleSave} className="action-modal-btn save-btn">
               {isEditing ? "Save changes" : "Save action"}
             </button>
           </div>
         </div>
       </div>
+
+      <style>{`
+        .action-modal-btn {
+          padding: 8px 16px;
+          border-radius: 20px;
+          font-size: 0.9rem;
+          font-weight: 500;
+          cursor: pointer;
+          transition: all 0.15s ease;
+        }
+        
+        .action-modal-btn.delete-btn {
+          background: transparent;
+          border: 1px solid transparent;
+          color: #ef4444; /* red text by default */
+        }
+        .action-modal-btn.delete-btn:hover {
+          border-color: #ef4444; /* red border on hover */
+        }
+        
+        .action-modal-btn.cancel-btn {
+          background: transparent;
+          border: 1px solid #444;
+          color: #ccc;
+        }
+        .action-modal-btn.cancel-btn:hover {
+          border-color: #666;
+          color: #fff;
+          background: rgba(255,255,255,0.05);
+        }
+        
+        .action-modal-btn.save-btn {
+          background: #3b82f6;
+          border: 1px solid #3b82f6;
+          color: #fff;
+        }
+        .action-modal-btn.save-btn:hover {
+          background: #60a5fa; /* lighter blue */
+          border-color: #60a5fa;
+        }
+      `}</style>
     </div>
   );
 }

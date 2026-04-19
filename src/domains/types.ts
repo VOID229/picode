@@ -128,6 +128,7 @@ export interface ChatSession {
   createdAt: string;
   updatedAt: string;
   status: "idle" | "streaming" | "awaiting-approval" | "error";
+  archivedAt?: string;
   runtime: SessionRuntimeMetadata;
   timeline: TimelineItem[];
 }

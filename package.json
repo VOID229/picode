@@ -7,6 +7,7 @@
     "dev": "vite --host 0.0.0.0 --port 1420",
     "build": "tsc && vite build",
     "preview": "vite preview",
+    "dmg": "bun run scripts/build-dmg.ts",
     "build:pi-runtime": "bun run scripts/build-pi-runtime.ts",
     "dev:prepare-runtime": "bun run build:pi-runtime",
     "tauri:dev": "bun run dev:prepare-runtime && tauri dev",

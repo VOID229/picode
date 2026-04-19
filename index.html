@@ -3,7 +3,37 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark light" />
     <title></title>
+    <style>
+      html,
+      body,
+      #root {
+        height: 100%;
+        margin: 0;
+        background: #121212;
+        color: #eaeaea;
+      }
+
+      body {
+        overflow: hidden;
+      }
+    </style>
+    <script>
+      (() => {
+        try {
+          const themeKey = "picode.theme";
+          const theme = window.localStorage.getItem(themeKey) || "dark";
+          const isLight = theme === "light";
+          const background = isLight ? "#ffffff" : "#121212";
+          const text = isLight ? "#09090b" : "#eaeaea";
+
+          document.documentElement.dataset.theme = theme;
+          document.documentElement.style.backgroundColor = background;
+          document.documentElement.style.color = text;
+        } catch {}
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

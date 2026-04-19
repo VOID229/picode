@@ -166,6 +166,22 @@ export async function renameSession(
   );
 }
 
+export async function archiveSession(workspaceId: string, sessionId: string) {
+  return normalize(
+    await invoke<PersistedAppState>("archive_session", {
+      payload: { workspaceId, sessionId },
+    }),
+  );
+}
+
+export async function restoreSession(workspaceId: string, sessionId: string) {
+  return normalize(
+    await invoke<PersistedAppState>("restore_session", {
+      payload: { workspaceId, sessionId },
+    }),
+  );
+}
+
 export async function deleteSession(workspaceId: string, sessionId: string) {
   return normalize(
     await invoke<PersistedAppState>("delete_session", {

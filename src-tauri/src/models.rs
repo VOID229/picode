@@ -186,6 +186,7 @@ pub struct ChatSession {
     pub created_at: String,
     pub updated_at: String,
     pub status: SessionStatus,
+    pub archived_at: Option<String>,
     #[serde(default)]
     pub runtime: SessionRuntimeMetadata,
     pub timeline: Vec<TimelineItem>,
@@ -384,6 +385,13 @@ pub struct RenameSessionPayload {
     pub workspace_id: String,
     pub session_id: String,
     pub title: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArchiveSessionPayload {
+    pub workspace_id: String,
+    pub session_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -653,6 +661,7 @@ pub fn new_session(title: impl Into<String>) -> ChatSession {
         created_at: now.clone(),
         updated_at: now.clone(),
         status: SessionStatus::Idle,
+        archived_at: None,
         runtime: SessionRuntimeMetadata::default(),
         timeline: vec![TimelineItem::SystemNotice {
             id: Uuid::new_v4().to_string(),

@@ -11,8 +11,10 @@ import {
   Edit2,
   Copy,
   Hash,
+  Archive,
+  SquarePen,
 } from "lucide-react";
-import { useMemo, useState, useTransition, useCallback } from "react";
+import { useMemo, useState, useTransition, useCallback, useEffect } from "react";
 import { Link } from "react-router-dom";
 import type {
   PersistedAppState,
@@ -34,16 +36,77 @@ export function Sidebar({ state }: SidebarProps) {
   const [isPending, startTransition] = useTransition();
   const createWorkspace = useAppStore((store) => store.createWorkspace);
 
+  const [projectSortOrder, setProjectSortOrder] = useState<"last-message" | "created" | "manual">("last-message");
+  const [threadSortOrder, setThreadSortOrder] = useState<"last-message" | "created">("last-message");
+  const [projectGrouping, setProjectGrouping] = useState<"repo" | "path" | "none">("repo");
+  const [sortMenu, setSortMenu] = useState<{ x: number, y: number } | null>(null);
+  const [isModifierHeld, setIsModifierHeld] = useState(false);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Meta" || e.key === "Control") setIsModifierHeld(true);
+    };
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.key === "Meta" || e.key === "Control") setIsModifierHeld(false);
+    };
+    const handleBlur = () => setIsModifierHeld(false);
+
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
+    window.addEventListener("blur", handleBlur);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
+      window.removeEventListener("blur", handleBlur);
+    };
+  }, []);
+
   const filteredWorkspaces = useMemo(() => {
     const normalized = query.trim().toLowerCase();
-    return state.workspaces.filter((w) => {
+    let result = state.workspaces.filter((w) => {
       if (!normalized) return true;
       return (
         w.name.toLowerCase().includes(normalized) ||
         w.path.toLowerCase().includes(normalized)
       );
     });
-  }, [query, state.workspaces]);
+
+    // Sorting logic for projects
+    result = [...result].sort((a, b) => {
+      if (projectSortOrder === "created") {
+        // We don't have workspace.createdAt, so we might need to use recentRank or similar
+        // For now let's assume recentRank is a proxy for creation or use session dates
+        return a.recentRank - b.recentRank;
+      }
+      if (projectSortOrder === "last-message") {
+        const lastA = Math.max(...a.sessions.map(s => new Date(s.updatedAt).getTime()), 0);
+        const lastB = Math.max(...b.sessions.map(s => new Date(s.updatedAt).getTime()), 0);
+        return lastB - lastA;
+      }
+      return 0; // Manual
+    });
+
+    return result;
+  }, [query, state.workspaces, projectSortOrder]);
+
+  const handleSortClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    setSortMenu({ x: e.clientX, y: e.clientY });
+  };
+
+  const sortMenuItems = useMemo<ContextMenuItem[]>(() => [
+    { label: "Sort projects", isHeader: true },
+    { label: "Last user message", isChecked: projectSortOrder === "last-message", onClick: () => setProjectSortOrder("last-message") },
+    { label: "Created at", isChecked: projectSortOrder === "created", onClick: () => setProjectSortOrder("created") },
+    { label: "Manual", isChecked: projectSortOrder === "manual", onClick: () => setProjectSortOrder("manual") },
+    { label: "Sort threads", isHeader: true, separator: true },
+    { label: "Last user message", isChecked: threadSortOrder === "last-message", onClick: () => setThreadSortOrder("last-message") },
+    { label: "Created at", isChecked: threadSortOrder === "created", onClick: () => setThreadSortOrder("created") },
+    { label: "Group projects", isHeader: true, separator: true },
+    { label: "Group by repository", isChecked: projectGrouping === "repo", onClick: () => setProjectGrouping("repo") },
+    { label: "Group by repository path", isChecked: projectGrouping === "path", onClick: () => setProjectGrouping("path") },
+    { label: "Keep separate", isChecked: projectGrouping === "none", onClick: () => setProjectGrouping("none") },
+  ], [projectSortOrder, threadSortOrder, projectGrouping]);
 
   return (
     <aside
@@ -150,10 +213,14 @@ export function Sidebar({ state }: SidebarProps) {
             PROJECTS
           </span>
           <div style={{ display: "flex", gap: "12px", color: "#666" }}>
-            <ArrowDownUp size={12} className="pointer" />
+            <ArrowDownUp 
+              size={12} 
+              className="pointer action-icon" 
+              onClick={handleSortClick}
+            />
             <Plus
               size={14}
-              className="pointer"
+              className="pointer action-icon"
               onClick={() => setIsPickerOpen(true)}
             />
           </div>
@@ -165,10 +232,21 @@ export function Sidebar({ state }: SidebarProps) {
               key={workspace.id}
               workspace={workspace}
               state={state}
+              threadSortOrder={threadSortOrder}
+              isModifierHeld={isModifierHeld}
             />
           ))}
         </div>
       </div>
+
+      {sortMenu && (
+        <ContextMenu
+          x={sortMenu.x}
+          y={sortMenu.y}
+          items={sortMenuItems}
+          onClose={() => setSortMenu(null)}
+        />
+      )}
 
       <div style={{ marginTop: "auto", padding: "16px" }}>
         <Link
@@ -180,6 +258,17 @@ export function Sidebar({ state }: SidebarProps) {
             color: "#888",
             textDecoration: "none",
             fontSize: "0.85rem",
+            padding: "6px 8px",
+            borderRadius: "6px",
+            transition: "background 0.2s, color 0.2s"
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = "#222";
+            e.currentTarget.style.color = "#ccc";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = "transparent";
+            e.currentTarget.style.color = "#888";
           }}
         >
           <Settings size={16} />
@@ -203,9 +292,13 @@ export function Sidebar({ state }: SidebarProps) {
 function ProjectNode({
   workspace,
   state,
+  threadSortOrder,
+  isModifierHeld,
 }: {
   workspace: WorkspaceRecord;
   state: PersistedAppState;
+  threadSortOrder: "last-message" | "created";
+  isModifierHeld: boolean;
 }) {
   const [isExpanded, setIsExpanded] = useState(
     workspace.id === state.activeWorkspaceId,
@@ -221,9 +314,37 @@ function ProjectNode({
   const renameWorkspace = useAppStore((store) => store.renameWorkspace);
   const removeWorkspace = useAppStore((store) => store.removeWorkspace);
   const renameSession = useAppStore((store) => store.renameSession);
+  const archiveSession = useAppStore((store) => store.archiveSession);
   const deleteSession = useAppStore((store) => store.deleteSession);
 
   const activeSessionId = state.activeSessionId;
+
+  // Global shortcut handler for 1-9 to switch threads
+  useEffect(() => {
+    if (workspace.id !== state.activeWorkspaceId) return;
+    
+    const handleShortcut = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && /^[1-9]$/.test(e.key)) {
+        const index = parseInt(e.key, 10) - 1;
+        const visibleSessions = workspace.sessions
+          .filter((s) => !s.archivedAt)
+          .sort((a, b) => {
+            if (threadSortOrder === "created") {
+              return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+            }
+            return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+          });
+        
+        if (visibleSessions[index]) {
+          e.preventDefault();
+          selectWorkspaceSession(workspace.id, visibleSessions[index].id);
+        }
+      }
+    };
+
+    window.addEventListener("keydown", handleShortcut);
+    return () => window.removeEventListener("keydown", handleShortcut);
+  }, [workspace, state.activeWorkspaceId, selectWorkspaceSession, threadSortOrder]);
 
   const handleProjectContextMenu = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -302,9 +423,9 @@ function ProjectNode({
           className="project-actions"
           style={{ opacity: 0, transition: "opacity 0.2s" }}
         >
-          <Plus
+          <SquarePen
             size={14}
-            className="pointer"
+            className="pointer action-icon"
             onClick={(e) => {
               e.stopPropagation();
               createSession(workspace.id);
@@ -325,28 +446,39 @@ function ProjectNode({
             paddingBottom: "8px",
           }}
         >
-          {workspace.sessions.length === 0 ? (
+          {workspace.sessions.filter((s) => !s.archivedAt).length === 0 ? (
             <div
               style={{ fontSize: "0.75rem", color: "#555", padding: "4px 8px" }}
             >
               No threads yet
             </div>
           ) : (
-            workspace.sessions.map((session) => (
-              <SessionItem
-                key={session.id}
-                session={session}
-                workspace={workspace}
-                isActive={session.id === activeSessionId}
-                onSelect={() =>
-                  selectWorkspaceSession(workspace.id, session.id)
+            workspace.sessions
+              .filter((s) => !s.archivedAt)
+              .sort((a, b) => {
+                if (threadSortOrder === "created") {
+                  return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
                 }
-                onRename={(title) =>
-                  renameSession(workspace.id, session.id, title)
-                }
-                onDelete={() => deleteSession(workspace.id, session.id)}
-              />
-            ))
+                return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+              })
+              .map((session, index) => (
+                <SessionItem
+                  key={session.id}
+                  session={session}
+                  workspace={workspace}
+                  isActive={session.id === activeSessionId}
+                  isModifierHeld={isModifierHeld}
+                  shortcutKey={workspace.id === state.activeWorkspaceId && index < 9 ? String(index + 1) : undefined}
+                  onSelect={() =>
+                    selectWorkspaceSession(workspace.id, session.id)
+                  }
+                  onRename={(title) =>
+                    renameSession(workspace.id, session.id, title)
+                  }
+                  onArchive={() => archiveSession(workspace.id, session.id)}
+                  onDelete={() => deleteSession(workspace.id, session.id)}
+                />
+              ))
           )}
         </div>
       )}
@@ -373,6 +505,22 @@ function ProjectNode({
                 .session-item:hover {
                   cursor: pointer;
                 }
+                .session-item:hover .archive-btn {
+                  display: block !important;
+                }
+                .session-item:hover .session-status {
+                  display: none;
+                }
+                .archive-btn:hover {
+                  color: #fff !important;
+                }
+                .action-icon {
+                  transition: color 0.2s, filter 0.2s;
+                }
+                .action-icon:hover {
+                  color: #fff !important;
+                  filter: drop-shadow(0 0 4px rgba(255, 255, 255, 0.4));
+                }
               `}</style>
     </div>
   );
@@ -382,15 +530,21 @@ function SessionItem({
   session,
   workspace,
   isActive,
+  isModifierHeld,
+  shortcutKey,
   onSelect,
   onRename,
+  onArchive,
   onDelete,
 }: {
   session: ChatSession;
   workspace: WorkspaceRecord;
   isActive: boolean;
+  isModifierHeld?: boolean;
+  shortcutKey?: string;
   onSelect: () => void;
   onRename: (title: string) => void;
+  onArchive: () => void;
   onDelete: () => void;
 }) {
   const [contextMenu, setContextMenu] = useState<{
@@ -412,6 +566,11 @@ function SessionItem({
           const title = prompt("Enter new thread title", session.title);
           if (title) onRename(title);
         },
+      },
+      {
+        label: "Archive thread",
+        icon: <Archive size={14} />,
+        onClick: onArchive,
       },
       {
         label: "Mark unread",
@@ -475,9 +634,32 @@ function SessionItem({
         <span className="truncate" style={{ flex: 1, marginRight: "8px" }}>
           {session.title}
         </span>
-        <span style={{ fontSize: "0.65rem", color: "#555" }}>
-          {session.status === "streaming" ? "Active" : "..."}
-        </span>
+        <div className="session-actions" style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+          <span style={{ fontSize: "0.65rem", color: "#555" }} className="session-status">
+            {isModifierHeld && shortcutKey ? (
+              <span style={{ background: "rgba(255,255,255,0.1)", color: "#fff", padding: "1px 4px", borderRadius: "4px", fontFamily: "monospace", fontSize: "0.6rem" }}>
+                ⌘{shortcutKey}
+              </span>
+            ) : session.status === "streaming" ? (
+              "Active"
+            ) : (
+              formatTimeAgo(session.updatedAt)
+            )}
+          </span>
+          <Archive 
+            size={14} 
+            className="archive-btn"
+            style={{ 
+              color: "#666", 
+              display: "none",
+              cursor: "pointer"
+            }} 
+            onClick={(e) => {
+              e.stopPropagation();
+              onArchive();
+            }}
+          />
+        </div>
       </div>
       {contextMenu && (
         <ContextMenu
@@ -489,4 +671,14 @@ function SessionItem({
       )}
     </>
   );
+}
+
+function formatTimeAgo(dateStr: string) {
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const minutes = Math.floor(diff / 60000);
+  if (minutes < 1) return "Just now";
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
 }

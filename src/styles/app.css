@@ -1,30 +1,35 @@
 :root {
   color-scheme: dark;
   font-family:
-    "Inter", "SF Pro Display", "SF Pro Text", system-ui, -apple-system, sans-serif;
-  
+    "Inter",
+    "SF Pro Display",
+    "SF Pro Text",
+    system-ui,
+    -apple-system,
+    sans-serif;
+
   /* Modern Neutral Palette (picode Style) */
   --bg: #121212;
   --surface: #181818;
   --surface-elevated: #242424;
   --surface-strong: #333333;
   --line: rgba(255, 255, 255, 0.06);
-  
+
   /* Accent Colors */
   --accent: #3b82f6;
   --accent-soft: rgba(59, 130, 246, 0.1);
   --accent-glow: rgba(59, 130, 246, 0.4);
-  
+
   /* Semantic Colors */
   --success: #10b981;
   --danger: #ef4444;
   --warning: #f59e0b;
-  
+
   /* Typography */
   --text: #eaeaea;
   --text-muted: #888888;
   --text-dim: #666666;
-  
+
   /* Blur & Glass (Reduced for flatter look) */
   --glass-bg: #121212;
   --glass-border: rgba(255, 255, 255, 0.08);
@@ -56,12 +61,20 @@
   -webkit-font-smoothing: antialiased;
 }
 
-html, body, #root {
+html,
+body,
+#root {
   height: 100%;
   margin: 0;
   overflow: hidden;
   background-color: var(--bg);
   color: var(--text);
+}
+
+body {
+  transition:
+    background-color 0.18s ease,
+    color 0.18s ease;
 }
 
 /* Scrollbars */
@@ -89,6 +102,26 @@ html, body, #root {
   grid-template-columns: var(--sidebar-width) 1fr;
   height: 100vh;
   position: relative;
+  background: var(--bg);
+}
+
+.boot-shell {
+  height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background:
+    radial-gradient(circle at top, rgba(59, 130, 246, 0.08), transparent 42%),
+    var(--bg);
+}
+
+.boot-shell__mark {
+  color: rgba(234, 234, 234, 0.34);
+  font-size: 0.9rem;
+  font-weight: 600;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  user-select: none;
 }
 
 /* Sidebar Styling */
@@ -192,7 +225,11 @@ html, body, #root {
   height: 100%;
   position: relative;
   min-height: 0;
-  background: radial-gradient(circle at top right, rgba(59, 130, 246, 0.03), transparent 40%);
+  background: radial-gradient(
+    circle at top right,
+    rgba(59, 130, 246, 0.03),
+    transparent 40%
+  );
 }
 
 .main-pane__header {
@@ -303,7 +340,9 @@ html, body, #root {
 
 .composer:focus-within {
   border-color: var(--accent);
-  box-shadow: 0 12px 40px -12px rgba(0, 0, 0, 0.7), 0 0 0 1px var(--accent);
+  box-shadow:
+    0 12px 40px -12px rgba(0, 0, 0, 0.7),
+    0 0 0 1px var(--accent);
 }
 
 .composer__input-area {
@@ -402,8 +441,14 @@ html, body, #root {
 
 /* Animations */
 @keyframes slideUp {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .animate-slide-up {

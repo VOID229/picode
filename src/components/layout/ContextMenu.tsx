@@ -4,9 +4,11 @@ import { createPortal } from "react-dom";
 export interface ContextMenuItem {
   label: string;
   icon?: React.ReactNode;
-  onClick: () => void;
+  onClick?: () => void;
   variant?: "default" | "danger";
   separator?: boolean;
+  isHeader?: boolean;
+  isChecked?: boolean;
 }
 
 interface ContextMenuProps {
@@ -15,6 +17,8 @@ interface ContextMenuProps {
   items: ContextMenuItem[];
   onClose: () => void;
 }
+
+import { Check } from "lucide-react";
 
 export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
@@ -50,59 +54,84 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
     <div
       ref={menuRef}
       style={{
-        position: 'fixed',
+        position: "fixed",
         top: adjustedY,
         left: adjustedX,
         zIndex: 1000,
-        background: '#1C1C1E',
-        border: '1px solid #333',
-        borderRadius: '12px',
-        padding: '6px',
-        minWidth: '200px',
-        boxShadow: '0 12px 30px rgba(0,0,0,0.5)',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '2px',
-        animation: 'contextMenuItemFadeIn 0.1s ease-out'
+        background: "#1C1C1E",
+        border: "1px solid #333",
+        borderRadius: "12px",
+        padding: "6px",
+        minWidth: "200px",
+        boxShadow: "0 12px 30px rgba(0,0,0,0.5)",
+        display: "flex",
+        flexDirection: "column",
+        gap: "2px",
+        animation: "contextMenuItemFadeIn 0.1s ease-out",
       }}
       onContextMenu={(e) => e.preventDefault()}
     >
       {items.map((item, index) => (
         <React.Fragment key={index}>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              item.onClick();
-              onClose();
-            }}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              padding: '8px 12px',
-              borderRadius: '6px',
-              border: 'none',
-              background: 'transparent',
-              color: item.variant === 'danger' ? '#ff453a' : '#ddd',
-              fontSize: '0.9rem',
-              cursor: 'pointer',
-              textAlign: 'left',
-              transition: 'background 0.1s, color 0.1s',
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background = item.variant === 'danger' ? 'rgba(255, 69, 58, 0.15)' : '#2563eb';
-              if (item.variant !== 'danger') e.currentTarget.style.color = 'white';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = 'transparent';
-              e.currentTarget.style.color = item.variant === 'danger' ? '#ff453a' : '#ddd';
-            }}
-          >
-            <span>{item.label}</span>
-            {item.icon && <span style={{ opacity: 0.8 }}>{item.icon}</span>}
-          </button>
+          {item.isHeader ? (
+            <div
+              style={{
+                fontSize: "0.7rem",
+                fontWeight: 600,
+                color: "#666",
+                padding: "8px 12px 4px 12px",
+                textTransform: "capitalize",
+                letterSpacing: "0.02em",
+              }}
+            >
+              {item.label}
+            </div>
+          ) : (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                item.onClick?.();
+                onClose();
+              }}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "8px",
+                padding: "8px 12px",
+                borderRadius: "6px",
+                border: "none",
+                background: "transparent",
+                color: item.variant === "danger" ? "#ff453a" : "#ddd",
+                fontSize: "0.9rem",
+                cursor: "pointer",
+                textAlign: "left",
+                transition: "background 0.1s, color 0.1s",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background =
+                  item.variant === "danger"
+                    ? "rgba(255, 69, 58, 0.15)"
+                    : "#2563eb";
+                if (item.variant !== "danger")
+                  e.currentTarget.style.color = "white";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = "transparent";
+                e.currentTarget.style.color =
+                  item.variant === "danger" ? "#ff453a" : "#ddd";
+              }}
+            >
+              <div style={{ width: "16px", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                {item.isChecked && <Check size={14} />}
+              </div>
+              <span style={{ flex: 1 }}>{item.label}</span>
+              {item.icon && <span style={{ opacity: 0.8 }}>{item.icon}</span>}
+            </button>
+          )}
           {item.separator && (
-            <div style={{ height: '1px', background: '#333', margin: '4px 0' }} />
+            <div
+              style={{ height: "1px", background: "#333", margin: "4px 0" }}
+            />
           )}
         </React.Fragment>
       ))}

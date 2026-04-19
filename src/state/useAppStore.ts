@@ -28,8 +28,13 @@ import {
   renameWorkspace as renameWorkspaceCommand,
   removeWorkspace as removeWorkspaceCommand,
   renameSession as renameSessionCommand,
+  archiveSession as archiveSessionCommand,
+  restoreSession as restoreSessionCommand,
   deleteSession as deleteSessionCommand,
 } from "../lib/tauri";
+
+let initializePromise: Promise<void> | null = null;
+let hasInitialized = false;
 
 export interface CustomAction {
   id: string;
@@ -98,6 +103,8 @@ interface AppStoreState {
     session_id: string,
     title: string,
   ) => Promise<void>;
+  archiveSession: (workspace_id: string, session_id: string) => Promise<void>;
+  restoreSession: (workspace_id: string, session_id: string) => Promise<void>;
   deleteSession: (workspace_id: string, session_id: string) => Promise<void>;
   sendPrompt: (
     workspaceId: string,
@@ -175,32 +182,59 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
   pendingRuntimeInput: null,
   pendingBrowserAuth: null,
   async initialize() {
-    set({ isBootstrapping: true });
-    const payload = await bootstrapState();
-    let runtimePayload:
-      | Awaited<ReturnType<typeof bootstrapRuntime>>
-      | undefined;
-    let runtimeGlobalError: string | undefined;
-
-    try {
-      runtimePayload = await bootstrapRuntime();
-    } catch (error) {
-      runtimeGlobalError =
-        error instanceof Error ? error.message : String(error);
+    if (hasInitialized && get().state) {
+      set({ isBootstrapping: false });
+      return;
     }
 
-    set({
-      isBootstrapping: false,
-      state: {
-        ...payload.state,
-        providers: runtimePayload?.providers ?? payload.state.providers,
-      },
-      git: payload.git,
-      connectionReady: true,
-      runtimePiHome: runtimePayload?.piHome,
-      runtimeVersion: runtimePayload?.version,
-      runtimeGlobalError,
-    });
+    if (initializePromise) {
+      return initializePromise;
+    }
+
+    set({ isBootstrapping: true });
+
+    initializePromise = (async () => {
+      const payload = await bootstrapState();
+      let runtimePayload:
+        | Awaited<ReturnType<typeof bootstrapRuntime>>
+        | undefined;
+      let runtimeGlobalError: string | undefined;
+
+      try {
+        runtimePayload = await bootstrapRuntime();
+      } catch (error) {
+        runtimeGlobalError =
+          error instanceof Error ? error.message : String(error);
+      }
+
+      hasInitialized = true;
+
+      set({
+        isBootstrapping: false,
+        state: {
+          ...payload.state,
+          providers: runtimePayload?.providers ?? payload.state.providers,
+        },
+        git: payload.git,
+        connectionReady: true,
+        runtimePiHome: runtimePayload?.piHome,
+        runtimeVersion: runtimePayload?.version,
+        runtimeGlobalError,
+      });
+    })()
+      .catch((error) => {
+        set({
+          isBootstrapping: false,
+          runtimeGlobalError:
+            error instanceof Error ? error.message : String(error),
+        });
+        throw error;
+      })
+      .finally(() => {
+        initializePromise = null;
+      });
+
+    return initializePromise;
   },
   setConnectionReady(connectionReady) {
     set({ connectionReady });
@@ -308,6 +342,14 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
   },
   async renameSession(workspaceId, sessionId, title) {
     const state = await renameSessionCommand(workspaceId, sessionId, title);
+    set({ state });
+  },
+  async archiveSession(workspaceId, sessionId) {
+    const state = await archiveSessionCommand(workspaceId, sessionId);
+    set({ state });
+  },
+  async restoreSession(workspaceId, sessionId) {
+    const state = await restoreSessionCommand(workspaceId, sessionId);
     set({ state });
   },
   async deleteSession(workspaceId, sessionId) {

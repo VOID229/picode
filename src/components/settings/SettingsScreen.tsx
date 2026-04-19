@@ -1,719 +1,358 @@
-import { ArrowLeft, Monitor, Shield, Zap, Globe } from "lucide-react";
-import { useState } from "react";
+import { ArrowLeft, SlidersHorizontal, Link as LinkIcon, Archive, RotateCcw, Trash2, RefreshCw } from "lucide-react";
+import { useState, useMemo } from "react";
 import { Link } from "react-router-dom";
-import { openPath } from "../../lib/tauri";
 import { useAppStore } from "../../state/useAppStore";
-import { cn } from "../../lib/cn";
-import type { ApprovalMode } from "../../domains/types";
 
-const themes = [
-  "dark",
-  "light",
-  "catppuccin",
-  "nord",
-  "gruvbox",
-  "solarized",
-] as const;
+function Toggle({ checked }: { checked: boolean }) {
+  return (
+    <div style={{
+      width: "36px", height: "20px", borderRadius: "10px",
+      background: checked ? "#2563eb" : "#333", position: "relative", cursor: "pointer",
+      transition: "background 0.2s"
+    }}>
+      <div style={{
+        width: "16px", height: "16px", borderRadius: "50%", background: "#fff",
+        position: "absolute", top: "2px", left: checked ? "18px" : "2px",
+        transition: "left 0.2s"
+      }} />
+    </div>
+  );
+}
+
+function SettingRow({ label, description, control }: { label: React.ReactNode, description: React.ReactNode, control: React.ReactNode }) {
+  return (
+    <div className="setting-row" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 20px", borderBottom: "1px solid #222" }}>
+      <div style={{ maxWidth: "70%" }}>
+        <div style={{ fontSize: "0.9rem", fontWeight: 600, color: "#fff" }}>{label}</div>
+        <div style={{ fontSize: "0.8rem", color: "#888", marginTop: "4px", lineHeight: "1.4" }}>{description}</div>
+      </div>
+      <div>
+        {control}
+      </div>
+    </div>
+  );
+}
+
+function SettingsSection({ title, children }: { title: string, children: React.ReactNode }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+        <div style={{ width: "16px", height: "1px", background: "#333" }} />
+        <span style={{ fontSize: "0.7rem", fontWeight: 600, color: "#666", letterSpacing: "0.05em" }}>{title}</span>
+      </div>
+      <div style={{ background: "rgba(255,255,255,0.02)", border: "1px solid #222", borderRadius: "12px", overflow: "hidden" }}>
+        <div style={{ display: "flex", flexDirection: "column" }}>
+          {children}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export function SettingsScreen() {
-  const [apiKeys, setApiKeys] = useState<Record<string, string>>({});
-  const [runtimeInputValue, setRuntimeInputValue] = useState("");
-  const state = useAppStore((store) => store.state);
-  const updatePreferences = useAppStore((store) => store.updatePreferences);
-  const updateWorkspaceSettings = useAppStore(
-    (store) => store.updateWorkspaceSettings,
-  );
-  const refreshRuntimeCatalog = useAppStore(
-    (store) => store.refreshRuntimeCatalog,
-  );
-  const startProviderLogin = useAppStore((store) => store.startProviderLogin);
-  const saveProviderApiKey = useAppStore((store) => store.saveProviderApiKey);
-  const logoutProvider = useAppStore((store) => store.logoutProvider);
-  const submitRuntimeInput = useAppStore((store) => store.submitRuntimeInput);
-  const clearRuntimeUi = useAppStore((store) => store.clearRuntimeUi);
-  const pendingRuntimeInput = useAppStore((store) => store.pendingRuntimeInput);
-  const pendingBrowserAuth = useAppStore((store) => store.pendingBrowserAuth);
-  const runtimeGlobalStatus = useAppStore((store) => store.runtimeGlobalStatus);
-  const runtimeGlobalError = useAppStore((store) => store.runtimeGlobalError);
+  const [activeTab, setActiveTab] = useState("general");
 
-  if (!state) {
-    return null;
-  }
-
-  const activeWorkspace = state.workspaces.find(
-    (item) => item.id === state.activeWorkspaceId,
-  );
-
-  const cardStyle: React.CSSProperties = {
-    background: "var(--surface)",
-    border: "1px solid var(--line)",
-    borderRadius: "12px",
-    padding: "24px",
-    display: "flex",
-    flexDirection: "column",
-    gap: "20px",
-  };
-
-  const inputStyle: React.CSSProperties = {
-    background: "var(--surface-elevated)",
-    border: "1px solid var(--line)",
-    borderRadius: "8px",
-    padding: "10px 12px",
-    color: "inherit",
-    fontSize: "0.9rem",
+  const controlStyle = {
+    background: "#111",
+    color: "#fff",
+    border: "1px solid #333",
+    padding: "8px 12px",
+    borderRadius: "6px",
     outline: "none",
-    width: "100%",
+    minWidth: "160px",
+    fontSize: "0.85rem"
   };
 
-  const activeProvider = activeWorkspace
-    ? state.providers.find(
-        (provider) => provider.id === activeWorkspace.providerId,
-      )
-    : null;
+  const btnStyle = {
+    background: "transparent",
+    color: "#fff",
+    border: "1px solid #333",
+    padding: "6px 12px",
+    borderRadius: "6px", 
+    outline: "none",
+    cursor: "pointer",
+    fontSize: "0.85rem"
+  };
+
+  const state = useAppStore((store) => store.state);
+  const restoreSession = useAppStore((store) => store.restoreSession);
+  const deleteSession = useAppStore((store) => store.deleteSession);
+
+  const archivedSessions = useMemo(() => {
+    if (!state) return [];
+    const archived: Array<{ workspaceId: string, workspaceName: string, session: any }> = [];
+    state.workspaces.forEach(workspace => {
+      workspace.sessions.forEach(session => {
+        if (session.archivedAt) {
+          archived.push({
+            workspaceId: workspace.id,
+            workspaceName: workspace.name,
+            session
+          });
+        }
+      });
+    });
+    return archived.sort((a, b) => {
+      const dateA = a.session.archivedAt ? new Date(a.session.archivedAt).getTime() : 0;
+      const dateB = b.session.archivedAt ? new Date(b.session.archivedAt).getTime() : 0;
+      return dateB - dateA;
+    });
+  }, [state]);
 
   return (
-    <div
-      className="main-pane"
-      style={{ overflowY: "auto", paddingBottom: "80px" }}
-    >
-      <header className="main-pane__header">
-        <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
-          <Link className="icon-button" to="/" aria-label="Back">
-            <ArrowLeft size={18} />
-          </Link>
-          <div className="main-pane__title">
-            <h1>Settings</h1>
+    <div style={{ display: "flex", width: "100%", height: "100vh", backgroundColor: "#0a0a0a", color: "#fff" }}>
+      {/* Sidebar */}
+      <div style={{ width: "260px", borderRight: "1px solid #222", display: "flex", flexDirection: "column", backgroundColor: "#111" }}>
+        <div
+          style={{
+            height: "54px",
+            width: "100%",
+            WebkitAppRegion: "drag",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "flex-start",
+            paddingLeft: "88px",
+          } as React.CSSProperties}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: "6px", marginTop: "-16px" }}>
+            <span style={{ fontWeight: 600, color: "#fff", fontSize: "1.05rem" }}>
+              picode
+            </span>
+            <span style={{ 
+              fontSize: "0.6rem", 
+              fontWeight: 700, 
+              letterSpacing: "0.05em",
+              color: "#888", 
+              background: "rgba(255,255,255,0.08)", 
+              padding: "2px 6px", 
+              borderRadius: "10px",
+              marginTop: "1px"
+            }}>
+              ALPHA
+            </span>
           </div>
         </div>
-      </header>
 
-      <div
-        style={{
-          maxWidth: "800px",
-          margin: "40px auto",
-          width: "100%",
-          padding: "0 24px",
-          display: "flex",
-          flexDirection: "column",
-          gap: "32px",
-        }}
-      >
-        <section style={cardStyle}>
-          <div
+        <div style={{ padding: "16px 12px", display: "flex", flexDirection: "column", gap: "4px" }}>
+          <div 
+            onClick={() => setActiveTab("general")}
+            style={{ display: "flex", alignItems: "center", gap: "8px", padding: "8px 12px", borderRadius: "6px", background: activeTab === "general" ? "rgba(255,255,255,0.08)" : "transparent", color: activeTab === "general" ? "#fff" : "#888", cursor: "pointer", transition: "background 0.2s, color 0.2s" }}
+            onMouseEnter={(e) => { if(activeTab !== "general") { e.currentTarget.style.background = "#222"; e.currentTarget.style.color = "#ccc"; } }}
+            onMouseLeave={(e) => { if(activeTab !== "general") { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "#888"; } }}
+          >
+            <SlidersHorizontal size={14} />
+            <span style={{ fontSize: "0.85rem", fontWeight: 500 }}>General</span>
+          </div>
+          <div 
+            onClick={() => setActiveTab("connections")}
+            style={{ display: "flex", alignItems: "center", gap: "8px", padding: "8px 12px", borderRadius: "6px", background: activeTab === "connections" ? "rgba(255,255,255,0.08)" : "transparent", color: activeTab === "connections" ? "#fff" : "#888", cursor: "pointer", transition: "background 0.2s, color 0.2s" }}
+            onMouseEnter={(e) => { if(activeTab !== "connections") { e.currentTarget.style.background = "#222"; e.currentTarget.style.color = "#ccc"; } }}
+            onMouseLeave={(e) => { if(activeTab !== "connections") { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "#888"; } }}
+          >
+            <LinkIcon size={14} />
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flex: 1 }}>
+              <span style={{ fontSize: "0.85rem", fontWeight: 500 }}>Connections</span>
+              <span style={{ fontSize: "0.55rem", fontWeight: 700, letterSpacing: "0.05em", color: "#888", background: "rgba(255,255,255,0.08)", padding: "2px 6px", borderRadius: "10px", textTransform: "uppercase" }}>Coming Soon</span>
+            </div>
+          </div>
+          <div 
+            onClick={() => setActiveTab("archive")}
+            style={{ display: "flex", alignItems: "center", gap: "8px", padding: "8px 12px", borderRadius: "6px", background: activeTab === "archive" ? "rgba(255,255,255,0.08)" : "transparent", color: activeTab === "archive" ? "#fff" : "#888", cursor: "pointer", transition: "background 0.2s, color 0.2s" }}
+            onMouseEnter={(e) => { if(activeTab !== "archive") { e.currentTarget.style.background = "#222"; e.currentTarget.style.color = "#ccc"; } }}
+            onMouseLeave={(e) => { if(activeTab !== "archive") { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "#888"; } }}
+          >
+            <Archive size={14} />
+            <span style={{ fontSize: "0.85rem", fontWeight: 500 }}>Archive</span>
+          </div>
+        </div>
+
+        <div style={{ marginTop: "auto", padding: "16px" }}>
+          <Link
+            to="/"
             style={{
               display: "flex",
               alignItems: "center",
-              gap: "10px",
-              color: "var(--text-dim)",
-              marginBottom: "4px",
-            }}
-          >
-            <Monitor size={18} />
-            <h2 style={{ fontSize: "1rem", margin: 0, color: "var(--text)" }}>
-              Appearance
-            </h2>
-          </div>
-          <p
-            style={{
-              margin: 0,
-              fontSize: "0.9rem",
-              color: "var(--text-muted)",
-            }}
-          >
-            Choose your preferred interface theme.
-          </p>
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fill, minmax(120px, 1fr))",
               gap: "8px",
+              color: "#888",
+              textDecoration: "none",
+              fontSize: "0.85rem",
+              padding: "6px 8px",
+              borderRadius: "6px",
+              transition: "background 0.2s, color 0.2s"
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = "#222";
+              e.currentTarget.style.color = "#ccc";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = "transparent";
+              e.currentTarget.style.color = "#888";
             }}
           >
-            {themes.map((theme) => (
-              <button
-                key={theme}
-                className={cn(
-                  "nav-item",
-                  state.preferences.theme === theme && "nav-item--active",
-                )}
-                style={{
-                  justifyContent: "center",
-                  textTransform: "capitalize",
-                }}
-                onClick={() =>
-                  updatePreferences({ ...state.preferences, theme })
-                }
-              >
-                {theme}
-              </button>
-            ))}
-          </div>
-        </section>
+            <ArrowLeft size={16} />
+            Back
+          </Link>
+        </div>
+      </div>
 
-        {activeWorkspace && (
-          <section style={cardStyle}>
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "10px",
-                color: "var(--text-dim)",
-                marginBottom: "4px",
-              }}
-            >
-              <Zap size={18} />
-              <h2 style={{ fontSize: "1rem", margin: 0, color: "var(--text)" }}>
-                Runtime Providers
-              </h2>
-            </div>
+      {/* Main Content */}
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
+        <div style={{ padding: "0 24px", height: "54px", minHeight: "54px", display: "flex", justifyContent: "space-between", alignItems: "center", WebkitAppRegion: "drag", borderBottom: "1px solid #222" } as React.CSSProperties}>
+          <div style={{ fontSize: "0.85rem", color: "#888" }}>Settings</div>
+          <button style={{ display: "flex", alignItems: "center", gap: "6px", background: "transparent", border: "1px solid #333", color: "#ccc", padding: "6px 12px", borderRadius: "6px", fontSize: "0.75rem", cursor: "pointer", WebkitAppRegion: "no-drag" } as React.CSSProperties}>
+            <RotateCcw size={12} />
+            Restore defaults
+          </button>
+        </div>
+        
+        <div style={{ flex: 1, overflowY: "auto", padding: "40px", display: "flex", flexDirection: "column", alignItems: "center" }}>
+          <div style={{ width: "100%", maxWidth: "800px", display: "flex", flexDirection: "column", gap: "40px" }}>
+            
+            {activeTab === "general" && (
+              <>
+                <SettingsSection title="GENERAL">
+                  <SettingRow 
+                    label="Theme" 
+                    description="Choose how picode looks across the app." 
+                    control={<select style={controlStyle} defaultValue="System"><option>System</option><option>Dark</option><option>Light</option></select>} 
+                  />
+                  <SettingRow 
+                    label="Time format" 
+                    description="System default follows your browser or OS clock preference." 
+                    control={<select style={controlStyle} defaultValue="System default"><option>System default</option><option>12-hour</option><option>24-hour</option></select>} 
+                  />
+                  <SettingRow 
+                    label="Diff line wrapping" 
+                    description="Set the default wrap state when the diff panel opens." 
+                    control={<Toggle checked={false} />} 
+                  />
+                  <SettingRow 
+                    label="Assistant output" 
+                    description="Show token-by-token output while a response is in progress." 
+                    control={<Toggle checked={false} />} 
+                  />
+                  <SettingRow 
+                    label="New threads" 
+                    description="Pick the default workspace mode for newly created draft threads." 
+                    control={<select style={controlStyle} defaultValue="Local"><option>Local</option><option>Cloud</option></select>} 
+                  />
+                  <SettingRow 
+                    label="Add project starts in" 
+                    description='Leave empty to use "~/" when the Add Project browser opens.' 
+                    control={<input style={controlStyle} defaultValue="~/" />} 
+                  />
+                  <SettingRow 
+                    label="Archive confirmation" 
+                    description="Require a second click on the inline archive action before a thread is archived." 
+                    control={<Toggle checked={false} />} 
+                  />
+                  <SettingRow 
+                    label="Delete confirmation" 
+                    description="Ask before deleting a thread and its chat history." 
+                    control={<Toggle checked={true} />} 
+                  />
+                  <SettingRow 
+                    label="Text generation model" 
+                    description="Configures the model used for suggested changes over files or workspaces." 
+                    control={<select style={controlStyle} defaultValue="High"><option>High</option><option>Low</option></select>} 
+                  />
+                </SettingsSection>
 
-            {(runtimeGlobalStatus || runtimeGlobalError) && (
-              <div
-                style={{
-                  display: "grid",
-                  gap: "8px",
-                  padding: "14px 16px",
-                  borderRadius: "10px",
-                  background: "var(--surface-elevated)",
-                  border: "1px solid var(--line)",
-                }}
-              >
-                {runtimeGlobalStatus && (
-                  <div
-                    style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}
-                  >
-                    {runtimeGlobalStatus}
+                <SettingsSection title="ADVANCED">
+                  <SettingRow 
+                    label="Keybindings" 
+                    description={
+                      <div style={{ marginTop: "4px" }}>
+                        Open the persisted `keybindings.json` file to edit advanced bindings directly.
+                        <div style={{ fontFamily: "monospace", color: "#888", marginTop: "4px", marginBottom: "4px" }}>/Users/gal/.picode/userdata/keybindings.json</div>
+                        Opens in your preferred editor.
+                      </div>
+                    } 
+                    control={<button style={btnStyle}>Open file</button>} 
+                  />
+                </SettingsSection>
+
+                <SettingsSection title="ABOUT">
+                  <SettingRow 
+                    label={<>Version <span style={{ fontFamily: "monospace", color: "#888", marginLeft: "6px", fontWeight: 400 }}>0.0.20</span></>} 
+                    description="Current version of the application." 
+                    control={<button style={btnStyle}>Check for Updates</button>} 
+                  />
+                  <SettingRow 
+                    label="Update track" 
+                    description="Stable follows full releases. Nightly follows the nightly desktop channel and can switch back to stable immediately." 
+                    control={<select style={controlStyle} defaultValue="Nightly"><option>Stable</option><option>Nightly</option></select>} 
+                  />
+                  <SettingRow 
+                    label="Diagnostics" 
+                    description={
+                      <div style={{ marginTop: "4px" }}>
+                        Local trace file.
+                        <div style={{ fontFamily: "monospace", color: "#888", marginTop: "4px" }}>/Users/gal/.picode/userdata/logs</div>
+                      </div>
+                    } 
+                    control={<button style={btnStyle}>Open logs folder</button>} 
+                  />
+                </SettingsSection>
+              </>
+            )}
+
+            {activeTab === "connections" && (
+              <div style={{ color: "#888", fontSize: "0.9rem", textAlign: "center", padding: "40px" }}>
+                Connections are configured elsewhere.
+              </div>
+            )}
+
+            {activeTab === "archive" && (
+              <div style={{ width: "100%", display: "flex", flexDirection: "column", gap: "20px" }}>
+                <div style={{ fontSize: "1.2rem", fontWeight: 600, marginBottom: "8px" }}>Archived Threads</div>
+                {archivedSessions.length === 0 ? (
+                  <div style={{ color: "#888", fontSize: "0.9rem", textAlign: "center", padding: "40px", background: "rgba(255,255,255,0.02)", border: "1px dashed #333", borderRadius: "12px" }}>
+                    No archived threads found.
                   </div>
-                )}
-                {runtimeGlobalError && (
-                  <div style={{ fontSize: "0.85rem", color: "#f87171" }}>
-                    {runtimeGlobalError}
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: "1px", background: "#222", border: "1px solid #222", borderRadius: "12px", overflow: "hidden" }}>
+                    {archivedSessions.map(({ workspaceId, workspaceName, session }) => (
+                      <div key={session.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 20px", background: "#0f0f0f" }}>
+                        <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                          <div style={{ fontSize: "0.9rem", fontWeight: 500, color: "#fff" }}>{session.title}</div>
+                          <div style={{ fontSize: "0.75rem", color: "#666" }}>{workspaceName} • Archived on {new Date(session.archivedAt).toLocaleDateString()}</div>
+                        </div>
+                        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                          <button 
+                            onClick={() => restoreSession(workspaceId, session.id)}
+                            style={{ ...btnStyle, display: "flex", alignItems: "center", gap: "6px", borderColor: "#333", padding: "6px 10px" }}
+                          >
+                            <RefreshCw size={14} />
+                            Restore
+                          </button>
+                          <button 
+                            onClick={() => {
+                              if (confirm(`Delete "${session.title}" permanently?`)) {
+                                deleteSession(workspaceId, session.id);
+                              }
+                            }}
+                            style={{ ...btnStyle, display: "flex", alignItems: "center", gap: "6px", borderColor: "#333", color: "#f87171", padding: "6px 10px" }}
+                          >
+                            <Trash2 size={14} />
+                            Delete
+                          </button>
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>
             )}
 
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "1fr 1fr",
-                gap: "20px",
-              }}
-            >
-              <label style={{ display: "grid", gap: "8px" }}>
-                <span style={{ fontSize: "0.85rem", fontWeight: 600 }}>
-                  Active Provider
-                </span>
-                <select
-                  style={inputStyle}
-                  value={activeWorkspace.providerId}
-                  onChange={(event) => {
-                    const provider = state.providers.find(
-                      (item) => item.id === event.target.value,
-                    );
-                    void updateWorkspaceSettings({
-                      workspaceId: activeWorkspace.id,
-                      approvalMode: activeWorkspace.approvalMode,
-                      providerId: event.target.value,
-                      modelId:
-                        provider?.models.find((model) => model.available)?.id ??
-                        provider?.models[0]?.id ??
-                        activeWorkspace.modelId,
-                      effort: activeWorkspace.effort,
-                      fastMode: activeWorkspace.fastMode,
-                      policy: activeWorkspace.policy,
-                    });
-                  }}
-                >
-                  {state.providers.map((provider) => (
-                    <option key={provider.id} value={provider.id}>
-                      {provider.label}
-                      {provider.available ? "" : " (setup required)"}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label style={{ display: "grid", gap: "8px" }}>
-                <span style={{ fontSize: "0.85rem", fontWeight: 600 }}>
-                  Active Model
-                </span>
-                <select
-                  style={inputStyle}
-                  value={activeWorkspace.modelId}
-                  onChange={(event) =>
-                    void updateWorkspaceSettings({
-                      workspaceId: activeWorkspace.id,
-                      approvalMode: activeWorkspace.approvalMode,
-                      providerId: activeWorkspace.providerId,
-                      modelId: event.target.value,
-                      effort: activeWorkspace.effort,
-                      fastMode: activeWorkspace.fastMode,
-                      policy: activeWorkspace.policy,
-                    })
-                  }
-                >
-                  {(activeProvider?.models ?? []).map((model) => (
-                    <option key={model.id} value={model.id}>
-                      {model.label}
-                      {model.available ? "" : " (unavailable)"}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-
-            <div style={{ display: "grid", gap: "16px" }}>
-              {state.providers.map((provider) => {
-                const isActiveProvider =
-                  activeWorkspace.providerId === provider.id;
-                const browserStep =
-                  pendingBrowserAuth?.providerId === provider.id;
-                const inputStep =
-                  pendingRuntimeInput?.providerId === provider.id;
-
-                return (
-                  <div
-                    key={provider.id}
-                    style={{
-                      display: "grid",
-                      gap: "14px",
-                      padding: "18px",
-                      borderRadius: "12px",
-                      background: "var(--surface-elevated)",
-                      border: `1px solid ${
-                        isActiveProvider ? "var(--accent)" : "var(--line)"
-                      }`,
-                    }}
-                  >
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "space-between",
-                        gap: "12px",
-                      }}
-                    >
-                      <div style={{ display: "grid", gap: "6px" }}>
-                        <div
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            gap: "10px",
-                          }}
-                        >
-                          <div style={{ fontWeight: 600 }}>
-                            {provider.label}
-                          </div>
-                          <span
-                            style={{
-                              fontSize: "0.72rem",
-                              textTransform: "uppercase",
-                              letterSpacing: "0.08em",
-                              color: provider.available
-                                ? "#4ade80"
-                                : "var(--text-muted)",
-                            }}
-                          >
-                            {provider.status.replaceAll("_", " ")}
-                          </span>
-                        </div>
-                        {provider.reason && (
-                          <div
-                            style={{
-                              fontSize: "0.82rem",
-                              color: "var(--text-muted)",
-                            }}
-                          >
-                            {provider.reason}
-                          </div>
-                        )}
-                      </div>
-                      <button
-                        className="nav-item"
-                        style={{ justifyContent: "center" }}
-                        onClick={() => void refreshRuntimeCatalog()}
-                      >
-                        Refresh
-                      </button>
-                    </div>
-
-                    <div
-                      style={{
-                        display: "flex",
-                        flexWrap: "wrap",
-                        gap: "8px",
-                      }}
-                    >
-                      {provider.models.map((model) => (
-                        <span
-                          key={model.id}
-                          style={{
-                            padding: "6px 10px",
-                            borderRadius: "999px",
-                            fontSize: "0.78rem",
-                            border: "1px solid var(--line)",
-                            color: model.available
-                              ? "var(--text)"
-                              : "var(--text-muted)",
-                          }}
-                        >
-                          {model.label}
-                        </span>
-                      ))}
-                    </div>
-
-                    {provider.authKind === "oauth" && (
-                      <div
-                        style={{
-                          display: "flex",
-                          gap: "10px",
-                          flexWrap: "wrap",
-                        }}
-                      >
-                        <button
-                          className="nav-item"
-                          style={{ justifyContent: "center" }}
-                          onClick={() => void startProviderLogin(provider.id)}
-                        >
-                          {provider.available ? "Reconnect" : "Connect"}
-                        </button>
-                        {provider.available && (
-                          <button
-                            className="nav-item"
-                            style={{ justifyContent: "center" }}
-                            onClick={() => void logoutProvider(provider.id)}
-                          >
-                            Disconnect
-                          </button>
-                        )}
-                      </div>
-                    )}
-
-                    {provider.authKind === "api-key" && (
-                      <div
-                        style={{
-                          display: "flex",
-                          gap: "10px",
-                          flexWrap: "wrap",
-                        }}
-                      >
-                        <input
-                          style={{ ...inputStyle, flex: 1, minWidth: "240px" }}
-                          type="password"
-                          placeholder={`${provider.label} API key`}
-                          value={apiKeys[provider.id] ?? ""}
-                          onChange={(event) =>
-                            setApiKeys((current) => ({
-                              ...current,
-                              [provider.id]: event.target.value,
-                            }))
-                          }
-                        />
-                        <button
-                          className="nav-item"
-                          style={{ justifyContent: "center" }}
-                          onClick={() =>
-                            void saveProviderApiKey(
-                              provider.id,
-                              apiKeys[provider.id] ?? "",
-                            )
-                          }
-                        >
-                          Save Key
-                        </button>
-                        {provider.available && (
-                          <button
-                            className="nav-item"
-                            style={{ justifyContent: "center" }}
-                            onClick={() => void logoutProvider(provider.id)}
-                          >
-                            Remove Key
-                          </button>
-                        )}
-                      </div>
-                    )}
-
-                    {browserStep && (
-                      <div
-                        style={{
-                          display: "grid",
-                          gap: "10px",
-                          padding: "14px",
-                          borderRadius: "10px",
-                          border: "1px solid var(--line)",
-                        }}
-                      >
-                        <div
-                          style={{
-                            fontSize: "0.85rem",
-                            color: "var(--text-muted)",
-                          }}
-                        >
-                          {pendingBrowserAuth.instructions ??
-                            `Open the ${provider.label} login flow in your browser.`}
-                        </div>
-                        <div
-                          style={{
-                            display: "flex",
-                            gap: "10px",
-                            flexWrap: "wrap",
-                          }}
-                        >
-                          <button
-                            className="nav-item"
-                            style={{ justifyContent: "center" }}
-                            onClick={() =>
-                              void openPath(pendingBrowserAuth.url)
-                            }
-                          >
-                            Open Browser
-                          </button>
-                          <button
-                            className="nav-item"
-                            style={{ justifyContent: "center" }}
-                            onClick={() => clearRuntimeUi()}
-                          >
-                            Hide
-                          </button>
-                        </div>
-                      </div>
-                    )}
-
-                    {inputStep && (
-                      <div
-                        style={{
-                          display: "grid",
-                          gap: "10px",
-                          padding: "14px",
-                          borderRadius: "10px",
-                          border: "1px solid var(--line)",
-                        }}
-                      >
-                        <div style={{ display: "grid", gap: "6px" }}>
-                          <div style={{ fontWeight: 600 }}>
-                            {pendingRuntimeInput.title}
-                          </div>
-                          <div
-                            style={{
-                              fontSize: "0.85rem",
-                              color: "var(--text-muted)",
-                            }}
-                          >
-                            {pendingRuntimeInput.message}
-                          </div>
-                        </div>
-                        <input
-                          style={inputStyle}
-                          placeholder={pendingRuntimeInput.placeholder}
-                          value={runtimeInputValue}
-                          onChange={(event) =>
-                            setRuntimeInputValue(event.target.value)
-                          }
-                        />
-                        <div
-                          style={{
-                            display: "flex",
-                            gap: "10px",
-                            flexWrap: "wrap",
-                          }}
-                        >
-                          <button
-                            className="nav-item"
-                            style={{ justifyContent: "center" }}
-                            onClick={() => {
-                              void submitRuntimeInput({
-                                requestId: pendingRuntimeInput.requestId,
-                                value: runtimeInputValue,
-                              });
-                              setRuntimeInputValue("");
-                            }}
-                          >
-                            Submit
-                          </button>
-                          <button
-                            className="nav-item"
-                            style={{ justifyContent: "center" }}
-                            onClick={() => {
-                              void submitRuntimeInput({
-                                requestId: pendingRuntimeInput.requestId,
-                                cancelled: true,
-                              });
-                              setRuntimeInputValue("");
-                            }}
-                          >
-                            Cancel
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </section>
-        )}
-
-        {activeWorkspace && (
-          <section style={cardStyle}>
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "10px",
-                color: "var(--text-dim)",
-                marginBottom: "4px",
-              }}
-            >
-              <Shield size={18} />
-              <h2 style={{ fontSize: "1rem", margin: 0, color: "var(--text)" }}>
-                Workspace Policy: {activeWorkspace.name}
-              </h2>
-            </div>
-
-            <div style={{ display: "grid", gap: "24px" }}>
-              <label style={{ display: "grid", gap: "8px" }}>
-                <span style={{ fontSize: "0.85rem", fontWeight: 600 }}>
-                  Approval Mode
-                </span>
-                <select
-                  style={inputStyle}
-                  value={activeWorkspace.approvalMode}
-                  onChange={(event) =>
-                    void updateWorkspaceSettings({
-                      workspaceId: activeWorkspace.id,
-                      approvalMode: event.target.value as ApprovalMode,
-                      providerId: activeWorkspace.providerId,
-                      modelId: activeWorkspace.modelId,
-                      policy: activeWorkspace.policy,
-                    })
-                  }
-                >
-                  <option value="supervised">Supervised (Recommended)</option>
-                  <option value="auto-accept-edits">Auto-Accept Edits</option>
-                  <option value="full-access">Full Access (Aventurous)</option>
-                </select>
-              </label>
-
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "1fr 1fr",
-                  gap: "20px",
-                }}
-              >
-                <label style={{ display: "grid", gap: "8px" }}>
-                  <span style={{ fontSize: "0.85rem", fontWeight: 600 }}>
-                    Allowed Paths
-                  </span>
-                  <textarea
-                    style={{
-                      ...inputStyle,
-                      minHeight: "100px",
-                      resize: "vertical",
-                    }}
-                    placeholder="/path/to/project"
-                    value={activeWorkspace.policy.allowedPaths.join("\n")}
-                    onChange={(event) =>
-                      void updateWorkspaceSettings({
-                        workspaceId: activeWorkspace.id,
-                        approvalMode: activeWorkspace.approvalMode,
-                        providerId: activeWorkspace.providerId,
-                        modelId: activeWorkspace.modelId,
-                        policy: {
-                          ...activeWorkspace.policy,
-                          allowedPaths: event.target.value
-                            .split("\n")
-                            .map((i) => i.trim())
-                            .filter(Boolean),
-                        },
-                      })
-                    }
-                  />
-                </label>
-                <label style={{ display: "grid", gap: "8px" }}>
-                  <span style={{ fontSize: "0.85rem", fontWeight: 600 }}>
-                    Allowed Commands
-                  </span>
-                  <textarea
-                    style={{
-                      ...inputStyle,
-                      minHeight: "100px",
-                      resize: "vertical",
-                    }}
-                    placeholder="npm start"
-                    value={activeWorkspace.policy.allowedCommands.join("\n")}
-                    onChange={(event) =>
-                      void updateWorkspaceSettings({
-                        workspaceId: activeWorkspace.id,
-                        approvalMode: activeWorkspace.approvalMode,
-                        providerId: activeWorkspace.providerId,
-                        modelId: activeWorkspace.modelId,
-                        policy: {
-                          ...activeWorkspace.policy,
-                          allowedCommands: event.target.value
-                            .split("\n")
-                            .map((i) => i.trim())
-                            .filter(Boolean),
-                        },
-                      })
-                    }
-                  />
-                </label>
-              </div>
-
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  padding: "16px",
-                  background: "var(--surface-elevated)",
-                  borderRadius: "8px",
-                }}
-              >
-                <div
-                  style={{ display: "flex", alignItems: "center", gap: "12px" }}
-                >
-                  <Globe size={18} className="text-dim" />
-                  <div>
-                    <div style={{ fontSize: "0.9rem", fontWeight: 600 }}>
-                      Network Access
-                    </div>
-                    <div
-                      style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}
-                    >
-                      Allow Pi to make external web requests
-                    </div>
-                  </div>
-                </div>
-                <input
-                  type="checkbox"
-                  style={{
-                    width: "20px",
-                    height: "20px",
-                    cursor: "pointer",
-                    accentColor: "var(--accent)",
-                  }}
-                  checked={activeWorkspace.policy.networkEnabled}
-                  onChange={(event) =>
-                    void updateWorkspaceSettings({
-                      workspaceId: activeWorkspace.id,
-                      approvalMode: activeWorkspace.approvalMode,
-                      providerId: activeWorkspace.providerId,
-                      modelId: activeWorkspace.modelId,
-                      policy: {
-                        ...activeWorkspace.policy,
-                        networkEnabled: event.target.checked,
-                      },
-                    })
-                  }
-                />
-              </div>
-            </div>
-          </section>
-        )}
+          </div>
+        </div>
       </div>
+      <style>{`
+        .setting-row:last-child {
+          border-bottom: none !important;
+        }
+      `}</style>
     </div>
   );
 }

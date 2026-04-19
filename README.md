@@ -48,6 +48,14 @@ Build desktop packages:
 bun run tauri:build
 ```
 
+Generate a macOS installer DMG:
+
+```bash
+bun run dmg
+```
+
+This builds `picode.app`, packages it into a `.dmg`, and prints the final paths. Install by opening the DMG and dragging `picode.app` into `Applications`.
+
 Current packaging targets in `tauri.conf.json` are:
 
 - macOS: `dmg`
