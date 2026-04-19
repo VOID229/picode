@@ -323,6 +323,20 @@ function ProjectNode({
 
   const activeSessionId = state.activeSessionId;
 
+  const [selectedSessionIds, setSelectedSessionIds] = useState<Set<string>>(new Set());
+  const [lastSelectedSessionId, setLastSelectedSessionId] = useState<string | null>(null);
+
+  const visibleSessions = useMemo(() => {
+    return workspace.sessions
+      .filter((s) => !s.archivedAt)
+      .sort((a, b) => {
+        if (threadSortOrder === "created") {
+          return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+        }
+        return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+      });
+  }, [workspace.sessions, threadSortOrder]);
+
   // Global shortcut handler for 1-9 to switch threads
   useEffect(() => {
     if (workspace.id !== state.activeWorkspaceId) return;
@@ -330,15 +344,6 @@ function ProjectNode({
     const handleShortcut = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && /^[1-9]$/.test(e.key)) {
         const index = parseInt(e.key, 10) - 1;
-        const visibleSessions = workspace.sessions
-          .filter((s) => !s.archivedAt)
-          .sort((a, b) => {
-            if (threadSortOrder === "created") {
-              return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-            }
-            return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
-          });
-        
         if (visibleSessions[index]) {
           e.preventDefault();
           selectWorkspaceSession(workspace.id, visibleSessions[index].id);
@@ -348,7 +353,7 @@ function ProjectNode({
 
     window.addEventListener("keydown", handleShortcut);
     return () => window.removeEventListener("keydown", handleShortcut);
-  }, [workspace, state.activeWorkspaceId, selectWorkspaceSession, threadSortOrder]);
+  }, [workspace.id, state.activeWorkspaceId, selectWorkspaceSession, visibleSessions]);
 
   const handleProjectContextMenu = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -457,39 +462,75 @@ function ProjectNode({
             paddingBottom: "8px",
           }}
         >
-          {workspace.sessions.filter((s) => !s.archivedAt).length === 0 ? (
+          {visibleSessions.length === 0 ? (
             <div
               style={{ fontSize: "0.75rem", color: "#555", padding: "4px 8px" }}
             >
               No threads yet
             </div>
           ) : (
-            workspace.sessions
-              .filter((s) => !s.archivedAt)
-              .sort((a, b) => {
-                if (threadSortOrder === "created") {
-                  return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-                }
-                return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
-              })
-              .map((session, index) => (
+            visibleSessions.map((session, index) => {
+              const isSelected = selectedSessionIds.has(session.id);
+              return (
                 <SessionItem
                   key={session.id}
                   session={session}
                   workspace={workspace}
                   isActive={session.id === activeSessionId}
+                  isSelected={isSelected}
+                  selectedCount={selectedSessionIds.size}
                   isModifierHeld={isModifierHeld}
                   shortcutKey={workspace.id === state.activeWorkspaceId && index < 9 ? String(index + 1) : undefined}
-                  onSelect={() =>
-                    selectWorkspaceSession(workspace.id, session.id)
-                  }
+                  onSelect={(e) => {
+                    if (e.metaKey || e.ctrlKey) {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      const newSel = new Set(selectedSessionIds);
+                      if (newSel.has(session.id)) {
+                        newSel.delete(session.id);
+                      } else {
+                        newSel.add(session.id);
+                      }
+                      setSelectedSessionIds(newSel);
+                      setLastSelectedSessionId(session.id);
+                    } else if (e.shiftKey && lastSelectedSessionId) {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      const currentIndex = visibleSessions.findIndex(s => s.id === session.id);
+                      const lastIndex = visibleSessions.findIndex(s => s.id === lastSelectedSessionId);
+                      if (currentIndex !== -1 && lastIndex !== -1) {
+                        const start = Math.min(currentIndex, lastIndex);
+                        const end = Math.max(currentIndex, lastIndex);
+                        const newSel = new Set(selectedSessionIds);
+                        for (let i = start; i <= end; i++) {
+                          newSel.add(visibleSessions[i].id);
+                        }
+                        setSelectedSessionIds(newSel);
+                      }
+                    } else {
+                      setSelectedSessionIds(new Set([session.id]));
+                      setLastSelectedSessionId(session.id);
+                      selectWorkspaceSession(workspace.id, session.id);
+                    }
+                  }}
+                  onClearSelection={() => {
+                    setSelectedSessionIds(new Set([session.id]));
+                    setLastSelectedSessionId(session.id);
+                  }}
                   onRename={(title) =>
                     renameSession(workspace.id, session.id, title)
                   }
                   onArchive={() => archiveSession(workspace.id, session.id)}
                   onDelete={() => deleteSession(workspace.id, session.id)}
+                  onDeleteMultiple={async () => {
+                    for (const id of Array.from(selectedSessionIds)) {
+                      await deleteSession(workspace.id, id);
+                    }
+                    setSelectedSessionIds(new Set());
+                  }}
                 />
-              ))
+              )
+            })
           )}
         </div>
       )}
@@ -553,22 +594,30 @@ function SessionItem({
   session,
   workspace,
   isActive,
+  isSelected,
+  selectedCount,
   isModifierHeld,
   shortcutKey,
   onSelect,
+  onClearSelection,
   onRename,
   onArchive,
   onDelete,
+  onDeleteMultiple,
 }: {
   session: ChatSession;
   workspace: WorkspaceRecord;
   isActive: boolean;
+  isSelected: boolean;
+  selectedCount: number;
   isModifierHeld?: boolean;
   shortcutKey?: string;
-  onSelect: () => void;
+  onSelect: (e: React.MouseEvent) => void;
+  onClearSelection: () => void;
   onRename: (title: string) => void;
   onArchive: () => void;
   onDelete: () => void;
+  onDeleteMultiple: () => void;
 }) {
   const [contextMenu, setContextMenu] = useState<{
     x: number;
@@ -578,11 +627,38 @@ function SessionItem({
 
   const handleContextMenu = (e: React.MouseEvent) => {
     e.preventDefault();
+    if (!isSelected) {
+      onClearSelection();
+    }
     setContextMenu({ x: e.clientX, y: e.clientY });
   };
 
-  const menuItems = useMemo<ContextMenuItem[]>(
-    () => [
+  const menuItems = useMemo<ContextMenuItem[]>(() => {
+    if (selectedCount > 1 && isSelected) {
+      return [
+        {
+          label: `Mark unread (${selectedCount})`,
+          onClick: () => console.log("Mark unread not implemented"),
+        },
+        {
+          label: `Delete (${selectedCount})`,
+          icon: <Trash2 size={14} />,
+          variant: "danger",
+          separator: true,
+          onClick: async () => {
+            const { ask } = await import('@tauri-apps/plugin-dialog');
+            const confirmed = await ask(`Are you sure you want to delete ${selectedCount} threads?`, {
+              title: 'Delete Threads',
+              kind: 'warning',
+            });
+            if (confirmed) {
+              onDeleteMultiple();
+            }
+          },
+        },
+      ];
+    }
+    return [
       {
         label: "Rename thread",
         icon: <Edit2 size={14} />,
@@ -631,9 +707,10 @@ function SessionItem({
           }
         },
       },
-    ],
-    [session, workspace, onRename, onDelete],
-  );
+    ];
+  }, [session, workspace, isSelected, selectedCount, onRename, onArchive, onDelete, onDeleteMultiple]);
+
+  const isMultiSelected = isSelected && selectedCount > 1;
 
   return (
     <>
@@ -642,26 +719,35 @@ function SessionItem({
         onContextMenu={handleContextMenu}
         className="session-item"
         style={{
+          userSelect: "none",
           padding: "6px 8px",
           borderRadius: "6px",
-          color: isActive ? "#fff" : "#888",
-          background: isActive ? "rgba(255,255,255,0.05)" : "transparent",
+          color: isMultiSelected ? "#fff" : (isActive ? "#fff" : "#888"),
+          background: isMultiSelected ? "#274377" : (isActive ? "rgba(255,255,255,0.05)" : "transparent"),
           display: "flex",
           justifyContent: "space-between",
           alignItems: "center",
           transition: "background 0.2s, color 0.2s",
         }}
         onMouseEnter={(e) => {
-          e.currentTarget.style.background = isActive
-            ? "rgba(255,255,255,0.08)"
-            : "#222";
-          if (!isActive) e.currentTarget.style.color = "#ccc";
+          if (isMultiSelected) {
+            e.currentTarget.style.background = "#2a4880";
+          } else {
+            e.currentTarget.style.background = isActive
+              ? "rgba(255,255,255,0.08)"
+              : "#222";
+            if (!isActive) e.currentTarget.style.color = "#ccc";
+          }
         }}
         onMouseLeave={(e) => {
-          e.currentTarget.style.background = isActive
-            ? "rgba(255,255,255,0.05)"
-            : "transparent";
-          if (!isActive) e.currentTarget.style.color = "#888";
+          if (isMultiSelected) {
+            e.currentTarget.style.background = "#274377";
+          } else {
+            e.currentTarget.style.background = isActive
+              ? "rgba(255,255,255,0.05)"
+              : "transparent";
+            if (!isActive) e.currentTarget.style.color = "#888";
+          }
         }}
       >
         <span className="truncate" style={{ flex: 1, marginRight: "8px" }}>

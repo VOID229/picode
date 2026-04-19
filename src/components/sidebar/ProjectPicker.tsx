@@ -400,24 +400,24 @@ export function ProjectPicker({ onClose, onSelect }: ProjectPickerProps) {
             onClick={() => void openPath(currentPath)}
             className="finder-button"
             style={{
-              color: "#aaa",
+              color: "#888",
               fontSize: "0.8rem",
-              background: "#222",
-              padding: "6px 12px",
-              borderRadius: "8px",
+              background: "transparent",
+              padding: "4px 8px",
+              borderRadius: "6px",
               fontWeight: 500,
+              whiteSpace: "nowrap",
               transition: "background 0.1s, color 0.1s",
               display: "flex",
               alignItems: "center",
-              height: "fit-content",
             }}
             onMouseEnter={(e) => {
               e.currentTarget.style.color = "#fff";
-              e.currentTarget.style.background = "#333";
+              e.currentTarget.style.background = "#222";
             }}
             onMouseLeave={(e) => {
-              e.currentTarget.style.color = "#aaa";
-              e.currentTarget.style.background = "#222";
+              e.currentTarget.style.color = "#888";
+              e.currentTarget.style.background = "transparent";
             }}
           >
             Open in Finder

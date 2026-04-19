@@ -127,7 +127,11 @@ export function AppShell() {
             <span
               style={{ fontWeight: 600, fontSize: "0.9rem", color: "#fff" }}
             >
-              {deferredSession ? deferredSession.title : "New thread"}
+              {deferredSession
+                ? deferredSession.title.toLowerCase() === "kickoff"
+                  ? "New thread"
+                  : deferredSession.title
+                : "New thread"}
             </span>
             {activeWorkspace && (
               <span
