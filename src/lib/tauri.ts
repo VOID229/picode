@@ -7,6 +7,7 @@ import type {
   PiRuntimeEvent,
   RuntimeBootstrapPayload,
   RuntimeHealthPayload,
+  WorkspaceRuntimeCatalogPayload,
   WorkspaceRecord,
 } from "../domains/types";
 
@@ -69,40 +70,15 @@ export async function bootstrapRuntime() {
   return normalize(await invoke<RuntimeBootstrapPayload>("bootstrap_runtime"));
 }
 
-export async function refreshRuntimeCatalog() {
-  return normalize(
-    await invoke<RuntimeBootstrapPayload>("refresh_runtime_catalog"),
-  );
-}
-
-export async function startProviderLogin(payload: { providerId: string }) {
-  return normalize(
-    await invoke<RuntimeBootstrapPayload>("start_provider_login", { payload }),
-  );
-}
-
-export async function saveProviderApiKey(payload: {
-  providerId: string;
-  apiKey: string;
+export async function refreshWorkspaceRuntimeCatalog(payload: {
+  workspaceId: string;
 }) {
   return normalize(
-    await invoke<RuntimeBootstrapPayload>("save_provider_api_key", { payload }),
+    await invoke<WorkspaceRuntimeCatalogPayload>(
+      "refresh_workspace_runtime_catalog",
+      { payload },
+    ),
   );
-}
-
-export async function logoutProvider(payload: { providerId: string }) {
-  return normalize(
-    await invoke<RuntimeBootstrapPayload>("logout_provider", { payload }),
-  );
-}
-
-export async function submitRuntimeInput(payload: {
-  requestId: string;
-  value?: string;
-  confirmed?: boolean;
-  cancelled?: boolean;
-}) {
-  return await invoke<void>("submit_runtime_input", { payload });
 }
 
 export async function abortPrompt(payload: {

@@ -30,6 +30,10 @@ export function AppShell() {
   const state = useAppStore((store) => store.state);
   const customActions = useAppStore((store) => store.customActions);
   const createSession = useAppStore((store) => store.createSession);
+  const runtimeInstall = useAppStore((store) => store.runtimeInstall);
+  const refreshWorkspaceRuntimeCatalog = useAppStore(
+    (store) => store.refreshWorkspaceRuntimeCatalog,
+  );
   const navigate = useNavigate();
   const [showActionModal, setShowActionModal] = useState(false);
   const [showActionDropdown, setShowActionDropdown] = useState(false);
@@ -78,6 +82,16 @@ export function AppShell() {
   );
 
   const deferredSession = useDeferredValue(activeSession);
+
+  useEffect(() => {
+    if (runtimeInstall?.status === "ready" && activeWorkspace) {
+      void refreshWorkspaceRuntimeCatalog(activeWorkspace.id);
+    }
+  }, [
+    activeWorkspace?.id,
+    refreshWorkspaceRuntimeCatalog,
+    runtimeInstall?.status,
+  ]);
 
   const getIcon = (iconName: string, size = 14) => {
     switch (iconName) {

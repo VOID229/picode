@@ -2,7 +2,7 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-pub const SCHEMA_VERSION: u32 = 2;
+pub const SCHEMA_VERSION: u32 = 3;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -280,6 +280,8 @@ pub struct AppPreferences {
     pub effort: String,
     #[serde(default = "default_fast_mode")]
     pub fast_mode: bool,
+    #[serde(default)]
+    pub pi_binary_path: Option<String>,
     pub layout: LayoutPreferences,
 }
 
@@ -291,6 +293,7 @@ pub struct PersistedAppState {
     pub active_session_id: Option<String>,
     pub workspaces: Vec<WorkspaceRecord>,
     pub preferences: AppPreferences,
+    #[serde(default)]
     pub providers: Vec<ProviderOption>,
 }
 
@@ -304,17 +307,50 @@ pub struct BootstrapPayload {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RuntimeBootstrapPayload {
-    pub pi_home: String,
-    pub version: Option<String>,
-    pub providers: Vec<ProviderOption>,
+    pub install: PiInstallStatus,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RuntimeHealthPayload {
-    pub ready: bool,
+    pub install: PiInstallStatus,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PiInstallState {
+    Ready,
+    Missing,
+    Broken,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PiInstallStatus {
+    pub status: PiInstallState,
+    #[serde(default)]
+    pub binary_path: Option<String>,
+    #[serde(default)]
     pub version: Option<String>,
-    pub pi_home: Option<String>,
+    #[serde(default)]
+    pub error: Option<String>,
+    pub install_url: String,
+    pub install_command: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RefreshWorkspaceRuntimeCatalogPayload {
+    pub workspace_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceRuntimeCatalogPayload {
+    pub workspace_id: String,
+    pub providers: Vec<ProviderOption>,
+    pub selected_provider_id: String,
+    pub selected_model_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -405,28 +441,6 @@ pub struct DeleteSessionPayload {
 #[serde(rename_all = "camelCase")]
 pub struct RefreshGitPayload {
     pub workspace_id: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ProviderAuthPayload {
-    pub provider_id: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SaveApiKeyPayload {
-    pub provider_id: String,
-    pub api_key: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SubmitRuntimeInputPayload {
-    pub request_id: String,
-    pub value: Option<String>,
-    pub confirmed: Option<bool>,
-    pub cancelled: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -644,6 +658,7 @@ pub fn default_preferences() -> AppPreferences {
         approval_mode: ApprovalMode::Supervised,
         effort: default_effort(),
         fast_mode: default_fast_mode(),
+        pi_binary_path: None,
         layout: LayoutPreferences {
             diff_mode: "split".to_string(),
             git_panel_open: true,
@@ -708,71 +723,40 @@ fn migrate_legacy_model_id(model_id: &str) -> Option<&'static str> {
     match model_id {
         "pi-4-pro" | "pi-cloud-max" => Some("gpt-5.4"),
         "pi-4-fast" | "pi-cloud-lite" => Some("gpt-5.4-mini"),
+        "gpt-5.1-codex-max" => Some("gpt-5.4"),
+        "gpt-5.1-codex-mini" => Some("gpt-5.4-mini"),
         _ => None,
     }
 }
 
-fn normalize_model_selection(
-    provider_id: &mut String,
-    model_id: &mut String,
-    providers: &[ProviderOption],
-) {
+fn normalize_stored_model_selection(provider_id: &mut String, model_id: &mut String) {
     let mapped_model_id = migrate_legacy_model_id(model_id.as_str()).unwrap_or(model_id.as_str());
-    let selected_provider = providers
-        .iter()
-        .find(|provider| {
-            provider
-                .models
-                .iter()
-                .any(|model| model.id == mapped_model_id)
-        })
-        .or_else(|| {
-            providers
-                .iter()
-                .find(|provider| provider.id == provider_id.as_str())
-        })
-        .or_else(|| providers.first());
 
-    let Some(provider) = selected_provider else {
+    if provider_id.trim().is_empty() {
         *provider_id = default_provider_id();
+    }
+    if mapped_model_id.trim().is_empty() {
         *model_id = default_model_id();
-        return;
-    };
-
-    *provider_id = provider.id.clone();
-    if provider
-        .models
-        .iter()
-        .any(|model| model.id == mapped_model_id)
-    {
-        *model_id = mapped_model_id.to_string();
     } else {
-        *model_id = provider
-            .models
-            .first()
-            .map(|model| model.id.clone())
-            .unwrap_or_else(default_model_id);
+        *model_id = mapped_model_id.to_string();
     }
 }
 
 pub fn normalize_state(mut state: PersistedAppState) -> PersistedAppState {
     state.schema_version = SCHEMA_VERSION;
-    state.providers = default_providers();
+    if state.providers.is_empty() {
+        state.providers = default_providers();
+    }
 
     normalize_effort(&mut state.preferences.effort);
-    normalize_model_selection(
+    normalize_stored_model_selection(
         &mut state.preferences.provider_id,
         &mut state.preferences.model_id,
-        &state.providers,
     );
 
     for workspace in &mut state.workspaces {
         normalize_effort(&mut workspace.effort);
-        normalize_model_selection(
-            &mut workspace.provider_id,
-            &mut workspace.model_id,
-            &state.providers,
-        );
+        normalize_stored_model_selection(&mut workspace.provider_id, &mut workspace.model_id);
     }
 
     state
@@ -801,7 +785,7 @@ mod tests {
     #[test]
     fn legacy_state_defaults_missing_runtime_fields() {
         let parsed: PersistedAppState = serde_json::from_value(json!({
-            "schemaVersion": 1,
+            "schemaVersion": 2,
             "activeWorkspaceId": "workspace-1",
             "activeSessionId": null,
             "workspaces": [{
@@ -847,14 +831,15 @@ mod tests {
 
         assert_eq!(parsed.preferences.effort, "high");
         assert!(!parsed.preferences.fast_mode);
+        assert_eq!(parsed.preferences.pi_binary_path, None);
         assert_eq!(parsed.workspaces[0].effort, "high");
         assert!(!parsed.workspaces[0].fast_mode);
     }
 
     #[test]
-    fn normalize_state_migrates_legacy_models() {
+    fn normalize_state_migrates_v2_state_to_v3_without_overwriting_legacy_providers() {
         let parsed: PersistedAppState = serde_json::from_value(json!({
-            "schemaVersion": 1,
+            "schemaVersion": 2,
             "activeWorkspaceId": "workspace-1",
             "activeSessionId": null,
             "workspaces": [{
@@ -900,11 +885,112 @@ mod tests {
 
         let normalized = normalize_state(parsed);
 
-        assert_eq!(normalized.preferences.provider_id, "openai-codex");
+        assert_eq!(normalized.schema_version, 3);
+        assert_eq!(normalized.preferences.provider_id, "pi-core");
         assert_eq!(normalized.preferences.model_id, "gpt-5.4");
-        assert_eq!(normalized.workspaces[0].provider_id, "openai-codex");
+        assert_eq!(normalized.workspaces[0].provider_id, "pi-cloud");
         assert_eq!(normalized.workspaces[0].model_id, "gpt-5.4-mini");
-        assert_eq!(normalized.providers[0].id, "openai-codex");
-        assert_eq!(normalized.providers[0].models[0].id, "gpt-5.4");
+        assert_eq!(normalized.providers[0].id, "pi-cloud");
+        assert_eq!(normalized.providers[0].models[0].id, "pi-cloud-lite");
+    }
+
+    #[test]
+    fn legacy_approval_fields_still_deserialize() {
+        let parsed: PersistedAppState = serde_json::from_value(json!({
+            "schemaVersion": 2,
+            "activeWorkspaceId": "workspace-1",
+            "activeSessionId": null,
+            "workspaces": [{
+                "id": "workspace-1",
+                "name": "Workspace",
+                "path": "/tmp/workspace",
+                "pinned": true,
+                "recentRank": 1,
+                "approvalMode": "ask-first",
+                "policy": {
+                    "allowedPaths": ["/tmp/workspace"],
+                    "allowedCommands": ["git status"],
+                    "envPassthrough": ["PATH"],
+                    "networkEnabled": false
+                },
+                "providerId": "openai-codex",
+                "modelId": "gpt-5.4",
+                "sessions": []
+            }],
+            "preferences": {
+                "theme": "dark",
+                "providerId": "openai-codex",
+                "modelId": "gpt-5.4",
+                "approvalMode": "full-access",
+                "layout": {
+                    "diffMode": "split",
+                    "gitPanelOpen": true,
+                    "diffPanelOpen": true
+                }
+            }
+        }))
+        .expect("legacy state should deserialize");
+
+        assert!(matches!(
+            parsed.workspaces[0].approval_mode,
+            ApprovalMode::Supervised
+        ));
+        assert!(matches!(
+            parsed.preferences.approval_mode,
+            ApprovalMode::FullAccess
+        ));
+        assert_eq!(
+            parsed.workspaces[0].policy.allowed_commands,
+            vec!["git status".to_string()]
+        );
+    }
+
+    #[test]
+    fn default_preferences_leave_pi_binary_path_unset() {
+        let preferences = default_preferences();
+        assert_eq!(preferences.pi_binary_path, None);
+    }
+
+    #[test]
+    fn normalize_state_migrates_stale_codex_model_ids() {
+        let parsed: PersistedAppState = serde_json::from_value(json!({
+            "schemaVersion": 3,
+            "activeWorkspaceId": "workspace-1",
+            "activeSessionId": null,
+            "workspaces": [{
+                "id": "workspace-1",
+                "name": "Workspace",
+                "path": "/tmp/workspace",
+                "pinned": true,
+                "recentRank": 1,
+                "approvalMode": "ask-first",
+                "policy": {
+                    "allowedPaths": [],
+                    "allowedCommands": [],
+                    "envPassthrough": [],
+                    "networkEnabled": false
+                },
+                "providerId": "openai-codex",
+                "modelId": "gpt-5.1-codex-mini",
+                "sessions": []
+            }],
+            "preferences": {
+                "theme": "dark",
+                "providerId": "openai-codex",
+                "modelId": "gpt-5.1-codex-max",
+                "approvalMode": "ask-first",
+                "layout": {
+                    "diffMode": "split",
+                    "gitPanelOpen": true,
+                    "diffPanelOpen": true
+                }
+            }
+        }))
+        .expect("state should deserialize");
+
+        let normalized = normalize_state(parsed);
+
+        assert_eq!(normalized.preferences.model_id, "gpt-5.4");
+        assert_eq!(normalized.workspaces[0].model_id, "gpt-5.4-mini");
     }
 }

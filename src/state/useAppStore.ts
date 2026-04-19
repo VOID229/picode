@@ -4,6 +4,7 @@ import type {
   ChatSession,
   GitSnapshot,
   PersistedAppState,
+  PiInstallStatus,
   PiRuntimeEvent,
   TimelineItem,
   WorkspaceRecord,
@@ -14,15 +15,12 @@ import {
   bootstrapRuntime,
   createSession as createSessionCommand,
   createWorkspace as createWorkspaceCommand,
-  logoutProvider as logoutProviderCommand,
   refreshGit as refreshGitCommand,
-  refreshRuntimeCatalog as refreshRuntimeCatalogCommand,
+  refreshWorkspaceRuntimeCatalog as refreshWorkspaceRuntimeCatalogCommand,
   resolveApproval as resolveApprovalCommand,
-  saveProviderApiKey as saveProviderApiKeyCommand,
+  runtimeHealthcheck as runtimeHealthcheckCommand,
   selectWorkspaceSession as selectWorkspaceSessionCommand,
   sendPrompt as sendPromptCommand,
-  startProviderLogin as startProviderLoginCommand,
-  submitRuntimeInput as submitRuntimeInputCommand,
   updatePreferences as updatePreferencesCommand,
   updateWorkspaceSettings as updateWorkspaceSettingsCommand,
   renameWorkspace as renameWorkspaceCommand,
@@ -52,23 +50,11 @@ interface AppStoreState {
   git: Record<string, GitSnapshot>;
   customActions: Record<string, CustomAction[]>; // workspaceId -> CustomAction[]
   currentMode: "plan" | "build";
-  runtimePiHome?: string;
-  runtimeVersion?: string;
+  runtimeInstall?: PiInstallStatus;
   runtimeGlobalStatus?: string;
   runtimeGlobalError?: string;
-  pendingRuntimeInput?: {
-    providerId: string;
-    requestId: string;
-    title: string;
-    message: string;
-    placeholder?: string;
-    kind: "prompt" | "manual-code";
-  } | null;
-  pendingBrowserAuth?: {
-    providerId: string;
-    url: string;
-    instructions?: string;
-  } | null;
+  workspaceCatalogs: Record<string, PersistedAppState["providers"]>;
+  workspaceCatalogErrors: Record<string, string | undefined>;
   initialize: () => Promise<void>;
   setConnectionReady: (ready: boolean) => void;
   setCommandPaletteOpen: (open: boolean) => void;
@@ -118,17 +104,8 @@ interface AppStoreState {
     approvalId: string,
     decision: "approved" | "rejected",
   ) => Promise<void>;
-  refreshRuntimeCatalog: () => Promise<void>;
-  startProviderLogin: (providerId: string) => Promise<void>;
-  saveProviderApiKey: (providerId: string, apiKey: string) => Promise<void>;
-  logoutProvider: (providerId: string) => Promise<void>;
-  submitRuntimeInput: (payload: {
-    requestId: string;
-    value?: string;
-    confirmed?: boolean;
-    cancelled?: boolean;
-  }) => Promise<void>;
-  clearRuntimeUi: () => void;
+  refreshRuntimeHealth: () => Promise<void>;
+  refreshWorkspaceRuntimeCatalog: (workspaceId: string) => Promise<void>;
   applyRuntimeEvent: (event: PiRuntimeEvent) => void;
 }
 
@@ -179,8 +156,8 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
   git: {},
   customActions: {},
   currentMode: "build",
-  pendingRuntimeInput: null,
-  pendingBrowserAuth: null,
+  workspaceCatalogs: {},
+  workspaceCatalogErrors: {},
   async initialize() {
     if (hasInitialized && get().state) {
       set({ isBootstrapping: false });
@@ -211,16 +188,17 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
 
       set({
         isBootstrapping: false,
-        state: {
-          ...payload.state,
-          providers: runtimePayload?.providers ?? payload.state.providers,
-        },
+        state: payload.state,
         git: payload.git,
         connectionReady: true,
-        runtimePiHome: runtimePayload?.piHome,
-        runtimeVersion: runtimePayload?.version,
+        runtimeInstall: runtimePayload?.install,
         runtimeGlobalError,
       });
+
+      const activeWorkspaceId = payload.state.activeWorkspaceId;
+      if (runtimePayload?.install.status === "ready" && activeWorkspaceId) {
+        await get().refreshWorkspaceRuntimeCatalog(activeWorkspaceId);
+      }
     })()
       .catch((error) => {
         set({
@@ -286,6 +264,9 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
       sessionId,
     });
     set({ state });
+    if (get().runtimeInstall?.status === "ready") {
+      await get().refreshWorkspaceRuntimeCatalog(workspaceId);
+    }
   },
   async createWorkspace(path, name) {
     const workspace = await createWorkspaceCommand({ path, name });
@@ -301,6 +282,9 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
           : store.state,
       }));
     });
+    if (get().runtimeInstall?.status === "ready") {
+      await get().refreshWorkspaceRuntimeCatalog(workspace.id);
+    }
   },
   async createSession(workspaceId) {
     const store = get();
@@ -321,6 +305,7 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
   async updatePreferences(preferences) {
     const state = await updatePreferencesCommand(preferences);
     set({ state });
+    await get().refreshRuntimeHealth();
   },
   async updateWorkspaceSettings(payload) {
     const state = await updateWorkspaceSettingsCommand(payload);
@@ -338,7 +323,17 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
   },
   async removeWorkspace(workspaceId) {
     const state = await removeWorkspaceCommand(workspaceId);
-    set({ state });
+    set((store) => {
+      const nextCatalogs = { ...store.workspaceCatalogs };
+      const nextErrors = { ...store.workspaceCatalogErrors };
+      delete nextCatalogs[workspaceId];
+      delete nextErrors[workspaceId];
+      return {
+        state,
+        workspaceCatalogs: nextCatalogs,
+        workspaceCatalogErrors: nextErrors,
+      };
+    });
   },
   async renameSession(workspaceId, sessionId, title) {
     const state = await renameSessionCommand(workspaceId, sessionId, title);
@@ -373,77 +368,86 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
     });
     set({ state });
   },
-  async refreshRuntimeCatalog() {
-    const payload = await refreshRuntimeCatalogCommand();
+  async refreshRuntimeHealth() {
+    const payload = await runtimeHealthcheckCommand();
     set((store) => ({
-      state: store.state
-        ? { ...store.state, providers: payload.providers }
-        : store.state,
-      runtimePiHome: payload.piHome || store.runtimePiHome,
-      runtimeVersion: payload.version || store.runtimeVersion,
+      runtimeInstall: payload.install,
+      runtimeGlobalError: undefined,
+      workspaceCatalogs:
+        payload.install.status === "ready" ? store.workspaceCatalogs : {},
+      workspaceCatalogErrors:
+        payload.install.status === "ready" ? store.workspaceCatalogErrors : {},
     }));
+
+    if (payload.install.status === "ready") {
+      const activeWorkspaceId = get().state?.activeWorkspaceId;
+      if (activeWorkspaceId) {
+        await get().refreshWorkspaceRuntimeCatalog(activeWorkspaceId);
+      }
+    }
   },
-  async startProviderLogin(providerId) {
-    const payload = await startProviderLoginCommand({ providerId });
-    set((store) => ({
-      state: store.state
-        ? { ...store.state, providers: payload.providers }
-        : store.state,
-      pendingRuntimeInput: null,
-    }));
-  },
-  async saveProviderApiKey(providerId, apiKey) {
-    const payload = await saveProviderApiKeyCommand({ providerId, apiKey });
-    set((store) => ({
-      state: store.state
-        ? { ...store.state, providers: payload.providers }
-        : store.state,
-    }));
-  },
-  async logoutProvider(providerId) {
-    const payload = await logoutProviderCommand({ providerId });
-    set((store) => ({
-      state: store.state
-        ? { ...store.state, providers: payload.providers }
-        : store.state,
-    }));
-  },
-  async submitRuntimeInput(payload) {
-    await submitRuntimeInputCommand(payload);
-    set({ pendingRuntimeInput: null });
-  },
-  clearRuntimeUi() {
-    set({ pendingRuntimeInput: null, pendingBrowserAuth: null });
+  async refreshWorkspaceRuntimeCatalog(workspaceId) {
+    if (get().runtimeInstall?.status !== "ready") {
+      return;
+    }
+
+    try {
+      const payload = await refreshWorkspaceRuntimeCatalogCommand({
+        workspaceId,
+      });
+      set((store) => {
+        if (!store.state) {
+          return {
+            workspaceCatalogs: {
+              ...store.workspaceCatalogs,
+              [workspaceId]: payload.providers,
+            },
+            workspaceCatalogErrors: {
+              ...store.workspaceCatalogErrors,
+              [workspaceId]: undefined,
+            },
+          };
+        }
+
+        const nextState = structuredClone(store.state);
+        const workspace = nextState.workspaces.find(
+          (item) => item.id === workspaceId,
+        );
+        if (workspace) {
+          workspace.providerId = payload.selectedProviderId;
+          workspace.modelId = payload.selectedModelId;
+        }
+
+        return {
+          state: nextState,
+          workspaceCatalogs: {
+            ...store.workspaceCatalogs,
+            [workspaceId]: payload.providers,
+          },
+          workspaceCatalogErrors: {
+            ...store.workspaceCatalogErrors,
+            [workspaceId]: undefined,
+          },
+        };
+      });
+    } catch (error) {
+      set((store) => ({
+        workspaceCatalogErrors: {
+          ...store.workspaceCatalogErrors,
+          [workspaceId]: error instanceof Error ? error.message : String(error),
+        },
+      }));
+    }
   },
   applyRuntimeEvent(event) {
     set((store) => {
       if (!store.state) {
-        if (event.type === "runtime-ready") {
-          return {
-            ...store,
-            runtimePiHome: event.piHome,
-            runtimeVersion: event.version,
-          };
-        }
         return store;
       }
 
       const state = structuredClone(store.state);
 
       switch (event.type) {
-        case "runtime-ready": {
-          return {
-            ...store,
-            runtimePiHome: event.piHome,
-            runtimeVersion: event.version,
-          };
-        }
-        case "catalog": {
-          return {
-            ...store,
-            state: { ...state, providers: event.providers },
-          };
-        }
         case "token": {
           const { session } = findSession(
             state,
@@ -644,45 +648,6 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
           session.status = "idle";
           applyRuntimeMetadata(session, event.metadata);
           break;
-        }
-        case "auth-browser-open": {
-          return {
-            ...store,
-            pendingBrowserAuth: {
-              providerId: event.providerId,
-              url: event.url,
-              instructions: event.instructions,
-            },
-            runtimeGlobalStatus: `Continue ${event.providerId} login in the browser.`,
-          };
-        }
-        case "auth-manual-input-requested": {
-          return {
-            ...store,
-            pendingRuntimeInput: {
-              providerId: event.providerId,
-              requestId: event.requestId,
-              title: event.title,
-              message: event.message,
-              placeholder: event.placeholder,
-              kind: event.kind,
-            },
-          };
-        }
-        case "auth-completed": {
-          return {
-            ...store,
-            pendingBrowserAuth: null,
-            pendingRuntimeInput: null,
-            runtimeGlobalStatus: `${event.providerId} is ready.`,
-          };
-        }
-        case "auth-failed": {
-          return {
-            ...store,
-            pendingRuntimeInput: null,
-            runtimeGlobalError: event.message,
-          };
         }
       }
 

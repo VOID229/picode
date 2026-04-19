@@ -35,18 +35,6 @@ if (process.platform !== "darwin") {
   fail("DMG packaging is only supported when this script is run on macOS.");
 }
 
-console.log("Building bundled pi-runtime...");
-const runtimeBuild = Bun.spawn({
-  cmd: ["bun", "run", "build:pi-runtime"],
-  cwd: root,
-  stdout: "inherit",
-  stderr: "inherit",
-});
-
-if ((await runtimeBuild.exited) !== 0) {
-  fail("pi-runtime build failed.");
-}
-
 console.log("Building macOS app bundle and DMG...");
 const tauriBuild = Bun.spawn({
   cmd: [

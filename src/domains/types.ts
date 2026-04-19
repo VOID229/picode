@@ -187,6 +187,7 @@ export interface AppPreferences {
   approvalMode: ApprovalMode;
   effort: string;
   fastMode: boolean;
+  piBinaryPath?: string;
   layout: LayoutPreferences;
 }
 
@@ -205,15 +206,29 @@ export interface BootstrapPayload {
 }
 
 export interface RuntimeBootstrapPayload {
-  piHome: string;
-  version?: string;
-  providers: ProviderOption[];
+  install: PiInstallStatus;
 }
 
 export interface RuntimeHealthPayload {
-  ready: boolean;
+  install: PiInstallStatus;
+}
+
+export type PiInstallState = "ready" | "missing" | "broken";
+
+export interface PiInstallStatus {
+  status: PiInstallState;
+  binaryPath?: string;
   version?: string;
-  piHome?: string;
+  error?: string;
+  installUrl: string;
+  installCommand: string;
+}
+
+export interface WorkspaceRuntimeCatalogPayload {
+  workspaceId: string;
+  providers: ProviderOption[];
+  selectedProviderId: string;
+  selectedModelId: string;
 }
 
 export type PiRuntimeEvent =

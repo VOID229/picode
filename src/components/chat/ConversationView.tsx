@@ -1,13 +1,4 @@
-import {
-  ArrowUp,
-  Shield,
-  Unlock,
-  Bot,
-  FileText,
-  Zap,
-  Check,
-  Pencil,
-} from "lucide-react";
+import { ArrowUp, Bot, FileText, Zap, Check } from "lucide-react";
 import { useMemo, useState, useRef, useEffect } from "react";
 import type { ChatSession, WorkspaceRecord } from "../../domains/types";
 import { useAppStore } from "../../state/useAppStore";
@@ -24,13 +15,17 @@ export function ConversationView({
 }: ConversationViewProps) {
   const [draft, setDraft] = useState("");
   const [isFocused, setIsFocused] = useState(false);
+  const [providerDropdownOpen, setProviderDropdownOpen] = useState(false);
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
-  const [approvalDropdownOpen, setApprovalDropdownOpen] = useState(false);
   const [effortDropdownOpen, setEffortDropdownOpen] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const timelineRef = useRef<HTMLDivElement>(null);
 
-  const state = useAppStore((store) => store.state);
+  const runtimeInstall = useAppStore((store) => store.runtimeInstall);
+  const workspaceCatalogs = useAppStore((store) => store.workspaceCatalogs);
+  const workspaceCatalogErrors = useAppStore(
+    (store) => store.workspaceCatalogErrors,
+  );
   const currentMode = useAppStore((store) => store.currentMode);
   const setCurrentMode = useAppStore((store) => store.setCurrentMode);
   const sendPrompt = useAppStore((state) => state.sendPrompt);
@@ -41,17 +36,17 @@ export function ConversationView({
   );
 
   const closeComposerMenus = () => {
+    setProviderDropdownOpen(false);
     setModelDropdownOpen(false);
-    setApprovalDropdownOpen(false);
     setEffortDropdownOpen(false);
   };
 
-  const toggleComposerMenu = (menu: "model" | "effort" | "approval") => {
+  const toggleComposerMenu = (menu: "provider" | "model" | "effort") => {
+    setProviderDropdownOpen((current) =>
+      menu === "provider" ? !current : false,
+    );
     setModelDropdownOpen((current) => (menu === "model" ? !current : false));
     setEffortDropdownOpen((current) => (menu === "effort" ? !current : false));
-    setApprovalDropdownOpen((current) =>
-      menu === "approval" ? !current : false,
-    );
   };
 
   const handleSubmit = async () => {
@@ -96,12 +91,30 @@ export function ConversationView({
   );
   const isEmptySpace = !hasUserMessage;
 
-  const activeProvider = state?.providers.find(
+  const workspaceProviders = workspace
+    ? (workspaceCatalogs[workspace.id] ?? [])
+    : [];
+  const workspaceCatalogError = workspace
+    ? workspaceCatalogErrors[workspace.id]
+    : undefined;
+  const activeProvider = workspaceProviders.find(
     (p) => p.id === workspace.providerId,
   );
   const activeModel = activeProvider?.models.find(
     (m) => m.id === workspace.modelId,
   );
+  const hasWorkspaceCatalog = workspaceProviders.length > 0;
+  const sendDisabledReason =
+    runtimeInstall?.status === "missing"
+      ? "Pi is not installed. Install it from Settings > Connections."
+      : runtimeInstall?.status === "broken"
+        ? "Pi was found but did not respond correctly. Check the runtime path in Settings."
+        : workspaceCatalogError
+          ? "Unable to load Pi models for this project. Refresh the runtime in Settings."
+          : runtimeInstall?.status === "ready" && !hasWorkspaceCatalog
+            ? "No Pi models are configured for this project. Run `pi` and configure a provider, or update your Pi config."
+            : undefined;
+  const sendDisabled = Boolean(sendDisabledReason);
 
   const effortLabels: Record<string, string> = {
     "extra-high": "Extra High",
@@ -172,6 +185,22 @@ export function ConversationView({
           margin: "0 auto",
         }}
       >
+        {sendDisabledReason && (
+          <div
+            style={{
+              marginBottom: "12px",
+              border: "1px solid #2a2a2c",
+              borderRadius: "10px",
+              padding: "10px 12px",
+              background: "rgba(255,255,255,0.03)",
+              color: "#c4c4c7",
+              fontSize: "0.82rem",
+              lineHeight: 1.5,
+            }}
+          >
+            {sendDisabledReason}
+          </div>
+        )}
         <div
           style={{
             background: "#18181A",
@@ -195,9 +224,12 @@ export function ConversationView({
             onKeyDown={(event) => {
               if (event.key === "Enter" && !event.shiftKey) {
                 event.preventDefault();
-                void handleSubmit();
+                if (!sendDisabled) {
+                  void handleSubmit();
+                }
               }
             }}
+            disabled={sendDisabled}
             rows={1}
             style={{
               background: "transparent",
@@ -229,14 +261,87 @@ export function ConversationView({
             >
               <div
                 className="composer-select-wrapper pointer"
-                onClick={() => toggleComposerMenu("model")}
+                onClick={() => {
+                  if (hasWorkspaceCatalog) {
+                    toggleComposerMenu("provider");
+                  }
+                }}
+              >
+                <span style={{ paddingRight: "4px" }}>
+                  {activeProvider?.label ||
+                    (runtimeInstall?.status === "ready"
+                      ? "Provider"
+                      : "Pi unavailable")}
+                </span>
+                <ChevronIcon />
+                {providerDropdownOpen && hasWorkspaceCatalog && (
+                  <>
+                    <div
+                      style={{
+                        position: "fixed",
+                        inset: 0,
+                        zIndex: 10,
+                        cursor: "default",
+                      }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        closeComposerMenus();
+                      }}
+                    />
+                    <div
+                      className="custom-dropdown"
+                      style={{ minWidth: "200px" }}
+                    >
+                      {workspaceProviders.map((provider) => (
+                        <div
+                          key={provider.id}
+                          className="custom-dropdown-item"
+                          style={{ justifyContent: "space-between" }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            closeComposerMenus();
+                            void updateWorkspaceSettings({
+                              workspaceId: workspace.id,
+                              approvalMode: workspace.approvalMode,
+                              providerId: provider.id,
+                              modelId:
+                                provider.models[0]?.id ?? workspace.modelId,
+                              policy: workspace.policy,
+                            });
+                          }}
+                        >
+                          <span>{provider.label}</span>
+                          {workspace.providerId === provider.id && (
+                            <Check size={14} />
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+
+              <div
+                style={{ width: "1px", height: "12px", background: "#333" }}
+              />
+
+              <div
+                className="composer-select-wrapper pointer"
+                onClick={() => {
+                  if (hasWorkspaceCatalog) {
+                    toggleComposerMenu("model");
+                  }
+                }}
               >
                 <Bot size={14} />
                 <span style={{ paddingRight: "4px" }}>
-                  {activeModel?.label || "Select Model"}
+                  {activeModel?.label ||
+                    (runtimeInstall?.status === "ready"
+                      ? "Select Model"
+                      : "Pi unavailable")}
                 </span>
                 <ChevronIcon />
-                {modelDropdownOpen && (
+                {modelDropdownOpen && hasWorkspaceCatalog && (
                   <>
                     <div
                       style={{
@@ -394,128 +499,6 @@ export function ConversationView({
               <div
                 style={{ width: "1px", height: "12px", background: "#333" }}
               />
-
-              <div
-                className="composer-select-wrapper pointer"
-                onClick={() => toggleComposerMenu("approval")}
-              >
-                {workspace.approvalMode === "supervised" ? (
-                  <Shield size={14} />
-                ) : workspace.approvalMode === "auto-accept-edits" ? (
-                  <Pencil size={14} />
-                ) : (
-                  <Unlock size={14} />
-                )}
-                <span style={{ paddingRight: "4px" }}>
-                  {workspace.approvalMode === "supervised"
-                    ? "Supervised"
-                    : workspace.approvalMode === "auto-accept-edits"
-                      ? "Auto-accept edits"
-                      : "Full access"}
-                </span>
-                <ChevronIcon />
-
-                {approvalDropdownOpen && (
-                  <>
-                    <div
-                      style={{
-                        position: "fixed",
-                        inset: 0,
-                        zIndex: 10,
-                        cursor: "default",
-                      }}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        closeComposerMenus();
-                      }}
-                    />
-                    <div
-                      className="custom-dropdown"
-                      style={{ minWidth: "280px", left: "auto", right: "-8px" }}
-                    >
-                      {[
-                        {
-                          id: "supervised",
-                          label: "Supervised",
-                          desc: "Ask before commands and file changes.",
-                        },
-                        {
-                          id: "auto-accept-edits",
-                          label: "Auto-accept edits",
-                          desc: "Auto-approve edits, ask before other actions.",
-                        },
-                        {
-                          id: "full-access",
-                          label: "Full access",
-                          desc: "Allow commands and edits without prompts.",
-                        },
-                      ].map((m) => (
-                        <div
-                          key={m.id}
-                          className="custom-dropdown-item multi-line"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            closeComposerMenus();
-                            void updateWorkspaceSettings({
-                              workspaceId: workspace.id,
-                              approvalMode: m.id as any,
-                              providerId: workspace.providerId,
-                              modelId: workspace.modelId,
-                              policy: workspace.policy,
-                            });
-                          }}
-                        >
-                          <div
-                            style={{
-                              width: "20px",
-                              display: "flex",
-                              alignItems: "center",
-                              justifyContent: "center",
-                              flexShrink: 0,
-                            }}
-                          >
-                            {workspace.approvalMode === m.id && (
-                              <Check size={14} />
-                            )}
-                          </div>
-                          <div
-                            style={{
-                              display: "flex",
-                              flexDirection: "column",
-                              gap: "2px",
-                            }}
-                          >
-                            <div
-                              style={{
-                                display: "flex",
-                                alignItems: "center",
-                                gap: "8px",
-                                color: "#eee",
-                                fontWeight: 500,
-                              }}
-                            >
-                              {m.id === "supervised" ? (
-                                <Shield size={14} />
-                              ) : m.id === "auto-accept-edits" ? (
-                                <Pencil size={14} />
-                              ) : (
-                                <Unlock size={14} />
-                              )}
-                              {m.label}
-                            </div>
-                            <div
-                              className="item-description"
-                              style={{ fontSize: "0.75rem", color: "#666" }}
-                            >
-                              {m.desc}
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </>
-                )}
-              </div>
             </div>
 
             <button
@@ -526,13 +509,13 @@ export function ConversationView({
                 background:
                   session.status === "streaming"
                     ? "#ef4444"
-                    : draft.trim()
+                    : !sendDisabled && draft.trim()
                       ? "#2563eb"
                       : "#333",
                 color:
                   session.status === "streaming"
                     ? "#fff"
-                    : draft.trim()
+                    : !sendDisabled && draft.trim()
                       ? "#fff"
                       : "#666",
                 display: "flex",
@@ -540,16 +523,22 @@ export function ConversationView({
                 justifyContent: "center",
                 border: "none",
                 cursor:
-                  session.status === "streaming" || draft.trim()
+                  session.status === "streaming" ||
+                  (!sendDisabled && Boolean(draft.trim()))
                     ? "pointer"
                     : "default",
                 transition: "background 0.2s, color 0.2s",
               }}
-              disabled={!draft.trim() && session.status !== "streaming"}
+              disabled={
+                session.status !== "streaming" &&
+                (sendDisabled || !draft.trim())
+              }
               onClick={() =>
                 session.status === "streaming"
                   ? void abortPrompt(workspace.id, session.id)
-                  : void handleSubmit()
+                  : !sendDisabled
+                    ? void handleSubmit()
+                    : undefined
               }
             >
               <ArrowUp size={16} />

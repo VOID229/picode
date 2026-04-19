@@ -8,17 +8,14 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "dmg": "bun run scripts/build-dmg.ts",
-    "build:pi-runtime": "bun run scripts/build-pi-runtime.ts",
-    "dev:prepare-runtime": "bun run build:pi-runtime",
-    "tauri:dev": "bun run dev:prepare-runtime && tauri dev",
-    "tauri:build": "bun run build:pi-runtime && tauri build"
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.99.0",
     "@tauri-apps/api": "^2.10.1",
     "@tauri-apps/plugin-clipboard-manager": "^2.3.2",
     "@tauri-apps/plugin-dialog": "^2.7.0",
-    "@tauri-apps/plugin-shell": "^2.3.5",
     "clsx": "^2.1.1",
     "lucide-react": "^1.8.0",
     "react": "^19.2.5",

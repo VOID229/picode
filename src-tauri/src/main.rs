@@ -4,12 +4,12 @@ mod pi;
 mod storage;
 
 use crate::models::{
-    AbortPromptPayload, ArchiveSessionPayload, BootstrapPayload, CreateSessionPayload, CreateWorkspacePayload,
-    DeleteSessionPayload, PersistedAppState, ProviderAuthPayload, RefreshGitPayload,
-    RemoveWorkspacePayload, RenameSessionPayload, RenameWorkspacePayload, ResolveApprovalPayload,
-    RuntimeBootstrapPayload, RuntimeHealthPayload, SaveApiKeyPayload,
-    SelectWorkspaceSessionPayload, SendPromptPayload, SubmitRuntimeInputPayload,
-    UpdateWorkspaceSettingsPayload, normalize_state,
+    AbortPromptPayload, BootstrapPayload, CreateSessionPayload, CreateWorkspacePayload,
+    DeleteSessionPayload, PersistedAppState, RefreshGitPayload,
+    RefreshWorkspaceRuntimeCatalogPayload, RemoveWorkspacePayload, RenameSessionPayload,
+    RenameWorkspacePayload, ResolveApprovalPayload, RuntimeBootstrapPayload, RuntimeHealthPayload,
+    SelectWorkspaceSessionPayload, SendPromptPayload, UpdateWorkspaceSettingsPayload,
+    WorkspaceRuntimeCatalogPayload, normalize_state,
 };
 use anyhow::Context;
 use models::{GitSnapshot, default_state, new_session};
@@ -27,7 +27,7 @@ impl AppState {
     fn new(state: PersistedAppState) -> Self {
         Self {
             state: Arc::new(Mutex::new(state)),
-            runtime: pi::PiRuntimeHandle::new(),
+            runtime: pi::PiRuntimeHandle::default(),
         }
     }
 }
@@ -153,10 +153,7 @@ async fn update_workspace_settings(
     workspace.fast_mode = payload.fast_mode.unwrap_or(workspace.fast_mode);
     workspace.policy = payload.policy;
     storage::save(&app, &state).map_err(|error| error.to_string())?;
-    let workspace_id = payload.workspace_id.clone();
-    drop(state);
-    let _ = pi::sync_workspace_policy(&app, shared.inner().clone(), &workspace_id).await;
-    Ok(shared.state.lock().await.clone())
+    Ok(state.clone())
 }
 
 #[tauri::command]
@@ -211,55 +208,12 @@ async fn bootstrap_runtime(
 }
 
 #[tauri::command]
-async fn refresh_runtime_catalog(
+async fn refresh_workspace_runtime_catalog(
     app: AppHandle,
     shared: State<'_, AppState>,
-) -> Result<RuntimeBootstrapPayload, String> {
-    pi::refresh_runtime_catalog(app, shared.inner().clone())
-        .await
-        .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-async fn start_provider_login(
-    app: AppHandle,
-    shared: State<'_, AppState>,
-    payload: ProviderAuthPayload,
-) -> Result<RuntimeBootstrapPayload, String> {
-    pi::start_provider_login(app, shared.inner().clone(), payload)
-        .await
-        .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-async fn save_provider_api_key(
-    app: AppHandle,
-    shared: State<'_, AppState>,
-    payload: SaveApiKeyPayload,
-) -> Result<RuntimeBootstrapPayload, String> {
-    pi::save_provider_api_key(app, shared.inner().clone(), payload)
-        .await
-        .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-async fn logout_provider(
-    app: AppHandle,
-    shared: State<'_, AppState>,
-    payload: ProviderAuthPayload,
-) -> Result<RuntimeBootstrapPayload, String> {
-    pi::logout_provider(app, shared.inner().clone(), payload)
-        .await
-        .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-async fn submit_runtime_input(
-    app: AppHandle,
-    shared: State<'_, AppState>,
-    payload: SubmitRuntimeInputPayload,
-) -> Result<(), String> {
-    pi::submit_runtime_input(app, shared.inner().clone(), payload)
+    payload: RefreshWorkspaceRuntimeCatalogPayload,
+) -> Result<WorkspaceRuntimeCatalogPayload, String> {
+    pi::refresh_workspace_runtime_catalog(app, shared.inner().clone(), payload)
         .await
         .map_err(|error| error.to_string())
 }
@@ -517,7 +471,6 @@ fn load_initial_state(app: &AppHandle) -> anyhow::Result<PersistedAppState> {
 
 fn main() {
     tauri::Builder::default()
-        .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .setup(|app| {
@@ -536,11 +489,7 @@ fn main() {
             send_prompt,
             resolve_approval,
             bootstrap_runtime,
-            refresh_runtime_catalog,
-            start_provider_login,
-            save_provider_api_key,
-            logout_provider,
-            submit_runtime_input,
+            refresh_workspace_runtime_catalog,
             abort_prompt,
             runtime_healthcheck,
             rename_workspace,

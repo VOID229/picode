@@ -40,8 +40,6 @@
       "icons/128x128@2x.png",
       "icons/icon.png"
     ],
-    "resources": ["bin/package.json"],
-    "targets": ["dmg", "appimage", "deb", "rpm"],
-    "externalBin": ["bin/pi-runtime"]
+    "targets": ["dmg", "appimage", "deb", "rpm"]
   }
 }
