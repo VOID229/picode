@@ -327,8 +327,13 @@ export function SettingsScreen() {
                             Restore
                           </button>
                           <button 
-                            onClick={() => {
-                              if (confirm(`Delete "${session.title}" permanently?`)) {
+                            onClick={async () => {
+                              const { ask } = await import('@tauri-apps/plugin-dialog');
+                              const confirmed = await ask(`Delete "${session.title}" permanently?`, {
+                                title: 'Delete Thread',
+                                kind: 'warning',
+                              });
+                              if (confirmed) {
                                 deleteSession(workspaceId, session.id);
                               }
                             }}

@@ -25,6 +25,7 @@ import { cn } from "../../lib/cn";
 import { useAppStore } from "../../state/useAppStore";
 import { ContextMenu, type ContextMenuItem } from "../layout/ContextMenu";
 import { ProjectPicker } from "./ProjectPicker";
+import { PromptModal } from "../layout/PromptModal";
 
 interface SidebarProps {
   state: PersistedAppState;
@@ -307,6 +308,9 @@ function ProjectNode({
     x: number;
     y: number;
   } | null>(null);
+  
+  const [renamePromptOpen, setRenamePromptOpen] = useState(false);
+
   const selectWorkspaceSession = useAppStore(
     (store) => store.selectWorkspaceSession,
   );
@@ -357,8 +361,7 @@ function ProjectNode({
         label: "Rename project",
         icon: <Edit2 size={14} />,
         onClick: () => {
-          const name = prompt("Enter new project name", workspace.name);
-          if (name) void renameWorkspace(workspace.id, name);
+          setRenamePromptOpen(true);
         },
       },
       {
@@ -369,14 +372,22 @@ function ProjectNode({
         label: "Copy Project Path",
         icon: <Copy size={14} />,
         separator: true,
-        onClick: () => navigator.clipboard.writeText(workspace.path),
+        onClick: async () => {
+          const { writeText } = await import('@tauri-apps/plugin-clipboard-manager');
+          await writeText(workspace.path);
+        },
       },
       {
         label: "Remove project",
         icon: <Trash2 size={14} />,
         variant: "danger",
-        onClick: () => {
-          if (confirm(`Are you sure you want to remove ${workspace.name}?`)) {
+        onClick: async () => {
+          const { ask } = await import('@tauri-apps/plugin-dialog');
+          const confirmed = await ask(`Are you sure you want to remove ${workspace.name}?`, {
+            title: 'Remove Project',
+            kind: 'warning',
+          });
+          if (confirmed) {
             void removeWorkspace(workspace.id);
           }
         },
@@ -491,6 +502,18 @@ function ProjectNode({
           onClose={() => setContextMenu(null)}
         />
       )}
+      
+      {renamePromptOpen && (
+        <PromptModal
+          title="Rename project"
+          initialValue={workspace.name}
+          onConfirm={(name) => {
+            if (name) void renameWorkspace(workspace.id, name);
+            setRenamePromptOpen(false);
+          }}
+          onCancel={() => setRenamePromptOpen(false)}
+        />
+      )}
 
       <style>{`
                 .project-row:hover .project-actions {
@@ -551,6 +574,7 @@ function SessionItem({
     x: number;
     y: number;
   } | null>(null);
+  const [renamePromptOpen, setRenamePromptOpen] = useState(false);
 
   const handleContextMenu = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -563,8 +587,7 @@ function SessionItem({
         label: "Rename thread",
         icon: <Edit2 size={14} />,
         onClick: () => {
-          const title = prompt("Enter new thread title", session.title);
-          if (title) onRename(title);
+          setRenamePromptOpen(true);
         },
       },
       {
@@ -579,21 +602,31 @@ function SessionItem({
       {
         label: "Copy Path",
         icon: <Copy size={14} />,
-        onClick: () =>
-          navigator.clipboard.writeText(`${workspace.path}/${session.title}`),
+        onClick: async () => {
+          const { writeText } = await import('@tauri-apps/plugin-clipboard-manager');
+          await writeText(`${workspace.path}/${session.title}`);
+        },
       },
       {
         label: "Copy Thread ID",
         icon: <Hash size={14} />,
         separator: true,
-        onClick: () => navigator.clipboard.writeText(session.id),
+        onClick: async () => {
+          const { writeText } = await import('@tauri-apps/plugin-clipboard-manager');
+          await writeText(session.id);
+        },
       },
       {
         label: "Delete",
         icon: <Trash2 size={14} />,
         variant: "danger",
-        onClick: () => {
-          if (confirm("Are you sure you want to delete this thread?")) {
+        onClick: async () => {
+          const { ask } = await import('@tauri-apps/plugin-dialog');
+          const confirmed = await ask("Are you sure you want to delete this thread?", {
+            title: 'Delete Thread',
+            kind: 'warning',
+          });
+          if (confirmed) {
             onDelete();
           }
         },
@@ -667,6 +700,17 @@ function SessionItem({
           y={contextMenu.y}
           items={menuItems}
           onClose={() => setContextMenu(null)}
+        />
+      )}
+      {renamePromptOpen && (
+        <PromptModal
+          title="Rename thread"
+          initialValue={session.title}
+          onConfirm={(title) => {
+            if (title) onRename(title);
+            setRenamePromptOpen(false);
+          }}
+          onCancel={() => setRenamePromptOpen(false)}
         />
       )}
     </>

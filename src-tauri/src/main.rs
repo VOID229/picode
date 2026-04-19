@@ -518,6 +518,8 @@ fn load_initial_state(app: &AppHandle) -> anyhow::Result<PersistedAppState> {
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .setup(|app| {
             let state = load_initial_state(app.handle())?;
             app.manage(AppState::new(state));
