@@ -1,31 +1,38 @@
 # picode
 
-`picode` is a desktop-native agent manager for Pi, built with Tauri v2, React, and TypeScript for macOS and Linux. This scaffold ships the shell, workspace/chat navigation, themed UI system, a typed frontend/backend bridge, JSON-backed local state, and a sidecar-oriented Pi runtime path with a bundled mock adapter for bring-up.
+`picode` is a minimal web GUI for coding agents using Pi
 
-## Stack
+Built with Tauri v2, React, and TypeScript, it provides a native shell for managing projects, sessions, approvals, and provider-backed agent runs from one interface.
 
-- Bun for frontend package management and scripts
-- Vite + React 19 + TypeScript
-- Tauri v2 shell
-- Rust backend with JSON persistence and git/process plumbing
-- Theme system with dark, light, Catppuccin, Nord, Gruvbox, and Solarized
+## Features
 
-## Setup
+- Workspace and session management
+- Inline approval flow for risky actions
+- Git context and local project state
+- Bundled `pi-runtime` sidecar bridge
+- macOS and Linux build targets
 
-1. Install Bun and Rust.
-2. Install Tauri system prerequisites for your OS.
-3. Install frontend dependencies:
+## Providers
+
+`picode` uses Pi as the backend which can connect to:
+
+- Codex
+- Claude
+- OpenCode
+- Ollama
+
+## Local Development
+
+Install the required tooling first:
+
+- Bun
+- Rust
+- Tauri prerequisites for your OS
+
+Install dependencies:
 
 ```bash
 bun install
-```
-
-## Development
-
-Run the web UI:
-
-```bash
-bun run dev
 ```
 
 Run the desktop app:
@@ -34,67 +41,33 @@ Run the desktop app:
 bun run tauri:dev
 ```
 
-## Build and Package
-
-Build the frontend bundle:
+Run only the web UI:
 
 ```bash
-bun run build
+bun run dev
 ```
 
-Build desktop packages:
+## Build
+
+Create a production desktop build:
 
 ```bash
 bun run tauri:build
 ```
 
-Generate a macOS installer DMG:
+Create a macOS DMG:
 
 ```bash
 bun run dmg
 ```
 
-This builds `picode.app`, packages it into a `.dmg`, and prints the final paths. Install by opening the DMG and dragging `picode.app` into `Applications`.
-
-Current packaging targets in `tauri.conf.json` are:
+Current packaging targets:
 
 - macOS: `dmg`
 - Linux: `appimage`, `deb`, `rpm`
 
-## Architecture
-
-The app uses a Tauri shell with a typed Rust command layer. The frontend invokes commands for bootstrap, workspace/session mutations, approvals, settings, and git refresh. Streaming agent activity arrives as typed Tauri events on `pi://event`.
-
-The process model is sidecar-first:
-
-- `src-tauri` owns lifecycle, persistence, and OS integration.
-- a bundled Pi runtime sidecar is launched for prompts
-- `pi-runtime/` contains the Bun/TypeScript integration layer that talks to the Pi SDK directly
-- `src-tauri/bin/pi-runtime` is built before `tauri dev` and `tauri build`, then launched by Rust over a JSONL stdio protocol
-
-## Storage
-
-App-owned state is stored as JSON under the platform app-data directory:
-
-- workspace registry
-- pinned/recent workspaces
-- sessions and timeline items
-- theme/layout/model preferences
-- approval mode and policy defaults
-
-Schema versioning is included in the stored payload to keep migrations straightforward.
-
-## Permissions
-
-Approval modes:
-
-- `Ask First`
-- `Full Access`
-
-The scaffold already models risky-action approvals, allowed paths, allowed commands, env passthrough, and a network toggle in settings. Approval requests are surfaced inline in the conversation timeline and can be accepted or denied from the keyboard or mouse.
-
 ## Notes
 
-- The repository includes a vertical slice, not the full Pi product surface.
-- The sidecar contract and event model are shaped for real Pi integration.
-- Git data is fetched safely with read-only commands in the current scaffold.
+`picode` is still early. Expect rough edges.
+
+App state is stored locally in the platform app-data directory.
