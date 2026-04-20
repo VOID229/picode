@@ -62,9 +62,11 @@ export function TimelineItemView({
     return (
       <article className="chat-row chat-row--user animate-slide-up">
         <div className="chat-user-stack">
+          <div className="chat-bubble chat-bubble--user">{item.content}</div>
           <div className="chat-message-actions">
             <button
               className="chat-message-action"
+              title="Copy"
               type="button"
               onClick={async () => {
                 const { writeText } =
@@ -73,10 +75,10 @@ export function TimelineItemView({
               }}
             >
               <Copy size={13} />
-              <span>Copy</span>
             </button>
             <button
               className="chat-message-action"
+              title="Fork"
               type="button"
               onClick={async () => {
                 const nextSessionId = await createSession(workspaceId, {
@@ -89,10 +91,10 @@ export function TimelineItemView({
               }}
             >
               <GitFork size={13} />
-              <span>Fork</span>
             </button>
             <button
               className="chat-message-action"
+              title="Undo"
               type="button"
               onClick={async () => {
                 if (!git?.isRepo) {
@@ -121,10 +123,8 @@ export function TimelineItemView({
               }}
             >
               <RotateCcw size={13} />
-              <span>Undo</span>
             </button>
           </div>
-          <div className="chat-bubble chat-bubble--user">{item.content}</div>
         </div>
       </article>
     );
