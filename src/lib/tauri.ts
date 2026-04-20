@@ -5,6 +5,8 @@ import type {
   GitSnapshot,
   PersistedAppState,
   PiRuntimeEvent,
+  RunTerminalCommandResult,
+  TerminalEvent,
   RuntimeBootstrapPayload,
   RuntimeHealthPayload,
   WorkspaceRuntimeCatalogPayload,
@@ -174,10 +176,47 @@ export async function openPath(path: string) {
   return await invoke<void>("open_path", { path });
 }
 
+export async function ensureTerminalSession(payload: { workspaceId: string }) {
+  return await invoke<void>("ensure_terminal_session", { payload });
+}
+
+export async function writeTerminalInput(payload: {
+  workspaceId: string;
+  data: string;
+}) {
+  return await invoke<void>("write_terminal_input", { payload });
+}
+
+export async function resizeTerminal(payload: {
+  workspaceId: string;
+  cols: number;
+  rows: number;
+}) {
+  return await invoke<void>("resize_terminal", { payload });
+}
+
+export async function runTerminalCommand(payload: {
+  workspaceId: string;
+  command: string;
+  refreshGit?: boolean;
+}) {
+  return normalize(
+    await invoke<RunTerminalCommandResult>("run_terminal_command", { payload }),
+  );
+}
+
 export async function listenToPiEvents(
   handler: (event: PiRuntimeEvent) => void,
 ) {
   return listen<PiRuntimeEvent>("pi://event", (event) =>
+    handler(normalize(event.payload)),
+  );
+}
+
+export async function listenToTerminalEvents(
+  handler: (event: TerminalEvent) => void,
+) {
+  return listen<TerminalEvent>("terminal://event", (event) =>
     handler(normalize(event.payload)),
   );
 }

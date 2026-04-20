@@ -3,12 +3,14 @@ import { useEffect, useMemo } from "react";
 import type { PropsWithChildren } from "react";
 import { ThemeController } from "../components/settings/ThemeController";
 import { usePiBridge } from "../services/piBridge";
+import { useTerminalBridge } from "../services/terminalBridge";
 import { useAppStore } from "../state/useAppStore";
 
 function AppBootstrap() {
   const initialize = useAppStore((state) => state.initialize);
 
   usePiBridge();
+  useTerminalBridge();
 
   useEffect(() => {
     void initialize();

@@ -1,48 +1,62 @@
-import { useEffect, useMemo, useState } from "react";
-import { useDeferredValue } from "react";
+import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { openPath } from "../../lib/tauri";
+import { useAppStore } from "../../state/useAppStore";
+import { AddActionModal } from "../action/AddActionModal";
 import { ConversationView } from "../chat/ConversationView";
 import { CommandPalette } from "../command/CommandPalette";
 import { Sidebar } from "../sidebar/Sidebar";
-import { AddActionModal } from "../action/AddActionModal";
-import { useAppStore } from "../../state/useAppStore";
+import { TerminalPane } from "../terminal/TerminalPane";
+import { PromptModal } from "./PromptModal";
 import {
-  Plus,
-  Play,
-  ChevronDown,
-  SquareTerminal,
-  GitCompare,
-  GitCommit,
-  CloudUpload,
-  GitPullRequest,
   AppWindow,
-  Folder,
-  FlaskConical,
-  ListChecks,
-  Wrench,
-  Hammer,
   Bug,
+  ChevronDown,
+  CloudUpload,
+  FlaskConical,
+  Folder,
+  GitCommit,
+  GitCompare,
+  GitPullRequest,
+  Hammer,
+  ListChecks,
+  Play,
+  Plus,
   Settings,
+  SquareTerminal,
+  Wrench,
 } from "lucide-react";
+
+function shellQuote(value: string) {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
 
 export function AppShell() {
   const isBootstrapping = useAppStore((state) => state.isBootstrapping);
   const state = useAppStore((store) => store.state);
+  const git = useAppStore((store) => store.git);
   const customActions = useAppStore((store) => store.customActions);
   const createSession = useAppStore((store) => store.createSession);
   const runtimeInstall = useAppStore((store) => store.runtimeInstall);
   const refreshWorkspaceRuntimeCatalog = useAppStore(
     (store) => store.refreshWorkspaceRuntimeCatalog,
   );
+  const runTerminalCommand = useAppStore((store) => store.runTerminalCommand);
+  const ensureTerminalSession = useAppStore(
+    (store) => store.ensureTerminalSession,
+  );
+  const terminalPaneOpen = useAppStore((store) => store.terminalPaneOpen);
+  const setTerminalPaneOpen = useAppStore((store) => store.setTerminalPaneOpen);
   const navigate = useNavigate();
+
   const [showActionModal, setShowActionModal] = useState(false);
   const [showActionDropdown, setShowActionDropdown] = useState(false);
-  const [editingActionId, setEditingActionId] = useState<string | undefined>(
-    undefined,
-  );
-  const [forceGitRef, setForceGitRef] = useState(false); // Local simulation
+  const [editingActionId, setEditingActionId] = useState<string | undefined>();
   const [showGitDropdown, setShowGitDropdown] = useState(false);
   const [showOpenDropdown, setShowOpenDropdown] = useState(false);
+  const [gitPromptMode, setGitPromptMode] = useState<
+    null | "commit" | "commit-push"
+  >(null);
 
   useEffect(() => {
     const handleShortcut = (event: KeyboardEvent) => {
@@ -81,6 +95,8 @@ export function AppShell() {
     [activeWorkspace, customActions],
   );
 
+  const gitSnapshot = activeWorkspace ? git[activeWorkspace.id] : undefined;
+  const hasGit = Boolean(gitSnapshot?.isRepo);
   const deferredSession = useDeferredValue(activeSession);
 
   useEffect(() => {
@@ -109,6 +125,54 @@ export function AppShell() {
       default:
         return <Play size={size} />;
     }
+  };
+
+  const runWorkspaceAction = async (command: string, refreshGit = false) => {
+    if (!activeWorkspace) {
+      return;
+    }
+
+    await runTerminalCommand(activeWorkspace.id, command, {
+      openPane: true,
+      refreshGit,
+    });
+  };
+
+  const handlePrimaryOpen = async () => {
+    if (!activeWorkspace) {
+      return;
+    }
+    await openPath(activeWorkspace.path);
+  };
+
+  const handleTerminalToggle = async () => {
+    const next = !terminalPaneOpen;
+    setTerminalPaneOpen(next);
+    if (next && activeWorkspace) {
+      await ensureTerminalSession(activeWorkspace.id);
+    }
+  };
+
+  const handleCommitPrompt = async (message: string) => {
+    if (!activeWorkspace) {
+      return;
+    }
+
+    const trimmed = message.trim();
+    if (!trimmed) {
+      return;
+    }
+
+    const command =
+      gitPromptMode === "commit-push"
+        ? `git add -A && git commit -m ${shellQuote(trimmed)} && git push`
+        : `git add -A && git commit -m ${shellQuote(trimmed)}`;
+
+    setGitPromptMode(null);
+    await runTerminalCommand(activeWorkspace.id, command, {
+      openPane: true,
+      refreshGit: true,
+    });
   };
 
   if (isBootstrapping || !state) {
@@ -160,15 +224,15 @@ export function AppShell() {
                 {activeWorkspace.name}
               </span>
             )}
-            {!forceGitRef && (
+            {activeWorkspace && !hasGit && (
               <span
                 style={{
                   padding: "2px 8px",
                   borderRadius: "12px",
-                  border: "1px solid #422",
+                  border: "1px solid #4a3721",
                   fontSize: "0.75rem",
-                  color: "#f80",
-                  background: "rgba(255,136,0,0.05)",
+                  color: "#c59b6d",
+                  background: "rgba(197,155,109,0.08)",
                 }}
               >
                 No Git
@@ -188,8 +252,11 @@ export function AppShell() {
                       borderRight: "none",
                     }}
                     title={activeWorkspaceActions[0].command}
+                    onClick={() =>
+                      void runWorkspaceAction(activeWorkspaceActions[0].command)
+                    }
                   >
-                    {getIcon(activeWorkspaceActions[0].icon)}{" "}
+                    {getIcon(activeWorkspaceActions[0].icon)}
                     {activeWorkspaceActions[0].name}
                   </button>
                   <button
@@ -199,7 +266,7 @@ export function AppShell() {
                       borderBottomLeftRadius: 0,
                       padding: "6px 4px",
                     }}
-                    onClick={() => setShowActionDropdown(!showActionDropdown)}
+                    onClick={() => setShowActionDropdown((value) => !value)}
                   >
                     <ChevronDown size={14} />
                   </button>
@@ -211,24 +278,7 @@ export function AppShell() {
                       className="click-away-layer"
                       onClick={() => setShowActionDropdown(false)}
                     />
-                    <div
-                      style={{
-                        position: "absolute",
-                        top: "100%",
-                        right: 0,
-                        marginTop: "8px",
-                        background: "#1C1C1E",
-                        border: "1px solid #333",
-                        borderRadius: "12px",
-                        padding: "8px",
-                        minWidth: "200px",
-                        zIndex: 40,
-                        boxShadow: "0 12px 30px rgba(0,0,0,0.5)",
-                        display: "flex",
-                        flexDirection: "column",
-                        gap: "2px",
-                      }}
-                    >
+                    <div className="app-shell__dropdown">
                       {activeWorkspaceActions.map((action) => (
                         <div
                           key={action.id}
@@ -241,8 +291,8 @@ export function AppShell() {
                         >
                           <button
                             onClick={() => {
-                              // TODO: Run action
                               setShowActionDropdown(false);
+                              void runWorkspaceAction(action.command);
                             }}
                             style={{
                               background: "transparent",
@@ -258,13 +308,13 @@ export function AppShell() {
                               padding: 0,
                             }}
                           >
-                            {getIcon(action.icon)}{" "}
+                            {getIcon(action.icon)}
                             <span style={{ flex: 1 }}>{action.name}</span>
                           </button>
 
                           <button
-                            onClick={(e) => {
-                              e.stopPropagation();
+                            onClick={(event) => {
+                              event.stopPropagation();
                               setEditingActionId(action.id);
                               setShowActionModal(true);
                               setShowActionDropdown(false);
@@ -323,7 +373,8 @@ export function AppShell() {
                   borderBottomRightRadius: 0,
                   borderRight: "none",
                 }}
-                title="Open in default editor"
+                title="Open current directory"
+                onClick={() => void handlePrimaryOpen()}
               >
                 <AppWindow size={14} /> Open
               </button>
@@ -334,41 +385,34 @@ export function AppShell() {
                   borderBottomLeftRadius: 0,
                   padding: "6px 4px",
                 }}
-                title="Change editor"
-                onClick={() => setShowOpenDropdown(!showOpenDropdown)}
+                title="Change open target"
+                onClick={() => setShowOpenDropdown((value) => !value)}
               >
                 <ChevronDown size={14} />
               </button>
 
-              {showOpenDropdown && (
+              {showOpenDropdown && activeWorkspace && (
                 <>
                   <div
                     className="click-away-layer"
                     onClick={() => setShowOpenDropdown(false)}
                   />
                   <div
-                    style={{
-                      position: "absolute",
-                      top: "100%",
-                      right: 0,
-                      marginTop: "8px",
-                      background: "#1C1C1E",
-                      border: "1px solid #333",
-                      borderRadius: "12px",
-                      padding: "8px",
-                      minWidth: "180px",
-                      zIndex: 40,
-                      boxShadow: "0 12px 30px rgba(0,0,0,0.5)",
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: "2px",
-                    }}
+                    className="app-shell__dropdown"
+                    style={{ minWidth: "180px" }}
                   >
                     <button
                       className="dropdown-item"
-                      onClick={() => setShowOpenDropdown(false)}
+                      onClick={() => {
+                        setShowOpenDropdown(false);
+                        void runTerminalCommand(
+                          activeWorkspace.id,
+                          `open -a Zed ${shellQuote(activeWorkspace.path)}`,
+                          { openPane: false },
+                        );
+                      }}
                     >
-                      <AppWindow size={14} />{" "}
+                      <AppWindow size={14} />
                       <span style={{ flex: 1 }}>Zed</span>
                       <span style={{ fontSize: "0.7rem", color: "#666" }}>
                         ⌘O
@@ -376,9 +420,12 @@ export function AppShell() {
                     </button>
                     <button
                       className="dropdown-item"
-                      onClick={() => setShowOpenDropdown(false)}
+                      onClick={() => {
+                        setShowOpenDropdown(false);
+                        void openPath(activeWorkspace.path);
+                      }}
                     >
-                      <Folder size={14} />{" "}
+                      <Folder size={14} />
                       <span style={{ flex: 1 }}>Finder</span>
                     </button>
                   </div>
@@ -386,10 +433,18 @@ export function AppShell() {
               )}
             </div>
 
-            {!forceGitRef ? (
+            {!hasGit ? (
               <button
                 className="topbar-btn"
-                onClick={() => setForceGitRef(true)}
+                disabled={!activeWorkspace}
+                onClick={() => {
+                  if (activeWorkspace) {
+                    void runTerminalCommand(activeWorkspace.id, "git init", {
+                      openPane: true,
+                      refreshGit: true,
+                    });
+                  }
+                }}
               >
                 Initialize Git
               </button>
@@ -403,6 +458,7 @@ export function AppShell() {
                       borderBottomRightRadius: 0,
                       borderRight: "none",
                     }}
+                    onClick={() => setGitPromptMode("commit-push")}
                   >
                     <CloudUpload size={14} /> Commit & push
                   </button>
@@ -413,51 +469,59 @@ export function AppShell() {
                       borderBottomLeftRadius: 0,
                       padding: "6px 4px",
                     }}
-                    onClick={() => setShowGitDropdown(!showGitDropdown)}
+                    onClick={() => setShowGitDropdown((value) => !value)}
                   >
                     <ChevronDown size={14} />
                   </button>
                 </div>
 
-                {showGitDropdown && (
+                {showGitDropdown && activeWorkspace && (
                   <>
                     <div
                       className="click-away-layer"
                       onClick={() => setShowGitDropdown(false)}
                     />
                     <div
-                      style={{
-                        position: "absolute",
-                        top: "100%",
-                        right: 0,
-                        marginTop: "8px",
-                        background: "#1C1C1E",
-                        border: "1px solid #333",
-                        borderRadius: "12px",
-                        padding: "8px",
-                        minWidth: "160px",
-                        zIndex: 40,
-                        boxShadow: "0 12px 30px rgba(0,0,0,0.5)",
-                        display: "flex",
-                        flexDirection: "column",
-                        gap: "2px",
-                      }}
+                      className="app-shell__dropdown"
+                      style={{ minWidth: "170px" }}
                     >
                       <button
                         className="dropdown-item"
-                        onClick={() => setShowGitDropdown(false)}
+                        onClick={() => {
+                          setShowGitDropdown(false);
+                          setGitPromptMode("commit");
+                        }}
                       >
                         <GitCommit size={14} /> Commit
                       </button>
                       <button
                         className="dropdown-item"
-                        onClick={() => setShowGitDropdown(false)}
+                        onClick={() => {
+                          setShowGitDropdown(false);
+                          void runTerminalCommand(
+                            activeWorkspace.id,
+                            "git push",
+                            {
+                              openPane: true,
+                              refreshGit: true,
+                            },
+                          );
+                        }}
                       >
                         <CloudUpload size={14} /> Push
                       </button>
                       <button
                         className="dropdown-item"
-                        onClick={() => setShowGitDropdown(false)}
+                        onClick={() => {
+                          setShowGitDropdown(false);
+                          void runTerminalCommand(
+                            activeWorkspace.id,
+                            "gh pr create --fill",
+                            {
+                              openPane: true,
+                            },
+                          );
+                        }}
                       >
                         <GitPullRequest size={14} /> Create PR
                       </button>
@@ -467,7 +531,11 @@ export function AppShell() {
               </div>
             )}
 
-            <button className="topbar-btn icon-only" title="Terminal">
+            <button
+              className="topbar-btn icon-only"
+              title="Terminal"
+              onClick={() => void handleTerminalToggle()}
+            >
               <SquareTerminal size={14} />
             </button>
             <button className="topbar-btn icon-only" title="Diff">
@@ -476,11 +544,20 @@ export function AppShell() {
           </div>
         </header>
 
-        <section className="conversation-view">
+        <section
+          className="conversation-view"
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            minHeight: 0,
+            flex: 1,
+          }}
+        >
           <ConversationView
             workspace={activeWorkspace}
             session={deferredSession}
           />
+          <TerminalPane workspace={activeWorkspace} />
         </section>
       </main>
 
@@ -492,6 +569,20 @@ export function AppShell() {
             setShowActionModal(false);
             setEditingActionId(undefined);
           }}
+        />
+      )}
+
+      {gitPromptMode && (
+        <PromptModal
+          title={
+            gitPromptMode === "commit-push"
+              ? "Commit message for commit and push"
+              : "Commit message"
+          }
+          onConfirm={(value) => {
+            void handleCommitPrompt(value);
+          }}
+          onCancel={() => setGitPromptMode(null)}
         />
       )}
 
@@ -518,6 +609,10 @@ export function AppShell() {
           background: #222;
           color: #fff;
         }
+        .topbar-btn:disabled {
+          opacity: 0.45;
+          cursor: not-allowed;
+        }
         .icon-only {
           padding: 0;
           width: 28px;
@@ -526,6 +621,22 @@ export function AppShell() {
           position: fixed;
           inset: 0;
           z-index: 30;
+        }
+        .app-shell__dropdown {
+          position: absolute;
+          top: 100%;
+          right: 0;
+          margin-top: 8px;
+          background: #1c1c1e;
+          border: 1px solid #333;
+          border-radius: 12px;
+          padding: 8px;
+          min-width: 200px;
+          z-index: 40;
+          box-shadow: 0 12px 30px rgba(0, 0, 0, 0.5);
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
         }
         .dropdown-item {
           background: transparent;
@@ -544,7 +655,7 @@ export function AppShell() {
           cursor: default;
         }
         .dropdown-item:hover {
-          background: #2A2A2C;
+          background: #2a2a2c;
           color: white;
         }
         .dropdown-item.group .edit-action-btn {

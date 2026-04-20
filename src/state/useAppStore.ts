@@ -6,6 +6,8 @@ import type {
   PersistedAppState,
   PiInstallStatus,
   PiRuntimeEvent,
+  TerminalEvent,
+  TerminalSessionState,
   TimelineItem,
   WorkspaceRecord,
 } from "../domains/types";
@@ -29,6 +31,10 @@ import {
   archiveSession as archiveSessionCommand,
   restoreSession as restoreSessionCommand,
   deleteSession as deleteSessionCommand,
+  ensureTerminalSession as ensureTerminalSessionCommand,
+  writeTerminalInput as writeTerminalInputCommand,
+  resizeTerminal as resizeTerminalCommand,
+  runTerminalCommand as runTerminalCommandCommand,
 } from "../lib/tauri";
 
 let initializePromise: Promise<void> | null = null;
@@ -46,8 +52,10 @@ interface AppStoreState {
   isBootstrapping: boolean;
   connectionReady: boolean;
   commandPaletteOpen: boolean;
+  terminalPaneOpen: boolean;
   state: PersistedAppState | null;
   git: Record<string, GitSnapshot>;
+  terminals: Record<string, TerminalSessionState>;
   customActions: Record<string, CustomAction[]>; // workspaceId -> CustomAction[]
   currentMode: "plan" | "build";
   runtimeInstall?: PiInstallStatus;
@@ -58,6 +66,7 @@ interface AppStoreState {
   initialize: () => Promise<void>;
   setConnectionReady: (ready: boolean) => void;
   setCommandPaletteOpen: (open: boolean) => void;
+  setTerminalPaneOpen: (open: boolean) => void;
   setCurrentMode: (mode: "plan" | "build") => void;
   addCustomAction: (
     workspaceId: string,
@@ -104,9 +113,22 @@ interface AppStoreState {
     approvalId: string,
     decision: "approved" | "rejected",
   ) => Promise<void>;
+  ensureTerminalSession: (workspaceId: string) => Promise<void>;
+  writeTerminalInput: (workspaceId: string, data: string) => Promise<void>;
+  resizeTerminal: (
+    workspaceId: string,
+    cols: number,
+    rows: number,
+  ) => Promise<void>;
+  runTerminalCommand: (
+    workspaceId: string,
+    command: string,
+    options?: { refreshGit?: boolean; openPane?: boolean },
+  ) => Promise<void>;
   refreshRuntimeHealth: () => Promise<void>;
   refreshWorkspaceRuntimeCatalog: (workspaceId: string) => Promise<void>;
   applyRuntimeEvent: (event: PiRuntimeEvent) => void;
+  applyTerminalEvent: (event: TerminalEvent) => void;
 }
 
 function findSession(
@@ -148,12 +170,28 @@ function applyRuntimeMetadata(
   };
 }
 
+function createTerminalState(workspaceId: string): TerminalSessionState {
+  return {
+    workspaceId,
+    open: false,
+    status: "idle",
+    buffer: "",
+  };
+}
+
+function trimTerminalBuffer(buffer: string) {
+  const maxBuffer = 250_000;
+  return buffer.length > maxBuffer ? buffer.slice(-maxBuffer) : buffer;
+}
+
 export const useAppStore = create<AppStoreState>((set, get) => ({
   isBootstrapping: true,
   connectionReady: false,
   commandPaletteOpen: false,
+  terminalPaneOpen: false,
   state: null,
   git: {},
+  terminals: {},
   customActions: {},
   currentMode: "build",
   workspaceCatalogs: {},
@@ -219,6 +257,9 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
   },
   setCommandPaletteOpen(commandPaletteOpen) {
     set({ commandPaletteOpen });
+  },
+  setTerminalPaneOpen(terminalPaneOpen) {
+    set({ terminalPaneOpen });
   },
   setCurrentMode(currentMode) {
     set({ currentMode });
@@ -326,12 +367,15 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
     set((store) => {
       const nextCatalogs = { ...store.workspaceCatalogs };
       const nextErrors = { ...store.workspaceCatalogErrors };
+      const nextTerminals = { ...store.terminals };
       delete nextCatalogs[workspaceId];
       delete nextErrors[workspaceId];
+      delete nextTerminals[workspaceId];
       return {
         state,
         workspaceCatalogs: nextCatalogs,
         workspaceCatalogErrors: nextErrors,
+        terminals: nextTerminals,
       };
     });
   },
@@ -352,8 +396,62 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
     set({ state });
   },
   async sendPrompt(workspaceId, sessionId, prompt) {
-    const state = await sendPromptCommand({ workspaceId, sessionId, prompt });
-    set({ state });
+    const createdAt = new Date().toISOString();
+    set((store) => {
+      if (!store.state) {
+        return store;
+      }
+
+      const nextState = structuredClone(store.state);
+      const { session } = findSession(nextState, workspaceId, sessionId);
+      if (!session) {
+        return store;
+      }
+
+      session.timeline.push({
+        id: crypto.randomUUID(),
+        kind: "user-message",
+        content: prompt,
+        createdAt,
+      });
+      session.status = "streaming";
+      session.updatedAt = createdAt;
+
+      return { state: nextState };
+    });
+
+    try {
+      await sendPromptCommand({ workspaceId, sessionId, prompt });
+    } catch (error) {
+      set((store) => {
+        if (!store.state) {
+          return {
+            runtimeGlobalError:
+              error instanceof Error ? error.message : String(error),
+          };
+        }
+
+        const nextState = structuredClone(store.state);
+        const { session } = findSession(nextState, workspaceId, sessionId);
+        if (session) {
+          session.status = "error";
+          session.timeline.push({
+            id: crypto.randomUUID(),
+            kind: "error",
+            title: "Send failed",
+            detail: error instanceof Error ? error.message : String(error),
+            createdAt: new Date().toISOString(),
+          });
+        }
+
+        return {
+          state: nextState,
+          runtimeGlobalError:
+            error instanceof Error ? error.message : String(error),
+        };
+      });
+      throw error;
+    }
   },
   async abortPrompt(workspaceId, sessionId) {
     const state = await abortPromptCommand({ workspaceId, sessionId });
@@ -367,6 +465,73 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
       decision,
     });
     set({ state });
+  },
+  async ensureTerminalSession(workspaceId) {
+    set((store) => ({
+      terminals: {
+        ...store.terminals,
+        [workspaceId]: {
+          ...(store.terminals[workspaceId] ?? createTerminalState(workspaceId)),
+          open: true,
+          status:
+            (store.terminals[workspaceId]?.status ?? "idle") === "ready"
+              ? "ready"
+              : "connecting",
+          error: undefined,
+        },
+      },
+    }));
+    await ensureTerminalSessionCommand({ workspaceId });
+  },
+  async writeTerminalInput(workspaceId, data) {
+    await get().ensureTerminalSession(workspaceId);
+    await writeTerminalInputCommand({ workspaceId, data });
+  },
+  async resizeTerminal(workspaceId, cols, rows) {
+    const safeCols = Math.max(2, Math.floor(cols));
+    const safeRows = Math.max(2, Math.floor(rows));
+    await get().ensureTerminalSession(workspaceId);
+    await resizeTerminalCommand({
+      workspaceId,
+      cols: safeCols,
+      rows: safeRows,
+    });
+  },
+  async runTerminalCommand(workspaceId, command, options) {
+    if (!command.trim()) {
+      return;
+    }
+
+    if (options?.openPane !== false) {
+      get().setTerminalPaneOpen(true);
+    }
+
+    await get().ensureTerminalSession(workspaceId);
+    const result = await runTerminalCommandCommand({
+      workspaceId,
+      command,
+      refreshGit: options?.refreshGit,
+    });
+
+    set((store) => {
+      const terminal =
+        store.terminals[workspaceId] ?? createTerminalState(workspaceId);
+      return {
+        terminals: {
+          ...store.terminals,
+          [workspaceId]: {
+            ...terminal,
+            open: true,
+            status: "ready",
+            activeCommand: {
+              id: result.commandId,
+              command,
+            },
+            error: undefined,
+          },
+        },
+      };
+    });
   },
   async refreshRuntimeHealth() {
     const payload = await runtimeHealthcheckCommand();
@@ -652,6 +817,95 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
       }
 
       return { ...store, state };
+    });
+  },
+  applyTerminalEvent(event) {
+    set((store) => {
+      const current =
+        store.terminals[event.workspaceId] ??
+        createTerminalState(event.workspaceId);
+
+      switch (event.type) {
+        case "started":
+          return {
+            terminals: {
+              ...store.terminals,
+              [event.workspaceId]: {
+                ...current,
+                open: true,
+                status: "ready",
+                error: undefined,
+              },
+            },
+          };
+        case "output":
+          return {
+            terminals: {
+              ...store.terminals,
+              [event.workspaceId]: {
+                ...current,
+                open: true,
+                status:
+                  current.status === "connecting" ? "ready" : current.status,
+                buffer: trimTerminalBuffer(current.buffer + event.chunk),
+              },
+            },
+          };
+        case "command-finished":
+          return {
+            git: event.gitSnapshot
+              ? { ...store.git, [event.workspaceId]: event.gitSnapshot }
+              : store.git,
+            terminals: {
+              ...store.terminals,
+              [event.workspaceId]: {
+                ...current,
+                open: true,
+                status: "ready",
+                activeCommand:
+                  current.activeCommand?.id === event.commandId
+                    ? undefined
+                    : current.activeCommand,
+                lastCommand: {
+                  id: event.commandId,
+                  command: event.command,
+                  exitCode: event.exitCode,
+                },
+                error:
+                  event.exitCode === 0
+                    ? undefined
+                    : `Command exited with code ${event.exitCode}`,
+              },
+            },
+          };
+        case "error":
+          return {
+            terminals: {
+              ...store.terminals,
+              [event.workspaceId]: {
+                ...current,
+                open: true,
+                status: "error",
+                error: event.message,
+              },
+            },
+          };
+        case "exit":
+          return {
+            terminals: {
+              ...store.terminals,
+              [event.workspaceId]: {
+                ...current,
+                status: "exited",
+                activeCommand: undefined,
+                error:
+                  event.exitCode === undefined
+                    ? current.error
+                    : `Shell exited with code ${event.exitCode}`,
+              },
+            },
+          };
+      }
     });
   },
 }));

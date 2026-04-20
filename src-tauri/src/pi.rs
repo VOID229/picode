@@ -1147,7 +1147,6 @@ async fn emit_status(
                 title: label.clone(),
                 detail: detail.clone().unwrap_or_default(),
             });
-            session.status = SessionStatus::Idle;
             session.updated_at = now_iso();
             storage::save(app, &state)?;
         }
@@ -1661,25 +1660,12 @@ pub async fn launch_prompt_stream(
     shared: AppState,
     payload: SendPromptPayload,
 ) -> Result<()> {
-    let resolved = resolve_pi_install(&shared).await?;
-    let binary_path = resolved
-        .binary_path
-        .context("Pi is not installed or failed validation")?;
-
-    let catalog =
-        fetch_workspace_catalog_and_normalize(&app, &shared, &payload.workspace_id, &binary_path)
-            .await?;
-
-    if catalog.providers.is_empty() {
-        return Err(anyhow!(
-            "No Pi models are configured for this workspace. Run `pi` in the project and configure a provider first."
-        ));
+    let key = session_key(&payload.workspace_id, &payload.session_id);
+    if shared.runtime.get_session(&key).await.is_some() {
+        return Err(anyhow!("A Pi prompt is already active for this session."));
     }
 
-    let session_file = session_file_path(&app, &payload.workspace_id, &payload.session_id)?;
-    let session_file_string = session_file.to_string_lossy().into_owned();
-
-    let (workspace_path, provider_id, model_id, effort) = {
+    {
         let mut state = shared.state.lock().await;
         let workspace = state
             .workspaces
@@ -1698,88 +1684,161 @@ pub async fn launch_prompt_stream(
             content: payload.prompt.clone(),
         });
         session.status = SessionStatus::Streaming;
-        session.runtime.provider_id = Some(catalog.selected_provider_id.clone());
-        session.runtime.model_id = Some(catalog.selected_model_id.clone());
-        session.runtime.pi_session_file = Some(session_file_string.clone());
-        session.runtime.last_known_ready = true;
+        session.runtime.provider_id = None;
+        session.runtime.model_id = None;
+        session.runtime.pi_session_file = None;
+        session.runtime.last_known_ready = false;
         session.runtime.last_error = None;
         session.updated_at = now_iso();
 
-        workspace.provider_id = catalog.selected_provider_id.clone();
-        workspace.model_id = catalog.selected_model_id.clone();
-        let workspace_path = expand_user_path(&workspace.path);
-        let provider_id = workspace.provider_id.clone();
-        let model_id = workspace.model_id.clone();
-        let effort = workspace.effort.clone();
         storage::save(&app, &state)?;
-
-        (workspace_path, provider_id, model_id, effort)
-    };
-
-    let mut command = command_for_binary(&binary_path);
-    command
-        .arg("--mode")
-        .arg("rpc")
-        .arg("--session")
-        .arg(&session_file)
-        .arg("--provider")
-        .arg(&provider_id)
-        .arg("--model")
-        .arg(&model_id)
-        .arg("--thinking")
-        .arg(map_effort_to_thinking(&effort))
-        .current_dir(&workspace_path)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true);
-
-    let mut child = command
-        .spawn()
-        .with_context(|| format!("failed to spawn Pi from {}", binary_path.to_string_lossy()))?;
-
-    let stdin = child.stdin.take().context("Pi stdin was not available")?;
-    let stdout = child.stdout.take().context("Pi stdout was not available")?;
-    let stderr = child.stderr.take().context("Pi stderr was not available")?;
-
-    let session_handle = ActiveSessionHandle::new(child, stdin);
-    let key = session_key(&payload.workspace_id, &payload.session_id);
-    shared
-        .runtime
-        .insert_session(key.clone(), session_handle.clone())
-        .await?;
-
-    tokio::spawn(handle_session_stdout(
-        app.clone(),
-        shared.clone(),
-        session_handle.clone(),
-        payload.workspace_id.clone(),
-        payload.session_id.clone(),
-        session_file_string.clone(),
-        stdout,
-    ));
-    tokio::spawn(handle_session_stderr(
-        app.clone(),
-        payload.workspace_id.clone(),
-        payload.session_id.clone(),
-        stderr,
-    ));
-
-    let prompt_result: Result<Value> = session_handle
-        .request(&json!({
-            "type": "prompt",
-            "message": payload.prompt,
-        }))
-        .await;
-
-    if let Err(error) = prompt_result {
-        let _ = shared.runtime.remove_session(&key).await;
-        session_handle.mark_abort_requested();
-        session_handle.terminate().await;
-        return Err(error);
     }
 
+    tokio::spawn(run_prompt_stream(app, shared, payload));
+
     Ok(())
+}
+
+async fn run_prompt_stream(app: AppHandle, shared: AppState, payload: SendPromptPayload) {
+    let workspace_id = payload.workspace_id.clone();
+    let session_id = payload.session_id.clone();
+    let prompt = payload.prompt.clone();
+    let key = session_key(&workspace_id, &session_id);
+
+    let result = async {
+        let resolved = resolve_pi_install(&shared).await?;
+        let binary_path = resolved
+            .binary_path
+            .context("Pi is not installed or failed validation")?;
+
+        let catalog =
+            fetch_workspace_catalog_and_normalize(&app, &shared, &workspace_id, &binary_path)
+                .await?;
+
+        if catalog.providers.is_empty() {
+            return Err(anyhow!(
+                "No Pi models are configured for this workspace. Run `pi` in the project and configure a provider first."
+            ));
+        }
+
+        let session_file = session_file_path(&app, &workspace_id, &session_id)?;
+        let session_file_string = session_file.to_string_lossy().into_owned();
+
+        let (workspace_path, provider_id, model_id, effort) = {
+            let mut state = shared.state.lock().await;
+            let workspace = state
+                .workspaces
+                .iter_mut()
+                .find(|workspace| workspace.id == workspace_id)
+                .context("workspace not found")?;
+            let session = workspace
+                .sessions
+                .iter_mut()
+                .find(|session| session.id == session_id)
+                .context("session not found")?;
+
+            session.runtime.provider_id = Some(catalog.selected_provider_id.clone());
+            session.runtime.model_id = Some(catalog.selected_model_id.clone());
+            session.runtime.pi_session_file = Some(session_file_string.clone());
+            session.runtime.last_known_ready = true;
+            session.runtime.last_error = None;
+            session.updated_at = now_iso();
+
+            workspace.provider_id = catalog.selected_provider_id.clone();
+            workspace.model_id = catalog.selected_model_id.clone();
+            let workspace_path = expand_user_path(&workspace.path);
+            let provider_id = workspace.provider_id.clone();
+            let model_id = workspace.model_id.clone();
+            let effort = workspace.effort.clone();
+            storage::save(&app, &state)?;
+
+            (workspace_path, provider_id, model_id, effort)
+        };
+
+        let mut command = command_for_binary(&binary_path);
+        command
+            .arg("--mode")
+            .arg("rpc")
+            .arg("--session")
+            .arg(&session_file)
+            .arg("--provider")
+            .arg(&provider_id)
+            .arg("--model")
+            .arg(&model_id)
+            .arg("--thinking")
+            .arg(map_effort_to_thinking(&effort))
+            .current_dir(&workspace_path)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true);
+
+        let mut child = command
+            .spawn()
+            .with_context(|| format!("failed to spawn Pi from {}", binary_path.to_string_lossy()))?;
+
+        let stdin = child.stdin.take().context("Pi stdin was not available")?;
+        let stdout = child.stdout.take().context("Pi stdout was not available")?;
+        let stderr = child.stderr.take().context("Pi stderr was not available")?;
+
+        let session_handle = ActiveSessionHandle::new(child, stdin);
+        shared
+            .runtime
+            .insert_session(key.clone(), session_handle.clone())
+            .await?;
+
+        tokio::spawn(handle_session_stdout(
+            app.clone(),
+            shared.clone(),
+            session_handle.clone(),
+            workspace_id.clone(),
+            session_id.clone(),
+            session_file_string.clone(),
+            stdout,
+        ));
+        tokio::spawn(handle_session_stderr(
+            app.clone(),
+            workspace_id.clone(),
+            session_id.clone(),
+            stderr,
+        ));
+
+        let prompt_result: Result<Value> = session_handle
+            .request(&json!({
+                "type": "prompt",
+                "message": prompt,
+            }))
+            .await;
+
+        if let Err(error) = prompt_result {
+            let _ = shared.runtime.remove_session(&key).await;
+            session_handle.mark_abort_requested();
+            session_handle.terminate().await;
+            return Err(error);
+        }
+
+        Ok(())
+    }
+    .await;
+
+    if let Err(error) = result {
+        let message = error.to_string();
+        let _ = emit_error(
+            &app,
+            &shared,
+            Some(&workspace_id),
+            Some(&session_id),
+            message,
+            Some(SessionRuntimeMetadata {
+                provider_id: None,
+                model_id: None,
+                pi_session_file: None,
+                last_known_ready: false,
+                last_error: None,
+            }),
+        )
+        .await;
+    }
 }
 
 pub async fn abort_prompt(

@@ -1,4 +1,13 @@
-import { ArrowUp, Bot, FileText, Zap, Check } from "lucide-react";
+import {
+  ArrowUp,
+  Bot,
+  FileText,
+  LoaderCircle,
+  Search,
+  Wrench,
+  Zap,
+  Check,
+} from "lucide-react";
 import { useMemo, useState, useRef, useEffect } from "react";
 import type { ChatSession, WorkspaceRecord } from "../../domains/types";
 import { useAppStore } from "../../state/useAppStore";
@@ -20,6 +29,7 @@ export function ConversationView({
   const [effortDropdownOpen, setEffortDropdownOpen] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const timelineRef = useRef<HTMLDivElement>(null);
+  const shouldStickToBottomRef = useRef(true);
 
   const runtimeInstall = useAppStore((store) => store.runtimeInstall);
   const workspaceCatalogs = useAppStore((store) => store.workspaceCatalogs);
@@ -55,11 +65,11 @@ export function ConversationView({
       return;
     }
     closeComposerMenus();
-    await sendPrompt(workspace.id, session.id, value);
     setDraft("");
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
     }
+    await sendPrompt(workspace.id, session.id, value);
   };
 
   // Auto-resize textarea
@@ -73,10 +83,28 @@ export function ConversationView({
 
   // Scroll to bottom on new messages
   useEffect(() => {
-    if (timelineRef.current) {
+    if (timelineRef.current && shouldStickToBottomRef.current) {
       timelineRef.current.scrollTop = timelineRef.current.scrollHeight;
     }
   }, [session?.timeline.length, session?.status]);
+
+  useEffect(() => {
+    const node = timelineRef.current;
+    if (!node) {
+      return;
+    }
+
+    const updateStickiness = () => {
+      shouldStickToBottomRef.current =
+        node.scrollHeight - node.scrollTop - node.clientHeight < 120;
+    };
+
+    updateStickiness();
+    node.addEventListener("scroll", updateStickiness);
+    return () => node.removeEventListener("scroll", updateStickiness);
+  }, [session?.id]);
+
+  const livePhase = useMemo(() => deriveLivePhase(session), [session]);
 
   if (!workspace || !session) {
     return (
@@ -173,6 +201,28 @@ export function ConversationView({
                 onResolveApproval={resolveApproval}
               />
             ))}
+            {livePhase && (
+              <div className="chat-row chat-row--assistant">
+                <div className="chat-inline-status chat-inline-status--live">
+                  {livePhase.icon === "search" ? (
+                    <Search size={14} />
+                  ) : livePhase.icon === "tool" ? (
+                    <Wrench size={14} />
+                  ) : (
+                    <LoaderCircle
+                      size={14}
+                      className="chat-inline-status__spin"
+                    />
+                  )}
+                  <span>{livePhase.label}</span>
+                  {livePhase.detail && (
+                    <span className="chat-inline-status__meta">
+                      {livePhase.detail}
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -625,6 +675,60 @@ export function ConversationView({
       `}</style>
     </div>
   );
+}
+
+function deriveLivePhase(session: ChatSession | null) {
+  if (!session || session.status !== "streaming") {
+    return null;
+  }
+
+  const recentItems = [...session.timeline].reverse();
+  const activeTool = recentItems.find(
+    (item) =>
+      item.kind === "tool-activity" && item.activity.status === "running",
+  );
+
+  if (activeTool && activeTool.kind === "tool-activity") {
+    const isSearchTool =
+      activeTool.activity.toolName.toLowerCase().includes("search") ||
+      activeTool.activity.toolName.toLowerCase().includes("find");
+    return {
+      icon: isSearchTool ? "search" : "tool",
+      label: isSearchTool ? "Searching" : "Running tool",
+      detail: activeTool.activity.toolName,
+    };
+  }
+
+  const recentNotice = recentItems.find(
+    (item) => item.kind === "system-notice" || item.kind === "warning",
+  );
+
+  if (
+    recentNotice &&
+    (recentNotice.kind === "system-notice" || recentNotice.kind === "warning")
+  ) {
+    if (/compact/i.test(recentNotice.title)) {
+      return {
+        icon: "thinking",
+        label: "Compacting",
+        detail: recentNotice.detail,
+      };
+    }
+
+    if (/retry/i.test(recentNotice.title)) {
+      return {
+        icon: "thinking",
+        label: "Retrying",
+        detail: recentNotice.detail,
+      };
+    }
+  }
+
+  return {
+    icon: "thinking",
+    label: "Thinking",
+    detail: "Planning the next response",
+  };
 }
 
 function ChevronIcon() {

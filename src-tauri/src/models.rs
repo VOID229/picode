@@ -452,6 +452,42 @@ pub struct AbortPromptPayload {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EnsureTerminalSessionPayload {
+    pub workspace_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WriteTerminalInputPayload {
+    pub workspace_id: String,
+    pub data: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResizeTerminalPayload {
+    pub workspace_id: String,
+    pub cols: u16,
+    pub rows: u16,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunTerminalCommandPayload {
+    pub workspace_id: String,
+    pub command: String,
+    #[serde(default)]
+    pub refresh_git: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunTerminalCommandResult {
+    pub command_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "kebab-case")]
 pub enum PiRuntimeEvent {
     RuntimeReady {
@@ -528,6 +564,33 @@ pub enum PiRuntimeEvent {
     AuthFailed {
         provider_id: String,
         message: String,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "kebab-case")]
+pub enum TerminalEvent {
+    Started {
+        workspace_id: String,
+    },
+    Output {
+        workspace_id: String,
+        chunk: String,
+    },
+    CommandFinished {
+        workspace_id: String,
+        command_id: String,
+        command: String,
+        exit_code: i32,
+        git_snapshot: Option<GitSnapshot>,
+    },
+    Error {
+        workspace_id: String,
+        message: String,
+    },
+    Exit {
+        workspace_id: String,
+        exit_code: Option<i32>,
     },
 }
 

@@ -2,14 +2,17 @@ mod git;
 mod models;
 mod pi;
 mod storage;
+mod terminal;
 
 use crate::models::{
     AbortPromptPayload, BootstrapPayload, CreateSessionPayload, CreateWorkspacePayload,
-    DeleteSessionPayload, PersistedAppState, RefreshGitPayload,
+    DeleteSessionPayload, EnsureTerminalSessionPayload, PersistedAppState, RefreshGitPayload,
     RefreshWorkspaceRuntimeCatalogPayload, RemoveWorkspacePayload, RenameSessionPayload,
-    RenameWorkspacePayload, ResolveApprovalPayload, RuntimeBootstrapPayload, RuntimeHealthPayload,
-    SelectWorkspaceSessionPayload, SendPromptPayload, UpdateWorkspaceSettingsPayload,
-    WorkspaceRuntimeCatalogPayload, normalize_state,
+    RenameWorkspacePayload, ResizeTerminalPayload, ResolveApprovalPayload,
+    RunTerminalCommandPayload, RunTerminalCommandResult, RuntimeBootstrapPayload,
+    RuntimeHealthPayload, SelectWorkspaceSessionPayload, SendPromptPayload,
+    UpdateWorkspaceSettingsPayload, WorkspaceRuntimeCatalogPayload, WriteTerminalInputPayload,
+    normalize_state,
 };
 use anyhow::Context;
 use models::{GitSnapshot, default_state, new_session};
@@ -21,6 +24,7 @@ use tokio::sync::Mutex;
 struct AppState {
     state: Arc<Mutex<PersistedAppState>>,
     runtime: pi::PiRuntimeHandle,
+    terminal: terminal::TerminalHandle,
 }
 
 impl AppState {
@@ -28,6 +32,7 @@ impl AppState {
         Self {
             state: Arc::new(Mutex::new(state)),
             runtime: pi::PiRuntimeHandle::default(),
+            terminal: terminal::TerminalHandle::default(),
         }
     }
 }
@@ -452,6 +457,79 @@ async fn open_path(path: String) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+async fn ensure_terminal_session(
+    app: AppHandle,
+    shared: State<'_, AppState>,
+    payload: EnsureTerminalSessionPayload,
+) -> Result<(), String> {
+    let workspace_path = {
+        let state = shared.state.lock().await;
+        state
+            .workspaces
+            .iter()
+            .find(|workspace| workspace.id == payload.workspace_id)
+            .map(|workspace| workspace.path.clone())
+            .context("workspace not found")
+            .map_err(|error| error.to_string())?
+    };
+
+    shared
+        .terminal
+        .ensure_session(app, payload.workspace_id, workspace_path)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn write_terminal_input(
+    shared: State<'_, AppState>,
+    payload: WriteTerminalInputPayload,
+) -> Result<(), String> {
+    shared
+        .terminal
+        .write_input(&payload.workspace_id, &payload.data)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn resize_terminal(
+    shared: State<'_, AppState>,
+    payload: ResizeTerminalPayload,
+) -> Result<(), String> {
+    shared
+        .terminal
+        .resize(&payload.workspace_id, payload.cols, payload.rows)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn run_terminal_command(
+    app: AppHandle,
+    shared: State<'_, AppState>,
+    payload: RunTerminalCommandPayload,
+) -> Result<RunTerminalCommandResult, String> {
+    let workspace_path = {
+        let state = shared.state.lock().await;
+        state
+            .workspaces
+            .iter()
+            .find(|workspace| workspace.id == payload.workspace_id)
+            .map(|workspace| workspace.path.clone())
+            .context("workspace not found")
+            .map_err(|error| error.to_string())?
+    };
+
+    shared
+        .terminal
+        .ensure_session(app, payload.workspace_id.clone(), workspace_path)
+        .map_err(|error| error.to_string())?;
+
+    shared
+        .terminal
+        .run_command(&payload.workspace_id, payload.command, payload.refresh_git)
+        .map_err(|error| error.to_string())
+}
+
 fn load_initial_state(app: &AppHandle) -> anyhow::Result<PersistedAppState> {
     if let Some(state) = storage::load(app)? {
         let state = normalize_state(state);
@@ -499,7 +577,11 @@ fn main() {
             restore_session,
             delete_session,
             read_dir,
-            open_path
+            open_path,
+            ensure_terminal_session,
+            write_terminal_input,
+            resize_terminal,
+            run_terminal_command
         ])
         .run(tauri::generate_context!())
         .expect("error while running picode");

@@ -174,6 +174,29 @@ export interface GitSnapshot {
   files: DiffFile[];
 }
 
+export type TerminalConnectionState =
+  | "idle"
+  | "connecting"
+  | "ready"
+  | "error"
+  | "exited";
+
+export interface TerminalCommandState {
+  id: string;
+  command: string;
+  exitCode?: number;
+}
+
+export interface TerminalSessionState {
+  workspaceId: string;
+  open: boolean;
+  status: TerminalConnectionState;
+  buffer: string;
+  activeCommand?: TerminalCommandState;
+  lastCommand?: TerminalCommandState;
+  error?: string;
+}
+
 export interface LayoutPreferences {
   diffMode: "split" | "inline";
   gitPanelOpen: boolean;
@@ -211,6 +234,10 @@ export interface RuntimeBootstrapPayload {
 
 export interface RuntimeHealthPayload {
   install: PiInstallStatus;
+}
+
+export interface RunTerminalCommandResult {
+  commandId: string;
 }
 
 export type PiInstallState = "ready" | "missing" | "broken";
@@ -320,4 +347,33 @@ export type PiRuntimeEvent =
       type: "auth-failed";
       providerId: string;
       message: string;
+    };
+
+export type TerminalEvent =
+  | {
+      type: "started";
+      workspaceId: string;
+    }
+  | {
+      type: "output";
+      workspaceId: string;
+      chunk: string;
+    }
+  | {
+      type: "command-finished";
+      workspaceId: string;
+      commandId: string;
+      command: string;
+      exitCode: number;
+      gitSnapshot?: GitSnapshot;
+    }
+  | {
+      type: "error";
+      workspaceId: string;
+      message: string;
+    }
+  | {
+      type: "exit";
+      workspaceId: string;
+      exitCode?: number;
     };
