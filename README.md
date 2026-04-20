@@ -17,7 +17,7 @@ Picode uses Pi as the backend which can connect to:
 
 - Codex
 - Claude
-- OpenCode
+- Gemini
 - Ollama
 
 ## Local Development
