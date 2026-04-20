@@ -1,5 +1,6 @@
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use std::{env, path::PathBuf};
 use uuid::Uuid;
 
 pub const SCHEMA_VERSION: u32 = 3;
@@ -667,6 +668,30 @@ pub fn default_preferences() -> AppPreferences {
     }
 }
 
+pub fn expand_user_path(path: &str) -> String {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+
+    let Some(home) = env::var_os("HOME") else {
+        return trimmed.to_string();
+    };
+
+    if trimmed == "~" {
+        return PathBuf::from(home).to_string_lossy().into_owned();
+    }
+
+    if let Some(suffix) = trimmed.strip_prefix("~/") {
+        return PathBuf::from(home)
+            .join(suffix)
+            .to_string_lossy()
+            .into_owned();
+    }
+
+    trimmed.to_string()
+}
+
 pub fn new_session(title: impl Into<String>) -> ChatSession {
     let now = now_iso();
     ChatSession {
@@ -692,10 +717,11 @@ pub fn new_workspace(
     path: impl Into<String>,
     recent_rank: i64,
 ) -> WorkspaceRecord {
+    let path = expand_user_path(&path.into());
     WorkspaceRecord {
         id: Uuid::new_v4().to_string(),
         name: name.into(),
-        path: path.into(),
+        path,
         pinned: recent_rank == 1,
         recent_rank,
         approval_mode: ApprovalMode::Supervised,
@@ -717,6 +743,10 @@ fn normalize_effort(effort: &mut String) {
     if effort.trim().is_empty() {
         *effort = default_effort();
     }
+}
+
+fn normalize_workspace_path(path: &mut String) {
+    *path = expand_user_path(path);
 }
 
 fn migrate_legacy_model_id(model_id: &str) -> Option<&'static str> {
@@ -755,6 +785,7 @@ pub fn normalize_state(mut state: PersistedAppState) -> PersistedAppState {
     );
 
     for workspace in &mut state.workspaces {
+        normalize_workspace_path(&mut workspace.path);
         normalize_effort(&mut workspace.effort);
         normalize_stored_model_selection(&mut workspace.provider_id, &mut workspace.model_id);
     }
@@ -992,5 +1023,49 @@ mod tests {
 
         assert_eq!(normalized.preferences.model_id, "gpt-5.4");
         assert_eq!(normalized.workspaces[0].model_id, "gpt-5.4-mini");
+    }
+
+    #[test]
+    fn normalize_state_expands_home_prefixed_workspace_paths() {
+        let parsed: PersistedAppState = serde_json::from_value(json!({
+            "schemaVersion": 3,
+            "activeWorkspaceId": "workspace-1",
+            "activeSessionId": null,
+            "workspaces": [{
+                "id": "workspace-1",
+                "name": "Workspace",
+                "path": "~/tmp/workspace",
+                "pinned": true,
+                "recentRank": 1,
+                "approvalMode": "ask-first",
+                "policy": {
+                    "allowedPaths": [],
+                    "allowedCommands": [],
+                    "envPassthrough": [],
+                    "networkEnabled": false
+                },
+                "providerId": "openai-codex",
+                "modelId": "gpt-5.4",
+                "sessions": []
+            }],
+            "preferences": {
+                "theme": "dark",
+                "providerId": "openai-codex",
+                "modelId": "gpt-5.4",
+                "approvalMode": "ask-first",
+                "layout": {
+                    "diffMode": "split",
+                    "gitPanelOpen": true,
+                    "diffPanelOpen": true
+                }
+            }
+        }))
+        .expect("state should deserialize");
+
+        let normalized = normalize_state(parsed);
+        let expected_prefix = env::var("HOME").expect("HOME should be set in tests");
+
+        assert!(normalized.workspaces[0].path.starts_with(&expected_prefix));
+        assert!(normalized.workspaces[0].path.ends_with("/tmp/workspace"));
     }
 }

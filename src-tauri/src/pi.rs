@@ -3,7 +3,7 @@ use crate::models::{
     PiInstallStatus, PiRuntimeEvent, ProviderAuthKind, ProviderOption, ProviderStatus,
     RefreshWorkspaceRuntimeCatalogPayload, ResolveApprovalPayload, RuntimeBootstrapPayload,
     RuntimeHealthPayload, SendPromptPayload, SessionRuntimeMetadata, SessionStatus, TimelineItem,
-    ToolActivity, ToolStatus, WorkspaceRuntimeCatalogPayload, now_iso,
+    ToolActivity, ToolStatus, WorkspaceRuntimeCatalogPayload, expand_user_path, now_iso,
 };
 use crate::{AppState, storage};
 use anyhow::{Context, Result, anyhow};
@@ -1591,6 +1591,7 @@ async fn fetch_workspace_catalog_and_normalize(
             .map(|workspace| workspace.path.clone())
             .context("workspace not found")?
     };
+    let workspace_path = expand_user_path(&workspace_path);
 
     let providers = map_models_to_provider_options(
         fetch_available_models(binary_path, Path::new(&workspace_path)).await?,
@@ -1706,7 +1707,7 @@ pub async fn launch_prompt_stream(
 
         workspace.provider_id = catalog.selected_provider_id.clone();
         workspace.model_id = catalog.selected_model_id.clone();
-        let workspace_path = workspace.path.clone();
+        let workspace_path = expand_user_path(&workspace.path);
         let provider_id = workspace.provider_id.clone();
         let model_id = workspace.model_id.clone();
         let effort = workspace.effort.clone();

@@ -1,9 +1,10 @@
-use crate::models::{DiffFile, GitSnapshot};
+use crate::models::{DiffFile, GitSnapshot, expand_user_path};
 use std::process::Command;
 
 pub fn snapshot(path: &str) -> GitSnapshot {
+    let path = expand_user_path(path);
     let status_output = Command::new("git")
-        .args(["-C", path, "status", "--short", "--branch"])
+        .args(["-C", &path, "status", "--short", "--branch"])
         .output();
 
     let Ok(status_output) = status_output else {
@@ -21,13 +22,13 @@ pub fn snapshot(path: &str) -> GitSnapshot {
     let entries: Vec<&str> = lines.collect();
 
     let diff_output = Command::new("git")
-        .args(["-C", path, "diff", "--no-ext-diff", "--unified=3"])
+        .args(["-C", &path, "diff", "--no-ext-diff", "--unified=3"])
         .output()
         .ok();
     let staged_output = Command::new("git")
         .args([
             "-C",
-            path,
+            &path,
             "diff",
             "--cached",
             "--no-ext-diff",
