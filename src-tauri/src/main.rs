@@ -10,9 +10,9 @@ use crate::models::{
     RefreshWorkspaceRuntimeCatalogPayload, RemoveWorkspacePayload, RenameSessionPayload,
     RenameWorkspacePayload, ResizeTerminalPayload, ResolveApprovalPayload,
     RunTerminalCommandPayload, RunTerminalCommandResult, RuntimeBootstrapPayload,
-    RuntimeHealthPayload, SelectWorkspaceSessionPayload, SendPromptPayload,
+    RuntimeHealthPayload, SelectWorkspaceSessionPayload, SendPromptPayload, UndoUserTurnPayload,
     UpdateWorkspaceSettingsPayload, WorkspaceRuntimeCatalogPayload, WriteTerminalInputPayload,
-    normalize_state,
+    WriteTextFilePayload, normalize_state,
 };
 use anyhow::Context;
 use models::{GitSnapshot, default_state, new_session};
@@ -98,11 +98,7 @@ async fn create_session(
         .context("workspace not found")
         .map_err(|error| error.to_string())?;
 
-    let title = format!(
-        "Chat {}",
-        state.workspaces[workspace_index].sessions.len() + 1
-    );
-    let session = new_session(title);
+    let session = new_session("New thread");
     let workspace_id = state.workspaces[workspace_index].id.clone();
     state.active_session_id = Some(session.id.clone());
     state.active_workspace_id = Some(workspace_id);
@@ -188,6 +184,88 @@ async fn send_prompt(
         .map_err(|error| error.to_string())?;
 
     Ok(cloned_shared.state.lock().await.clone())
+}
+
+#[tauri::command]
+async fn undo_user_turn(
+    app: AppHandle,
+    shared: State<'_, AppState>,
+    payload: UndoUserTurnPayload,
+) -> Result<PersistedAppState, String> {
+    let checkpoint = storage::load_undo_checkpoint(
+        &app,
+        &payload.workspace_id,
+        &payload.session_id,
+        &payload.user_message_id,
+    )
+    .map_err(|error| error.to_string())?
+    .context("Undo is unavailable for this message because no checkpoint was stored.")
+    .map_err(|error| error.to_string())?;
+
+    let workspace_path = {
+        let state = shared.state.lock().await;
+        state
+            .workspaces
+            .iter()
+            .find(|workspace| workspace.id == payload.workspace_id)
+            .map(|workspace| workspace.path.clone())
+            .context("workspace not found")
+            .map_err(|error| error.to_string())?
+    };
+
+    git::restore_undo_checkpoint(&workspace_path, &checkpoint)
+        .map_err(|error| error.to_string())?;
+
+    let removed_user_ids = {
+        let mut state = shared.state.lock().await;
+        let session = state
+            .workspaces
+            .iter_mut()
+            .find(|workspace| workspace.id == payload.workspace_id)
+            .and_then(|workspace| {
+                workspace
+                    .sessions
+                    .iter_mut()
+                    .find(|session| session.id == payload.session_id)
+            })
+            .context("session not found")
+            .map_err(|error| error.to_string())?;
+
+        let Some(index) = session.timeline.iter().position(|item| {
+            matches!(
+                item,
+                models::TimelineItem::UserMessage { id, .. } if id == &payload.user_message_id
+            )
+        }) else {
+            return Err("user message not found in session timeline".to_string());
+        };
+
+        let removed = session.timeline.split_off(index);
+        session.status = models::SessionStatus::Idle;
+        session.updated_at = models::now_iso();
+
+        let removed_user_ids = removed
+            .into_iter()
+            .filter_map(|item| match item {
+                models::TimelineItem::UserMessage { id, .. } => Some(id),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        storage::save(&app, &state).map_err(|error| error.to_string())?;
+        removed_user_ids
+    };
+
+    for user_message_id in removed_user_ids {
+        let _ = storage::delete_undo_checkpoint(
+            &app,
+            &payload.workspace_id,
+            &payload.session_id,
+            &user_message_id,
+        );
+    }
+
+    Ok(shared.state.lock().await.clone())
 }
 
 #[tauri::command]
@@ -530,9 +608,15 @@ async fn run_terminal_command(
         .map_err(|error| error.to_string())
 }
 
+#[tauri::command]
+async fn write_text_file(payload: WriteTextFilePayload) -> Result<(), String> {
+    std::fs::write(payload.path, payload.content).map_err(|error| error.to_string())
+}
+
 fn load_initial_state(app: &AppHandle) -> anyhow::Result<PersistedAppState> {
     if let Some(state) = storage::load(app)? {
-        let state = normalize_state(state);
+        let mut state = normalize_state(state);
+        pi::reconcile_persisted_state(&mut state);
         storage::save(app, &state)?;
         return Ok(state);
     }
@@ -566,6 +650,7 @@ fn main() {
             refresh_git_snapshot,
             send_prompt,
             resolve_approval,
+            undo_user_turn,
             bootstrap_runtime,
             refresh_workspace_runtime_catalog,
             abort_prompt,
@@ -581,7 +666,8 @@ fn main() {
             ensure_terminal_session,
             write_terminal_input,
             resize_terminal,
-            run_terminal_command
+            run_terminal_command,
+            write_text_file
         ])
         .run(tauri::generate_context!())
         .expect("error while running picode");

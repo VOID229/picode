@@ -1,7 +1,10 @@
 import {
   AlertTriangle,
   CheckCircle2,
+  Copy,
+  GitFork,
   LoaderCircle,
+  RotateCcw,
   Search,
   TerminalSquare,
   Wrench,
@@ -9,11 +12,16 @@ import {
 } from "lucide-react";
 import type { TimelineItem } from "../../domains/types";
 import { cn } from "../../lib/cn";
+import { useAppStore } from "../../state/useAppStore";
+import { MarkdownRenderer } from "./MarkdownRenderer";
+import { PlanCard } from "./PlanCard";
+import { isTransientTimelineItem, parseAssistantContent } from "./chatRuntime";
 
 interface TimelineItemViewProps {
   item: TimelineItem;
   workspaceId: string;
   sessionId: string;
+  assistantLabel: string;
   onResolveApproval: (
     workspaceId: string,
     sessionId: string,
@@ -26,8 +34,14 @@ export function TimelineItemView({
   item,
   workspaceId,
   sessionId,
+  assistantLabel,
   onResolveApproval,
 }: TimelineItemViewProps) {
+  const createSession = useAppStore((store) => store.createSession);
+  const setComposerDraft = useAppStore((store) => store.setComposerDraft);
+  const undoUserTurn = useAppStore((store) => store.undoUserTurn);
+  const git = useAppStore((store) => store.git[workspaceId]);
+
   if (item.kind === "system-notice" && item.title === "Session ready") {
     return null;
   }
@@ -40,10 +54,78 @@ export function TimelineItemView({
     return null;
   }
 
+  if (isTransientTimelineItem(item)) {
+    return null;
+  }
+
   if (item.kind === "user-message") {
     return (
       <article className="chat-row chat-row--user animate-slide-up">
-        <div className="chat-bubble chat-bubble--user">{item.content}</div>
+        <div className="chat-user-stack">
+          <div className="chat-message-actions">
+            <button
+              className="chat-message-action"
+              type="button"
+              onClick={async () => {
+                const { writeText } =
+                  await import("@tauri-apps/plugin-clipboard-manager");
+                await writeText(item.content);
+              }}
+            >
+              <Copy size={13} />
+              <span>Copy</span>
+            </button>
+            <button
+              className="chat-message-action"
+              type="button"
+              onClick={async () => {
+                const nextSessionId = await createSession(workspaceId, {
+                  forceNew: true,
+                });
+                if (!nextSessionId) {
+                  return;
+                }
+                setComposerDraft(nextSessionId, item.content);
+              }}
+            >
+              <GitFork size={13} />
+              <span>Fork</span>
+            </button>
+            <button
+              className="chat-message-action"
+              type="button"
+              onClick={async () => {
+                if (!git?.isRepo) {
+                  window.alert(
+                    "Undo is only available for git workspaces with a saved checkpoint for this turn.",
+                  );
+                  return;
+                }
+
+                const confirmed = window.confirm(
+                  "Undo this message and everything after it? This restores the working tree and index to the saved checkpoint only if HEAD has not changed.",
+                );
+                if (!confirmed) {
+                  return;
+                }
+
+                try {
+                  await undoUserTurn(workspaceId, sessionId, item.id);
+                } catch (error) {
+                  window.alert(
+                    error instanceof Error
+                      ? error.message
+                      : "Undo is unavailable for this message.",
+                  );
+                }
+              }}
+            >
+              <RotateCcw size={13} />
+              <span>Undo</span>
+            </button>
+          </div>
+          <div className="chat-bubble chat-bubble--user">{item.content}</div>
+        </div>
       </article>
     );
   }
@@ -52,13 +134,24 @@ export function TimelineItemView({
     return (
       <article className="chat-row chat-row--assistant animate-slide-up">
         <div className="chat-assistant-copy">
-          <div className="chat-copy-text">{item.content}</div>
-          {item.streaming && (
-            <div className="chat-inline-status">
-              <LoaderCircle size={14} className="chat-inline-status__spin" />
-              <span>Writing response</span>
-            </div>
-          )}
+          <div className="chat-speaker-label">{assistantLabel}</div>
+          <div className="chat-copy-text">
+            {parseAssistantContent(item.content).map((block, index) =>
+              block.type === "proposed-plan" ? (
+                <PlanCard
+                  key={`${item.id}-plan-${index}`}
+                  content={block.content}
+                  workspaceId={workspaceId}
+                />
+              ) : (
+                <MarkdownRenderer
+                  key={`${item.id}-md-${index}`}
+                  className="markdown-content"
+                  content={block.content}
+                />
+              ),
+            )}
+          </div>
         </div>
       </article>
     );
@@ -73,8 +166,7 @@ export function TimelineItemView({
         <div className="chat-inline-status">
           {isSearchTool ? <Search size={14} /> : <Wrench size={14} />}
           <span>
-            {isSearchTool ? "Searching" : "Running tool"}:{" "}
-            {item.activity.toolName}
+            {isSearchTool ? "Searched" : "Tool"}: {item.activity.toolName}
           </span>
           <span className="chat-inline-status__meta">
             {item.activity.summary}
@@ -88,6 +180,7 @@ export function TimelineItemView({
     return (
       <article className="chat-row chat-row--assistant animate-slide-up">
         <div className="chat-approval">
+          <div className="chat-speaker-label">{assistantLabel}</div>
           <div className="chat-inline-status">
             <AlertTriangle size={14} />
             <span>Awaiting approval</span>
@@ -182,11 +275,7 @@ function iconForNotice(
     return <Search size={14} />;
   }
 
-  if (/compact/i.test(item.title)) {
-    return <LoaderCircle size={14} className="chat-inline-status__spin" />;
-  }
-
-  if (/retry/i.test(item.title)) {
+  if (/compact|retry/i.test(item.title)) {
     return <LoaderCircle size={14} className="chat-inline-status__spin" />;
   }
 

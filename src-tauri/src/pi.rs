@@ -1,11 +1,11 @@
 use crate::models::{
     AbortPromptPayload, ApprovalDecision, ApprovalState, ModelOption, PiInstallState,
-    PiInstallStatus, PiRuntimeEvent, ProviderAuthKind, ProviderOption, ProviderStatus,
+    PiInstallStatus, PiRuntimeEvent, PromptMode, ProviderAuthKind, ProviderOption, ProviderStatus,
     RefreshWorkspaceRuntimeCatalogPayload, ResolveApprovalPayload, RuntimeBootstrapPayload,
     RuntimeHealthPayload, SendPromptPayload, SessionRuntimeMetadata, SessionStatus, TimelineItem,
     ToolActivity, ToolStatus, WorkspaceRuntimeCatalogPayload, expand_user_path, now_iso,
 };
-use crate::{AppState, storage};
+use crate::{AppState, git, storage};
 use anyhow::{Context, Result, anyhow};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
@@ -241,6 +241,10 @@ enum AssistantMessageEvent {
     TextDelta {
         delta: String,
     },
+    TextEnd {
+        #[serde(rename = "content")]
+        _content: String,
+    },
     Done {
         reason: String,
     },
@@ -274,6 +278,8 @@ enum RpcEvent {
         message: PiMessage,
     },
     MessageUpdate {
+        #[serde(default)]
+        message: Option<PiMessage>,
         #[serde(rename = "assistantMessageEvent")]
         assistant_message_event: AssistantMessageEvent,
     },
@@ -333,6 +339,14 @@ enum RpcEvent {
     },
     #[serde(other)]
     Other,
+}
+
+#[derive(Debug, Deserialize)]
+struct PiSessionEntry {
+    #[serde(rename = "type")]
+    kind: String,
+    #[serde(default)]
+    message: Option<PiMessage>,
 }
 
 #[derive(Debug, Clone)]
@@ -899,6 +913,63 @@ fn map_effort_to_thinking(effort: &str) -> &'static str {
     }
 }
 
+fn prompt_for_mode(prompt: &str, mode: &PromptMode) -> String {
+    match mode {
+        PromptMode::Build => prompt.to_string(),
+        PromptMode::Plan => format!(
+            concat!(
+                "You are in plan mode. Respond with exactly one <proposed_plan> block and no text outside it.\n",
+                "Inside the block, provide concise markdown with a title, summary, key changes, test plan, and assumptions.\n",
+                "Do not implement anything, do not include commentary before or after the block.\n\n",
+                "User request:\n{}"
+            ),
+            prompt
+        ),
+    }
+}
+
+fn prompt_for_title(user_message: &str, assistant_message: &str) -> String {
+    format!(
+        concat!(
+            "Generate a short plain-text chat thread title.\n",
+            "Requirements:\n",
+            "- 2 to 6 words\n",
+            "- No quotes\n",
+            "- No markdown\n",
+            "- No trailing punctuation\n",
+            "- Describe the actual task, not the conversation\n\n",
+            "First user message:\n{}\n\n",
+            "First assistant response:\n{}\n"
+        ),
+        user_message, assistant_message
+    )
+}
+
+fn sanitize_generated_title(value: &str) -> Option<String> {
+    let trimmed = value.trim().trim_matches('"').trim_matches('\'');
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let first_line = trimmed.lines().next()?.trim();
+    let cleaned = first_line
+        .trim_matches('"')
+        .trim_matches('\'')
+        .trim_end_matches(['.', '!', '?', ':', ';', ','])
+        .trim();
+
+    if cleaned.is_empty() {
+        return None;
+    }
+
+    let words = cleaned
+        .split_whitespace()
+        .take(6)
+        .collect::<Vec<_>>()
+        .join(" ");
+    (!words.is_empty()).then_some(words)
+}
+
 fn assistant_message_text(message: &PiMessage) -> String {
     match &message.content {
         PiMessageContent::Text(text) => text.clone(),
@@ -911,6 +982,37 @@ fn assistant_message_text(message: &PiMessage) -> String {
             .collect::<Vec<_>>()
             .join(""),
     }
+}
+
+fn extract_text_from_prompt_response(value: &Value) -> Option<String> {
+    if let Some(text) = value.as_str() {
+        return Some(text.to_string());
+    }
+
+    if let Some(title) = value.get("title").and_then(Value::as_str) {
+        return Some(title.to_string());
+    }
+
+    if let Some(text) = value.get("text").and_then(Value::as_str) {
+        return Some(text.to_string());
+    }
+
+    if let Some(message) = value.get("message") {
+        let parsed = serde_json::from_value::<PiMessage>(message.clone()).ok()?;
+        return Some(assistant_message_text(&parsed));
+    }
+
+    if let Some(messages) = value.get("messages").and_then(Value::as_array) {
+        for message in messages.iter().rev() {
+            if let Ok(parsed) = serde_json::from_value::<PiMessage>(message.clone()) {
+                if parsed.role == "assistant" {
+                    return Some(assistant_message_text(&parsed));
+                }
+            }
+        }
+    }
+
+    None
 }
 
 fn assistant_message_metadata(
@@ -1213,6 +1315,12 @@ async fn emit_done(
     {
         let mut state = shared.state.lock().await;
         if let Some(session) = find_session_mut(&mut state, workspace_id, session_id) {
+            session.timeline.push(TimelineItem::AssistantMessage {
+                id: Uuid::new_v4().to_string(),
+                created_at: now_iso(),
+                content: content.clone(),
+                streaming: false,
+            });
             session.status = SessionStatus::Idle;
             apply_metadata(session, Some(metadata.clone()));
             session.runtime.last_known_ready = true;
@@ -1231,6 +1339,304 @@ async fn emit_done(
             metadata: Some(metadata),
         },
     )?;
+
+    maybe_enqueue_thread_title(
+        app.clone(),
+        shared.clone(),
+        workspace_id.to_string(),
+        session_id.to_string(),
+    );
+    Ok(())
+}
+
+fn maybe_enqueue_thread_title(
+    app: AppHandle,
+    shared: AppState,
+    workspace_id: String,
+    session_id: String,
+) {
+    tokio::spawn(async move {
+        let _ = generate_thread_title(app, shared, &workspace_id, &session_id).await;
+    });
+}
+
+async fn process_stdout_line(
+    app: &AppHandle,
+    shared: &AppState,
+    session_handle: &ActiveSessionHandle,
+    workspace_id: &str,
+    session_id: &str,
+    session_file: &str,
+    line: &[u8],
+    completed: &mut bool,
+) -> Result<()> {
+    let value: Value = serde_json::from_slice(line).with_context(|| {
+        format!(
+            "failed to parse Pi RPC line: {}",
+            String::from_utf8_lossy(line)
+        )
+    })?;
+
+    if value.get("type").and_then(Value::as_str) == Some("response") {
+        let response: RpcResponseEnvelope = serde_json::from_value(value)?;
+        if let Some(request_id) = response.id.clone() {
+            if let Some(sender) = session_handle
+                .inner
+                .pending
+                .lock()
+                .await
+                .remove(&request_id)
+            {
+                let _ = if response.success.unwrap_or(false) {
+                    sender.send(Ok(response.data.unwrap_or(Value::Null)))
+                } else {
+                    sender.send(Err(response
+                        .error
+                        .unwrap_or_else(|| "Pi RPC request failed.".to_string())))
+                };
+            }
+        }
+        return Ok(());
+    }
+
+    let event: RpcEvent = serde_json::from_value(value)?;
+    match event {
+        RpcEvent::MessageUpdate {
+            assistant_message_event: AssistantMessageEvent::TextDelta { delta },
+            ..
+        } => {
+            app.emit(
+                "pi://event",
+                PiRuntimeEvent::Token {
+                    workspace_id: workspace_id.to_string(),
+                    session_id: session_id.to_string(),
+                    delta,
+                    metadata: None,
+                },
+            )?;
+        }
+        RpcEvent::MessageUpdate {
+            message: Some(message),
+            assistant_message_event: AssistantMessageEvent::TextEnd { .. },
+        } => {
+            if message.role == "assistant" && message.stop_reason.as_deref() != Some("toolUse") {
+                *completed = true;
+                emit_assistant_terminal_event(
+                    app,
+                    shared,
+                    session_handle,
+                    workspace_id,
+                    session_id,
+                    session_file,
+                    &message,
+                )
+                .await?;
+            }
+        }
+        RpcEvent::MessageUpdate {
+            assistant_message_event: AssistantMessageEvent::Done { reason },
+            ..
+        } => {
+            if reason == "tool_use" {
+                return Ok(());
+            }
+        }
+        RpcEvent::MessageUpdate {
+            assistant_message_event: AssistantMessageEvent::Error { reason },
+            ..
+        } => {
+            if reason == "aborted" {
+                session_handle.mark_abort_requested();
+            }
+        }
+        RpcEvent::MessageUpdate {
+            assistant_message_event: AssistantMessageEvent::Other,
+            ..
+        } => {}
+        RpcEvent::MessageUpdate {
+            assistant_message_event: AssistantMessageEvent::TextEnd { .. },
+            ..
+        } => {}
+        RpcEvent::ToolExecutionStart {
+            tool_call_id,
+            tool_name,
+            args,
+        } => {
+            emit_tool_start(
+                app,
+                shared,
+                workspace_id,
+                session_id,
+                ToolActivity {
+                    id: tool_call_id.clone(),
+                    tool_name: tool_name.clone(),
+                    summary: summarize_tool_start(&tool_name, &args),
+                    output: None,
+                    status: ToolStatus::Running,
+                    started_at: now_iso(),
+                },
+            )
+            .await?;
+        }
+        RpcEvent::ToolExecutionUpdate {
+            tool_call_id,
+            _tool_name: _,
+            _args: _,
+            partial_result,
+        } => {
+            emit_tool_update(
+                app,
+                shared,
+                workspace_id,
+                session_id,
+                &tool_call_id,
+                tool_result_text(&partial_result),
+                ToolStatus::Running,
+            )
+            .await?;
+        }
+        RpcEvent::ToolExecutionEnd {
+            tool_call_id,
+            _tool_name: _,
+            result,
+            is_error,
+        } => {
+            emit_tool_update(
+                app,
+                shared,
+                workspace_id,
+                session_id,
+                &tool_call_id,
+                tool_result_text(&result),
+                if is_error {
+                    ToolStatus::Failed
+                } else {
+                    ToolStatus::Completed
+                },
+            )
+            .await?;
+        }
+        RpcEvent::CompactionStart { reason } => {
+            emit_status(
+                app,
+                shared,
+                workspace_id,
+                session_id,
+                "Compacting session".to_string(),
+                Some(reason),
+            )
+            .await?;
+        }
+        RpcEvent::CompactionEnd {
+            reason,
+            error_message,
+        } => {
+            emit_status(
+                app,
+                shared,
+                workspace_id,
+                session_id,
+                "Compaction complete".to_string(),
+                error_message.or(Some(reason)),
+            )
+            .await?;
+        }
+        RpcEvent::AutoRetryStart {
+            attempt,
+            max_attempts,
+            error_message,
+        } => {
+            emit_status(
+                app,
+                shared,
+                workspace_id,
+                session_id,
+                format!("Retrying ({attempt}/{max_attempts})"),
+                Some(error_message),
+            )
+            .await?;
+        }
+        RpcEvent::AutoRetryEnd {
+            success,
+            attempt,
+            final_error,
+        } => {
+            emit_status(
+                app,
+                shared,
+                workspace_id,
+                session_id,
+                if success {
+                    format!("Retry succeeded on attempt {attempt}")
+                } else {
+                    format!("Retry failed on attempt {attempt}")
+                },
+                final_error,
+            )
+            .await?;
+        }
+        RpcEvent::ExtensionError { error, message } => {
+            emit_error(
+                app,
+                shared,
+                Some(workspace_id),
+                Some(session_id),
+                error
+                    .or(message)
+                    .unwrap_or_else(|| "A Pi extension reported an error.".to_string()),
+                Some(SessionRuntimeMetadata {
+                    provider_id: None,
+                    model_id: None,
+                    pi_session_file: Some(session_file.to_string()),
+                    last_known_ready: false,
+                    last_error: None,
+                }),
+            )
+            .await?;
+        }
+        RpcEvent::MessageEnd { message } => {
+            if message.role == "assistant" {
+                *completed = true;
+                emit_assistant_terminal_event(
+                    app,
+                    shared,
+                    session_handle,
+                    workspace_id,
+                    session_id,
+                    session_file,
+                    &message,
+                )
+                .await?;
+            }
+        }
+        RpcEvent::AgentEnd { messages } => {
+            if !*completed {
+                if let Some(message) = messages
+                    .iter()
+                    .rev()
+                    .find(|message| message.role == "assistant")
+                {
+                    *completed = true;
+                    emit_assistant_terminal_event(
+                        app,
+                        shared,
+                        session_handle,
+                        workspace_id,
+                        session_id,
+                        session_file,
+                        message,
+                    )
+                    .await?;
+                }
+            }
+        }
+        RpcEvent::AgentStart
+        | RpcEvent::TurnStart
+        | RpcEvent::TurnEnd { .. }
+        | RpcEvent::MessageStart { .. }
+        | RpcEvent::Other => {}
+    }
+
     Ok(())
 }
 
@@ -1250,6 +1656,20 @@ async fn handle_session_stdout(
     loop {
         let read = stdout.read(&mut chunk).await?;
         if read == 0 {
+            if !buffer.is_empty() {
+                let line = std::mem::take(&mut buffer);
+                process_stdout_line(
+                    &app,
+                    &shared,
+                    &session_handle,
+                    &workspace_id,
+                    &session_id,
+                    &session_file,
+                    &line,
+                    &mut completed,
+                )
+                .await?;
+            }
             break;
         }
 
@@ -1267,247 +1687,25 @@ async fn handle_session_stdout(
                 continue;
             }
 
-            let value: Value = serde_json::from_slice(&line).with_context(|| {
-                format!(
-                    "failed to parse Pi RPC line: {}",
-                    String::from_utf8_lossy(&line)
-                )
-            })?;
+            process_stdout_line(
+                &app,
+                &shared,
+                &session_handle,
+                &workspace_id,
+                &session_id,
+                &session_file,
+                &line,
+                &mut completed,
+            )
+            .await?;
 
-            if value.get("type").and_then(Value::as_str) == Some("response") {
-                let response: RpcResponseEnvelope = serde_json::from_value(value)?;
-                if let Some(request_id) = response.id.clone() {
-                    if let Some(sender) = session_handle
-                        .inner
-                        .pending
-                        .lock()
-                        .await
-                        .remove(&request_id)
-                    {
-                        let _ = if response.success.unwrap_or(false) {
-                            sender.send(Ok(response.data.unwrap_or(Value::Null)))
-                        } else {
-                            sender.send(Err(response
-                                .error
-                                .unwrap_or_else(|| "Pi RPC request failed.".to_string())))
-                        };
-                    }
-                }
-                continue;
+            if completed {
+                break;
             }
+        }
 
-            let event: RpcEvent = serde_json::from_value(value)?;
-            match event {
-                RpcEvent::MessageUpdate {
-                    assistant_message_event: AssistantMessageEvent::TextDelta { delta },
-                } => {
-                    app.emit(
-                        "pi://event",
-                        PiRuntimeEvent::Token {
-                            workspace_id: workspace_id.clone(),
-                            session_id: session_id.clone(),
-                            delta,
-                            metadata: None,
-                        },
-                    )?;
-                }
-                RpcEvent::MessageUpdate {
-                    assistant_message_event: AssistantMessageEvent::Done { reason },
-                } => {
-                    if reason == "tool_use" {
-                        continue;
-                    }
-                }
-                RpcEvent::MessageUpdate {
-                    assistant_message_event: AssistantMessageEvent::Error { reason },
-                } => {
-                    if reason == "aborted" {
-                        session_handle.mark_abort_requested();
-                    }
-                }
-                RpcEvent::MessageUpdate {
-                    assistant_message_event: AssistantMessageEvent::Other,
-                } => {}
-                RpcEvent::ToolExecutionStart {
-                    tool_call_id,
-                    tool_name,
-                    args,
-                } => {
-                    emit_tool_start(
-                        &app,
-                        &shared,
-                        &workspace_id,
-                        &session_id,
-                        ToolActivity {
-                            id: tool_call_id.clone(),
-                            tool_name: tool_name.clone(),
-                            summary: summarize_tool_start(&tool_name, &args),
-                            output: None,
-                            status: ToolStatus::Running,
-                            started_at: now_iso(),
-                        },
-                    )
-                    .await?;
-                }
-                RpcEvent::ToolExecutionUpdate {
-                    tool_call_id,
-                    _tool_name: _,
-                    _args: _,
-                    partial_result,
-                } => {
-                    emit_tool_update(
-                        &app,
-                        &shared,
-                        &workspace_id,
-                        &session_id,
-                        &tool_call_id,
-                        tool_result_text(&partial_result),
-                        ToolStatus::Running,
-                    )
-                    .await?;
-                }
-                RpcEvent::ToolExecutionEnd {
-                    tool_call_id,
-                    _tool_name: _,
-                    result,
-                    is_error,
-                } => {
-                    emit_tool_update(
-                        &app,
-                        &shared,
-                        &workspace_id,
-                        &session_id,
-                        &tool_call_id,
-                        tool_result_text(&result),
-                        if is_error {
-                            ToolStatus::Failed
-                        } else {
-                            ToolStatus::Completed
-                        },
-                    )
-                    .await?;
-                }
-                RpcEvent::CompactionStart { reason } => {
-                    emit_status(
-                        &app,
-                        &shared,
-                        &workspace_id,
-                        &session_id,
-                        "Compacting session".to_string(),
-                        Some(reason),
-                    )
-                    .await?;
-                }
-                RpcEvent::CompactionEnd {
-                    reason,
-                    error_message,
-                } => {
-                    emit_status(
-                        &app,
-                        &shared,
-                        &workspace_id,
-                        &session_id,
-                        "Compaction complete".to_string(),
-                        error_message.or(Some(reason)),
-                    )
-                    .await?;
-                }
-                RpcEvent::AutoRetryStart {
-                    attempt,
-                    max_attempts,
-                    error_message,
-                } => {
-                    emit_status(
-                        &app,
-                        &shared,
-                        &workspace_id,
-                        &session_id,
-                        format!("Retrying ({attempt}/{max_attempts})"),
-                        Some(error_message),
-                    )
-                    .await?;
-                }
-                RpcEvent::AutoRetryEnd {
-                    success,
-                    attempt,
-                    final_error,
-                } => {
-                    emit_status(
-                        &app,
-                        &shared,
-                        &workspace_id,
-                        &session_id,
-                        if success {
-                            format!("Retry succeeded on attempt {attempt}")
-                        } else {
-                            format!("Retry failed on attempt {attempt}")
-                        },
-                        final_error,
-                    )
-                    .await?;
-                }
-                RpcEvent::ExtensionError { error, message } => {
-                    emit_error(
-                        &app,
-                        &shared,
-                        Some(&workspace_id),
-                        Some(&session_id),
-                        error
-                            .or(message)
-                            .unwrap_or_else(|| "A Pi extension reported an error.".to_string()),
-                        Some(SessionRuntimeMetadata {
-                            provider_id: None,
-                            model_id: None,
-                            pi_session_file: Some(session_file.clone()),
-                            last_known_ready: false,
-                            last_error: None,
-                        }),
-                    )
-                    .await?;
-                }
-                RpcEvent::MessageEnd { message } => {
-                    if message.role == "assistant" {
-                        completed = true;
-                        emit_assistant_terminal_event(
-                            &app,
-                            &shared,
-                            &session_handle,
-                            &workspace_id,
-                            &session_id,
-                            &session_file,
-                            &message,
-                        )
-                        .await?;
-                    }
-                }
-                RpcEvent::AgentEnd { messages } => {
-                    if !completed {
-                        if let Some(message) = messages
-                            .iter()
-                            .rev()
-                            .find(|message| message.role == "assistant")
-                        {
-                            completed = true;
-                            emit_assistant_terminal_event(
-                                &app,
-                                &shared,
-                                &session_handle,
-                                &workspace_id,
-                                &session_id,
-                                &session_file,
-                                message,
-                            )
-                            .await?;
-                        }
-                    }
-                    break;
-                }
-                RpcEvent::AgentStart
-                | RpcEvent::TurnStart
-                | RpcEvent::TurnEnd { .. }
-                | RpcEvent::MessageStart { .. }
-                | RpcEvent::Other => {}
-            }
+        if completed {
+            break;
         }
     }
 
@@ -1565,6 +1763,120 @@ async fn handle_session_stderr(
     );
 }
 
+async fn generate_thread_title(
+    app: AppHandle,
+    shared: AppState,
+    workspace_id: &str,
+    session_id: &str,
+) -> Result<()> {
+    let (workspace_path, provider_id, model_id, user_message, assistant_message) = {
+        let state = shared.state.lock().await;
+        let Some(workspace) = state
+            .workspaces
+            .iter()
+            .find(|workspace| workspace.id == workspace_id)
+        else {
+            return Ok(());
+        };
+
+        let Some(session) = workspace
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+        else {
+            return Ok(());
+        };
+
+        if !state.preferences.auto_title_enabled || session.title != "New thread" {
+            return Ok(());
+        }
+
+        let user_message = session.timeline.iter().find_map(|item| match item {
+            TimelineItem::UserMessage { content, .. } if !content.trim().is_empty() => {
+                Some(content.clone())
+            }
+            _ => None,
+        });
+        let assistant_message = session.timeline.iter().find_map(|item| match item {
+            TimelineItem::AssistantMessage { content, .. } if !content.trim().is_empty() => {
+                Some(content.clone())
+            }
+            _ => None,
+        });
+
+        let (Some(user_message), Some(assistant_message)) = (user_message, assistant_message)
+        else {
+            return Ok(());
+        };
+
+        (
+            expand_user_path(&workspace.path),
+            state.preferences.title_model_provider_id.clone(),
+            state.preferences.title_model_id.clone(),
+            user_message,
+            assistant_message,
+        )
+    };
+
+    let resolved = resolve_pi_install(&shared).await?;
+    let binary_path = resolved
+        .binary_path
+        .context("Pi is not installed or failed validation")?;
+
+    let extra_args = vec![
+        "--no-session".to_string(),
+        "--provider".to_string(),
+        provider_id,
+        "--model".to_string(),
+        model_id,
+        "--thinking".to_string(),
+        "low".to_string(),
+    ];
+    let extra_arg_refs = extra_args.iter().map(String::as_str).collect::<Vec<_>>();
+    let response = run_rpc_once(
+        &binary_path,
+        Some(Path::new(&workspace_path)),
+        &extra_arg_refs,
+        json!({
+            "type": "prompt",
+            "message": prompt_for_title(&user_message, &assistant_message)
+        }),
+    )
+    .await?;
+
+    let Some(title) = extract_text_from_prompt_response(&response)
+        .and_then(|value| sanitize_generated_title(&value))
+    else {
+        return Ok(());
+    };
+
+    {
+        let mut state = shared.state.lock().await;
+        let Some(session) = find_session_mut(&mut state, workspace_id, session_id) else {
+            return Ok(());
+        };
+
+        if session.title != "New thread" {
+            return Ok(());
+        }
+
+        session.title = title.clone();
+        session.updated_at = now_iso();
+        storage::save(&app, &state)?;
+    }
+
+    app.emit(
+        "pi://event",
+        PiRuntimeEvent::SessionTitled {
+            workspace_id: workspace_id.to_string(),
+            session_id: session_id.to_string(),
+            title,
+        },
+    )?;
+
+    Ok(())
+}
+
 fn session_file_path(app: &AppHandle, workspace_id: &str, session_id: &str) -> Result<PathBuf> {
     let app_data = app
         .path()
@@ -1573,6 +1885,91 @@ fn session_file_path(app: &AppHandle, workspace_id: &str, session_id: &str) -> R
     let directory = app_data.join("pi-sessions").join(workspace_id);
     std::fs::create_dir_all(&directory)?;
     Ok(directory.join(format!("{session_id}.jsonl")))
+}
+
+pub fn reconcile_persisted_state(state: &mut crate::models::PersistedAppState) {
+    for workspace in &mut state.workspaces {
+        for session in &mut workspace.sessions {
+            if matches!(session.status, SessionStatus::Streaming) {
+                session.status = SessionStatus::Idle;
+            }
+
+            let Some(session_file) = session.runtime.pi_session_file.clone() else {
+                continue;
+            };
+
+            let Ok(raw) = std::fs::read_to_string(&session_file) else {
+                continue;
+            };
+
+            let mut existing_assistants = session
+                .timeline
+                .iter()
+                .filter_map(|item| match item {
+                    TimelineItem::AssistantMessage { content, .. } => Some(content.clone()),
+                    _ => None,
+                })
+                .fold(HashMap::<String, usize>::new(), |mut counts, content| {
+                    *counts.entry(content).or_insert(0) += 1;
+                    counts
+                });
+
+            let mut last_final_assistant: Option<PiMessage> = None;
+
+            for line in raw.lines() {
+                let Ok(entry) = serde_json::from_str::<PiSessionEntry>(line) else {
+                    continue;
+                };
+                if entry.kind != "message" {
+                    continue;
+                }
+
+                let Some(message) = entry.message else {
+                    continue;
+                };
+                if message.role != "assistant" || message.stop_reason.as_deref() == Some("toolUse")
+                {
+                    continue;
+                }
+
+                let content = assistant_message_text(&message);
+                if content.trim().is_empty() {
+                    continue;
+                }
+
+                match existing_assistants.get_mut(&content) {
+                    Some(count) if *count > 0 => {
+                        *count -= 1;
+                    }
+                    _ => {
+                        session.timeline.push(TimelineItem::AssistantMessage {
+                            id: Uuid::new_v4().to_string(),
+                            created_at: now_iso(),
+                            content,
+                            streaming: false,
+                        });
+                    }
+                }
+
+                last_final_assistant = Some(message);
+            }
+
+            if let Some(message) = last_final_assistant {
+                apply_metadata(
+                    session,
+                    Some(assistant_message_metadata(
+                        &message,
+                        &session_file,
+                        true,
+                        None,
+                    )),
+                );
+                session.runtime.last_known_ready = true;
+                session.runtime.last_error = None;
+                session.status = SessionStatus::Idle;
+            }
+        }
+    }
 }
 
 async fn fetch_workspace_catalog_and_normalize(
@@ -1678,11 +2075,18 @@ pub async fn launch_prompt_stream(
             .find(|session| session.id == payload.session_id)
             .context("session not found")?;
 
-        session.timeline.push(TimelineItem::UserMessage {
-            id: Uuid::new_v4().to_string(),
-            created_at: now_iso(),
-            content: payload.prompt.clone(),
-        });
+        if !session.timeline.iter().any(|item| {
+            matches!(
+                item,
+                TimelineItem::UserMessage { id, .. } if id == &payload.user_message_id
+            )
+        }) {
+            session.timeline.push(TimelineItem::UserMessage {
+                id: payload.user_message_id.clone(),
+                created_at: now_iso(),
+                content: payload.prompt.clone(),
+            });
+        }
         session.status = SessionStatus::Streaming;
         session.runtime.provider_id = None;
         session.runtime.model_id = None;
@@ -1690,6 +2094,15 @@ pub async fn launch_prompt_stream(
         session.runtime.last_known_ready = false;
         session.runtime.last_error = None;
         session.updated_at = now_iso();
+
+        if let Some(checkpoint) = git::capture_undo_checkpoint(
+            &payload.workspace_id,
+            &payload.session_id,
+            &payload.user_message_id,
+            &workspace.path,
+        )? {
+            storage::save_undo_checkpoint(&app, &checkpoint)?;
+        }
 
         storage::save(&app, &state)?;
     }
@@ -1703,6 +2116,7 @@ async fn run_prompt_stream(app: AppHandle, shared: AppState, payload: SendPrompt
     let workspace_id = payload.workspace_id.clone();
     let session_id = payload.session_id.clone();
     let prompt = payload.prompt.clone();
+    let prompt_mode = payload.mode.clone();
     let key = session_key(&workspace_id, &session_id);
 
     let result = async {
@@ -1806,7 +2220,7 @@ async fn run_prompt_stream(app: AppHandle, shared: AppState, payload: SendPrompt
         let prompt_result: Result<Value> = session_handle
             .request(&json!({
                 "type": "prompt",
-                "message": prompt,
+                "message": prompt_for_mode(&prompt, &prompt_mode),
             }))
             .await;
 
@@ -2064,5 +2478,20 @@ mod tests {
         assert!(!changed);
         assert_eq!(provider_id, "openai");
         assert_eq!(model_id, "gpt-5.4");
+    }
+
+    #[test]
+    fn build_mode_prompt_passthrough_is_unchanged() {
+        let prompt = "Fix the broken terminal pane.";
+        assert_eq!(prompt_for_mode(prompt, &PromptMode::Build), prompt);
+    }
+
+    #[test]
+    fn plan_mode_prompt_is_wrapped_with_proposed_plan_instruction() {
+        let wrapped = prompt_for_mode("Investigate the bug.", &PromptMode::Plan);
+
+        assert!(wrapped.contains("<proposed_plan>"));
+        assert!(wrapped.contains("Respond with exactly one"));
+        assert!(wrapped.contains("User request:\nInvestigate the bug."));
     }
 }

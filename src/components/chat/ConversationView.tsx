@@ -1,17 +1,24 @@
 import {
   ArrowUp,
   Bot,
+  Check,
   FileText,
   LoaderCircle,
   Search,
   Wrench,
   Zap,
-  Check,
 } from "lucide-react";
-import { useMemo, useState, useRef, useEffect } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChatSession, WorkspaceRecord } from "../../domains/types";
 import { useAppStore } from "../../state/useAppStore";
 import { TimelineItemView } from "./TimelineItemView";
+import {
+  deriveLivePhase,
+  resolveAssistantLabel,
+  resolveComposerCapabilities,
+  shortenAssistantLabel,
+  type LivePhase,
+} from "./chatRuntime";
 
 interface ConversationViewProps {
   workspace: WorkspaceRecord | null;
@@ -22,7 +29,6 @@ export function ConversationView({
   workspace,
   session,
 }: ConversationViewProps) {
-  const [draft, setDraft] = useState("");
   const [isFocused, setIsFocused] = useState(false);
   const [providerDropdownOpen, setProviderDropdownOpen] = useState(false);
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
@@ -32,12 +38,19 @@ export function ConversationView({
   const shouldStickToBottomRef = useRef(true);
 
   const runtimeInstall = useAppStore((store) => store.runtimeInstall);
+  const stateProviders = useAppStore((store) => store.state?.providers ?? []);
   const workspaceCatalogs = useAppStore((store) => store.workspaceCatalogs);
+  const workspaceCatalogStatus = useAppStore(
+    (store) => store.workspaceCatalogStatus,
+  );
   const workspaceCatalogErrors = useAppStore(
     (store) => store.workspaceCatalogErrors,
   );
+  const composerDrafts = useAppStore((store) => store.composerDrafts);
   const currentMode = useAppStore((store) => store.currentMode);
   const setCurrentMode = useAppStore((store) => store.setCurrentMode);
+  const setComposerDraft = useAppStore((store) => store.setComposerDraft);
+  const clearComposerDraft = useAppStore((store) => store.clearComposerDraft);
   const sendPrompt = useAppStore((state) => state.sendPrompt);
   const abortPrompt = useAppStore((state) => state.abortPrompt);
   const resolveApproval = useAppStore((state) => state.resolveApproval);
@@ -59,29 +72,36 @@ export function ConversationView({
     setEffortDropdownOpen((current) => (menu === "effort" ? !current : false));
   };
 
+  const sessionDraft = session ? (composerDrafts[session.id] ?? "") : "";
+
   const handleSubmit = async () => {
-    const value = draft.trim();
+    const value = sessionDraft.trim();
     if (!workspace || !session || !value) {
       return;
     }
+
     closeComposerMenus();
-    setDraft("");
+    clearComposerDraft(session.id);
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
     }
-    await sendPrompt(workspace.id, session.id, value);
+
+    try {
+      await sendPrompt(workspace.id, session.id, value, currentMode);
+    } catch (error) {
+      setComposerDraft(session.id, value);
+      throw error;
+    }
   };
 
-  // Auto-resize textarea
   useEffect(() => {
     const textarea = textareaRef.current;
     if (textarea) {
       textarea.style.height = "auto";
       textarea.style.height = `${textarea.scrollHeight}px`;
     }
-  }, [draft]);
+  }, [sessionDraft, session?.id]);
 
-  // Scroll to bottom on new messages
   useEffect(() => {
     if (timelineRef.current && shouldStickToBottomRef.current) {
       timelineRef.current.scrollTop = timelineRef.current.scrollHeight;
@@ -106,10 +126,50 @@ export function ConversationView({
 
   const livePhase = useMemo(() => deriveLivePhase(session), [session]);
 
+  useEffect(() => {
+    if (!workspace || !session) {
+      return;
+    }
+
+    const workspaceProviders = workspaceCatalogs[workspace.id] ?? [];
+    const displayProviders =
+      workspaceProviders.length > 0 ? workspaceProviders : stateProviders;
+    const capabilities = resolveComposerCapabilities({
+      providers: displayProviders,
+      providerId: workspace.providerId,
+      modelId: workspace.modelId,
+      effort: workspace.effort,
+      fastMode: workspace.fastMode,
+    });
+
+    if (
+      workspace.effort === capabilities.normalizedEffort &&
+      workspace.fastMode === capabilities.normalizedFastMode
+    ) {
+      return;
+    }
+
+    void updateWorkspaceSettings({
+      workspaceId: workspace.id,
+      approvalMode: workspace.approvalMode,
+      providerId: workspace.providerId,
+      modelId: workspace.modelId,
+      effort: capabilities.normalizedEffort,
+      fastMode: capabilities.normalizedFastMode,
+      policy: workspace.policy,
+    });
+  }, [
+    session,
+    stateProviders,
+    updateWorkspaceSettings,
+    workspace,
+    workspaceCatalogs,
+  ]);
+
   if (!workspace || !session) {
     return (
       <div className="empty-state" style={{ color: "#555" }}>
-        Send a message to start the conversation.
+        Select a thread to continue.
       </div>
     );
   }
@@ -119,39 +179,55 @@ export function ConversationView({
   );
   const isEmptySpace = !hasUserMessage;
 
-  const workspaceProviders = workspace
-    ? (workspaceCatalogs[workspace.id] ?? [])
-    : [];
-  const workspaceCatalogError = workspace
-    ? workspaceCatalogErrors[workspace.id]
-    : undefined;
-  const activeProvider = workspaceProviders.find(
-    (p) => p.id === workspace.providerId,
+  const workspaceProviders = workspaceCatalogs[workspace.id] ?? [];
+  const catalogStatus = workspaceCatalogStatus[workspace.id] ?? "idle";
+  const workspaceCatalogError = workspaceCatalogErrors[workspace.id];
+  const displayProviders =
+    workspaceProviders.length > 0 ? workspaceProviders : stateProviders;
+  const activeProvider = displayProviders.find(
+    (provider) => provider.id === workspace.providerId,
   );
-  const activeModel = activeProvider?.models.find(
-    (m) => m.id === workspace.modelId,
+  const activeModel =
+    activeProvider?.models.find((model) => model.id === workspace.modelId) ??
+    displayProviders
+      .flatMap((provider) => provider.models)
+      .find((model) => model.id === workspace.modelId);
+  const assistantLabel = resolveAssistantLabel({
+    session,
+    workspace,
+    workspaceCatalog: workspaceProviders,
+    defaultProviders: stateProviders,
+  });
+  const assistantChromeLabel = shortenAssistantLabel(assistantLabel);
+  const composerCapabilities = resolveComposerCapabilities({
+    providers: displayProviders,
+    providerId: workspace.providerId,
+    modelId: workspace.modelId,
+    effort: workspace.effort,
+    fastMode: workspace.fastMode,
+  });
+  const effortLabels = Object.fromEntries(
+    composerCapabilities.effortOptions.map((entry) => [entry.id, entry.label]),
   );
+
   const hasWorkspaceCatalog = workspaceProviders.length > 0;
   const sendDisabledReason =
     runtimeInstall?.status === "missing"
-      ? "Pi is not installed. Install it from Settings > Connections."
+      ? "The local runtime is not installed. Install it from Settings > Connections."
       : runtimeInstall?.status === "broken"
-        ? "Pi was found but did not respond correctly. Check the runtime path in Settings."
-        : workspaceCatalogError
-          ? "Unable to load Pi models for this project. Refresh the runtime in Settings."
-          : runtimeInstall?.status === "ready" && !hasWorkspaceCatalog
-            ? "No Pi models are configured for this project. Run `pi` and configure a provider, or update your Pi config."
+        ? "The local runtime did not respond correctly. Check the runtime path in Settings."
+        : catalogStatus === "error"
+          ? workspaceCatalogError ||
+            "Unable to load models for this project. Refresh the runtime in Settings."
+          : runtimeInstall?.status === "ready" &&
+              catalogStatus === "ready" &&
+              workspaceProviders.length === 0
+            ? "No models are configured for this project. Run `pi` in the project and configure a provider, or update your config."
             : undefined;
   const sendDisabled = Boolean(sendDisabledReason);
 
-  const effortLabels: Record<string, string> = {
-    "extra-high": "Extra High",
-    high: "High (default)",
-    medium: "Medium",
-    low: "Low",
-  };
-
-  const currentEffortLabel = effortLabels[workspace.effort] || "High";
+  const currentEffortLabel =
+    effortLabels[composerCapabilities.normalizedEffort] || "High";
 
   return (
     <div
@@ -198,30 +274,15 @@ export function ConversationView({
                 item={item}
                 workspaceId={workspace.id}
                 sessionId={session.id}
+                assistantLabel={assistantChromeLabel}
                 onResolveApproval={resolveApproval}
               />
             ))}
             {livePhase && (
-              <div className="chat-row chat-row--assistant">
-                <div className="chat-inline-status chat-inline-status--live">
-                  {livePhase.icon === "search" ? (
-                    <Search size={14} />
-                  ) : livePhase.icon === "tool" ? (
-                    <Wrench size={14} />
-                  ) : (
-                    <LoaderCircle
-                      size={14}
-                      className="chat-inline-status__spin"
-                    />
-                  )}
-                  <span>{livePhase.label}</span>
-                  {livePhase.detail && (
-                    <span className="chat-inline-status__meta">
-                      {livePhase.detail}
-                    </span>
-                  )}
-                </div>
-              </div>
+              <LivePhaseIndicator
+                assistantLabel={assistantChromeLabel}
+                phase={livePhase}
+              />
             )}
           </div>
         </div>
@@ -266,10 +327,15 @@ export function ConversationView({
         >
           <textarea
             ref={textareaRef}
-            value={draft}
+            value={sessionDraft}
             onFocus={() => setIsFocused(true)}
             onBlur={() => setIsFocused(false)}
-            onChange={(event) => setDraft(event.target.value)}
+            onChange={(event) => {
+              if (!session) {
+                return;
+              }
+              setComposerDraft(session.id, event.target.value);
+            }}
             placeholder="Ask for follow-up changes or attach images"
             onKeyDown={(event) => {
               if (event.key === "Enter" && !event.shiftKey) {
@@ -281,6 +347,7 @@ export function ConversationView({
             }}
             disabled={sendDisabled}
             rows={1}
+            aria-label="Message composer"
             style={{
               background: "transparent",
               border: "none",
@@ -319,9 +386,11 @@ export function ConversationView({
               >
                 <span style={{ paddingRight: "4px" }}>
                   {activeProvider?.label ||
-                    (runtimeInstall?.status === "ready"
-                      ? "Provider"
-                      : "Pi unavailable")}
+                    (catalogStatus === "loading"
+                      ? "Loading providers..."
+                      : runtimeInstall?.status === "ready"
+                        ? "Provider"
+                        : "Runtime unavailable")}
                 </span>
                 <ChevronIcon />
                 {providerDropdownOpen && hasWorkspaceCatalog && (
@@ -333,8 +402,8 @@ export function ConversationView({
                         zIndex: 10,
                         cursor: "default",
                       }}
-                      onClick={(e) => {
-                        e.stopPropagation();
+                      onClick={(event) => {
+                        event.stopPropagation();
                         closeComposerMenus();
                       }}
                     />
@@ -347,8 +416,8 @@ export function ConversationView({
                           key={provider.id}
                           className="custom-dropdown-item"
                           style={{ justifyContent: "space-between" }}
-                          onClick={(e) => {
-                            e.stopPropagation();
+                          onClick={(event) => {
+                            event.stopPropagation();
                             closeComposerMenus();
                             void updateWorkspaceSettings({
                               workspaceId: workspace.id,
@@ -386,9 +455,11 @@ export function ConversationView({
                 <Bot size={14} />
                 <span style={{ paddingRight: "4px" }}>
                   {activeModel?.label ||
-                    (runtimeInstall?.status === "ready"
-                      ? "Select Model"
-                      : "Pi unavailable")}
+                    (catalogStatus === "loading"
+                      ? "Loading models..."
+                      : runtimeInstall?.status === "ready"
+                        ? "Select model"
+                        : "Runtime unavailable")}
                 </span>
                 <ChevronIcon />
                 {modelDropdownOpen && hasWorkspaceCatalog && (
@@ -400,34 +471,36 @@ export function ConversationView({
                         zIndex: 10,
                         cursor: "default",
                       }}
-                      onClick={(e) => {
-                        e.stopPropagation();
+                      onClick={(event) => {
+                        event.stopPropagation();
                         closeComposerMenus();
                       }}
                     />
                     <div
                       className="custom-dropdown"
-                      style={{ minWidth: "200px" }}
+                      style={{ minWidth: "220px" }}
                     >
-                      {activeProvider?.models.map((m) => (
+                      {activeProvider?.models.map((model) => (
                         <div
-                          key={m.id}
+                          key={model.id}
                           className="custom-dropdown-item"
                           style={{ justifyContent: "space-between" }}
-                          onClick={(e) => {
-                            e.stopPropagation();
+                          onClick={(event) => {
+                            event.stopPropagation();
                             closeComposerMenus();
                             void updateWorkspaceSettings({
                               workspaceId: workspace.id,
                               approvalMode: workspace.approvalMode,
                               providerId: workspace.providerId,
-                              modelId: m.id,
+                              modelId: model.id,
                               policy: workspace.policy,
                             });
                           }}
                         >
-                          <span>{m.label}</span>
-                          {workspace.modelId === m.id && <Check size={14} />}
+                          <span>{model.label}</span>
+                          {workspace.modelId === model.id && (
+                            <Check size={14} />
+                          )}
                         </div>
                       ))}
                     </div>
@@ -456,8 +529,8 @@ export function ConversationView({
                         zIndex: 10,
                         cursor: "default",
                       }}
-                      onClick={(e) => {
-                        e.stopPropagation();
+                      onClick={(event) => {
+                        event.stopPropagation();
                         closeComposerMenus();
                       }}
                     />
@@ -466,62 +539,72 @@ export function ConversationView({
                       style={{ minWidth: "160px" }}
                     >
                       <div className="dropdown-section-label">Effort</div>
-                      {Object.entries(effortLabels).map(([id, label]) => (
-                        <div
-                          key={id}
-                          className="custom-dropdown-item"
-                          style={{ justifyContent: "space-between" }}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            closeComposerMenus();
-                            void updateWorkspaceSettings({
-                              workspaceId: workspace.id,
-                              approvalMode: workspace.approvalMode,
-                              providerId: workspace.providerId,
-                              modelId: workspace.modelId,
-                              effort: id,
-                              policy: workspace.policy,
-                            });
-                          }}
-                        >
-                          <span>{label}</span>
-                          {workspace.effort === id && <Check size={14} />}
-                        </div>
-                      ))}
+                      {composerCapabilities.effortOptions.map(
+                        ({ id, label }) => (
+                          <div
+                            key={id}
+                            className="custom-dropdown-item"
+                            style={{ justifyContent: "space-between" }}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              closeComposerMenus();
+                              void updateWorkspaceSettings({
+                                workspaceId: workspace.id,
+                                approvalMode: workspace.approvalMode,
+                                providerId: workspace.providerId,
+                                modelId: workspace.modelId,
+                                effort: id,
+                                policy: workspace.policy,
+                              });
+                            }}
+                          >
+                            <span>{label}</span>
+                            {workspace.effort === id && <Check size={14} />}
+                          </div>
+                        ),
+                      )}
 
-                      <div
-                        style={{
-                          height: "1px",
-                          background: "#333",
-                          margin: "4px 0",
-                        }}
-                      />
-                      <div className="dropdown-section-label">Fast Mode</div>
-                      {[
-                        { id: false, label: "off" },
-                        { id: true, label: "on" },
-                      ].map((opt) => (
-                        <div
-                          key={opt.label}
-                          className="custom-dropdown-item"
-                          style={{ justifyContent: "space-between" }}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            closeComposerMenus();
-                            void updateWorkspaceSettings({
-                              workspaceId: workspace.id,
-                              approvalMode: workspace.approvalMode,
-                              providerId: workspace.providerId,
-                              modelId: workspace.modelId,
-                              fastMode: opt.id,
-                              policy: workspace.policy,
-                            });
-                          }}
-                        >
-                          <span>{opt.label}</span>
-                          {workspace.fastMode === opt.id && <Check size={14} />}
-                        </div>
-                      ))}
+                      {composerCapabilities.supportsFastMode && (
+                        <>
+                          <div
+                            style={{
+                              height: "1px",
+                              background: "#333",
+                              margin: "4px 0",
+                            }}
+                          />
+                          <div className="dropdown-section-label">
+                            Fast Mode
+                          </div>
+                          {[
+                            { id: false, label: "off" },
+                            { id: true, label: "on" },
+                          ].map((option) => (
+                            <div
+                              key={option.label}
+                              className="custom-dropdown-item"
+                              style={{ justifyContent: "space-between" }}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                closeComposerMenus();
+                                void updateWorkspaceSettings({
+                                  workspaceId: workspace.id,
+                                  approvalMode: workspace.approvalMode,
+                                  providerId: workspace.providerId,
+                                  modelId: workspace.modelId,
+                                  fastMode: option.id,
+                                  policy: workspace.policy,
+                                });
+                              }}
+                            >
+                              <span>{option.label}</span>
+                              {workspace.fastMode === option.id && (
+                                <Check size={14} />
+                              )}
+                            </div>
+                          ))}
+                        </>
+                      )}
                     </div>
                   </>
                 )}
@@ -559,13 +642,13 @@ export function ConversationView({
                 background:
                   session.status === "streaming"
                     ? "#ef4444"
-                    : !sendDisabled && draft.trim()
+                    : !sendDisabled && sessionDraft.trim()
                       ? "#2563eb"
                       : "#333",
                 color:
                   session.status === "streaming"
                     ? "#fff"
-                    : !sendDisabled && draft.trim()
+                    : !sendDisabled && sessionDraft.trim()
                       ? "#fff"
                       : "#666",
                 display: "flex",
@@ -574,14 +657,14 @@ export function ConversationView({
                 border: "none",
                 cursor:
                   session.status === "streaming" ||
-                  (!sendDisabled && Boolean(draft.trim()))
+                  (!sendDisabled && Boolean(sessionDraft.trim()))
                     ? "pointer"
                     : "default",
                 transition: "background 0.2s, color 0.2s",
               }}
               disabled={
                 session.status !== "streaming" &&
-                (sendDisabled || !draft.trim())
+                (sendDisabled || !sessionDraft.trim())
               }
               onClick={() =>
                 session.status === "streaming"
@@ -615,19 +698,6 @@ export function ConversationView({
           background: rgba(255, 255, 255, 0.05);
           color: #eee;
         }
-        .composer-select {
-          appearance: none;
-          background: transparent;
-          border: none;
-          color: inherit;
-          font-size: inherit;
-          outline: none;
-          padding-right: 4px;
-        }
-        .composer-select option {
-          background: #18181A;
-          color: #fff;
-        }
         .custom-dropdown {
           position: absolute;
           bottom: calc(100% + 12px);
@@ -657,13 +727,6 @@ export function ConversationView({
           background: #2563eb;
           color: white;
         }
-        .custom-dropdown-item:hover .item-description {
-          color: rgba(255, 255, 255, 0.8) !important;
-        }
-        .custom-dropdown-item.multi-line {
-          align-items: flex-start;
-          padding: 10px 12px;
-        }
         .dropdown-section-label {
           padding: 4px 12px;
           font-size: 0.7rem;
@@ -677,58 +740,47 @@ export function ConversationView({
   );
 }
 
-function deriveLivePhase(session: ChatSession | null) {
-  if (!session || session.status !== "streaming") {
-    return null;
-  }
-
-  const recentItems = [...session.timeline].reverse();
-  const activeTool = recentItems.find(
-    (item) =>
-      item.kind === "tool-activity" && item.activity.status === "running",
+function LivePhaseIndicator({
+  assistantLabel,
+  phase,
+}: {
+  assistantLabel: string;
+  phase: LivePhase;
+}) {
+  return (
+    <div className="chat-row chat-row--assistant">
+      <div className={`chat-live-phase chat-live-phase--${phase.phase}`}>
+        <div className="chat-speaker-label">{assistantLabel}</div>
+        <div className="chat-inline-status chat-inline-status--live">
+          <span className="chat-live-phase__icon">
+            <LivePhaseIcon phase={phase} />
+          </span>
+          <span className="chat-live-phase__text" data-text={phase.label}>
+            {phase.label}
+          </span>
+          {phase.detail && (
+            <span className="chat-inline-status__meta">{phase.detail}</span>
+          )}
+        </div>
+      </div>
+    </div>
   );
+}
 
-  if (activeTool && activeTool.kind === "tool-activity") {
-    const isSearchTool =
-      activeTool.activity.toolName.toLowerCase().includes("search") ||
-      activeTool.activity.toolName.toLowerCase().includes("find");
-    return {
-      icon: isSearchTool ? "search" : "tool",
-      label: isSearchTool ? "Searching" : "Running tool",
-      detail: activeTool.activity.toolName,
-    };
+function LivePhaseIcon({ phase }: { phase: LivePhase }) {
+  switch (phase.phase) {
+    case "reading-files":
+      return <Search size={14} />;
+    case "listing-directory":
+      return <Wrench size={14} />;
+    case "writing-files":
+      return <FileText size={14} />;
+    case "verifying":
+      return <Check size={14} />;
+    case "thinking":
+    default:
+      return <LoaderCircle size={14} className="chat-inline-status__spin" />;
   }
-
-  const recentNotice = recentItems.find(
-    (item) => item.kind === "system-notice" || item.kind === "warning",
-  );
-
-  if (
-    recentNotice &&
-    (recentNotice.kind === "system-notice" || recentNotice.kind === "warning")
-  ) {
-    if (/compact/i.test(recentNotice.title)) {
-      return {
-        icon: "thinking",
-        label: "Compacting",
-        detail: recentNotice.detail,
-      };
-    }
-
-    if (/retry/i.test(recentNotice.title)) {
-      return {
-        icon: "thinking",
-        label: "Retrying",
-        detail: recentNotice.detail,
-      };
-    }
-  }
-
-  return {
-    icon: "thinking",
-    label: "Thinking",
-    detail: "Planning the next response",
-  };
 }
 
 function ChevronIcon() {

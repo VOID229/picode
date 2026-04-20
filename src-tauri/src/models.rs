@@ -14,6 +14,13 @@ pub enum ApprovalMode {
     FullAccess,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum PromptMode {
+    Plan,
+    Build,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ApprovalPolicy {
@@ -276,6 +283,12 @@ pub struct AppPreferences {
     pub provider_id: String,
     #[serde(default = "default_model_id")]
     pub model_id: String,
+    #[serde(default = "default_provider_id")]
+    pub title_model_provider_id: String,
+    #[serde(default = "default_model_id")]
+    pub title_model_id: String,
+    #[serde(default = "default_auto_title_enabled")]
+    pub auto_title_enabled: bool,
     pub approval_mode: ApprovalMode,
     #[serde(default = "default_effort")]
     pub effort: String,
@@ -391,7 +404,17 @@ pub struct UpdateWorkspaceSettingsPayload {
 pub struct SendPromptPayload {
     pub workspace_id: String,
     pub session_id: String,
+    pub user_message_id: String,
     pub prompt: String,
+    pub mode: PromptMode,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UndoUserTurnPayload {
+    pub workspace_id: String,
+    pub session_id: String,
+    pub user_message_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -483,6 +506,13 @@ pub struct RunTerminalCommandPayload {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct WriteTextFilePayload {
+    pub path: String,
+    pub content: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RunTerminalCommandResult {
     pub command_id: String,
 }
@@ -544,6 +574,11 @@ pub enum PiRuntimeEvent {
         session_id: String,
         content: String,
         metadata: Option<SessionRuntimeMetadata>,
+    },
+    SessionTitled {
+        workspace_id: String,
+        session_id: String,
+        title: String,
     },
     AuthBrowserOpen {
         provider_id: String,
@@ -612,6 +647,10 @@ fn default_effort() -> String {
 
 fn default_fast_mode() -> bool {
     false
+}
+
+fn default_auto_title_enabled() -> bool {
+    true
 }
 
 fn default_provider_status() -> ProviderStatus {
@@ -719,6 +758,9 @@ pub fn default_preferences() -> AppPreferences {
         theme: "dark".to_string(),
         provider_id: default_provider_id(),
         model_id: default_model_id(),
+        title_model_provider_id: default_provider_id(),
+        title_model_id: default_model_id(),
+        auto_title_enabled: default_auto_title_enabled(),
         approval_mode: ApprovalMode::Supervised,
         effort: default_effort(),
         fast_mode: default_fast_mode(),
@@ -770,7 +812,8 @@ pub fn new_session(title: impl Into<String>) -> ChatSession {
             id: Uuid::new_v4().to_string(),
             created_at: now,
             title: "Session ready".to_string(),
-            detail: "Pi will stream tool activity, approvals, and model output here.".to_string(),
+            detail: "The selected model will stream tool activity, approvals, and output here."
+                .to_string(),
         }],
     }
 }
@@ -845,6 +888,10 @@ pub fn normalize_state(mut state: PersistedAppState) -> PersistedAppState {
     normalize_stored_model_selection(
         &mut state.preferences.provider_id,
         &mut state.preferences.model_id,
+    );
+    normalize_stored_model_selection(
+        &mut state.preferences.title_model_provider_id,
+        &mut state.preferences.title_model_id,
     );
 
     for workspace in &mut state.workspaces {

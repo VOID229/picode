@@ -5,10 +5,12 @@ import type {
   GitSnapshot,
   PersistedAppState,
   PiInstallStatus,
+  PromptMode,
   PiRuntimeEvent,
   TerminalEvent,
   TerminalSessionState,
   TimelineItem,
+  WorkspaceCatalogStatus,
   WorkspaceRecord,
 } from "../domains/types";
 import {
@@ -31,6 +33,7 @@ import {
   archiveSession as archiveSessionCommand,
   restoreSession as restoreSessionCommand,
   deleteSession as deleteSessionCommand,
+  undoUserTurn as undoUserTurnCommand,
   ensureTerminalSession as ensureTerminalSessionCommand,
   writeTerminalInput as writeTerminalInputCommand,
   resizeTerminal as resizeTerminalCommand,
@@ -62,7 +65,9 @@ interface AppStoreState {
   runtimeGlobalStatus?: string;
   runtimeGlobalError?: string;
   workspaceCatalogs: Record<string, PersistedAppState["providers"]>;
+  workspaceCatalogStatus: Record<string, WorkspaceCatalogStatus>;
   workspaceCatalogErrors: Record<string, string | undefined>;
+  composerDrafts: Record<string, string>;
   initialize: () => Promise<void>;
   setConnectionReady: (ready: boolean) => void;
   setCommandPaletteOpen: (open: boolean) => void;
@@ -83,7 +88,10 @@ interface AppStoreState {
     sessionId: string | null,
   ) => Promise<void>;
   createWorkspace: (path: string, name?: string) => Promise<void>;
-  createSession: (workspaceId: string) => Promise<void>;
+  createSession: (
+    workspaceId: string,
+    options?: { forceNew?: boolean },
+  ) => Promise<string | null>;
   updatePreferences: (
     preferences: PersistedAppState["preferences"],
   ) => Promise<void>;
@@ -101,10 +109,16 @@ interface AppStoreState {
   archiveSession: (workspace_id: string, session_id: string) => Promise<void>;
   restoreSession: (workspace_id: string, session_id: string) => Promise<void>;
   deleteSession: (workspace_id: string, session_id: string) => Promise<void>;
+  undoUserTurn: (
+    workspaceId: string,
+    sessionId: string,
+    userMessageId: string,
+  ) => Promise<void>;
   sendPrompt: (
     workspaceId: string,
     sessionId: string,
     prompt: string,
+    mode: PromptMode,
   ) => Promise<void>;
   abortPrompt: (workspaceId: string, sessionId: string) => Promise<void>;
   resolveApproval: (
@@ -127,6 +141,8 @@ interface AppStoreState {
   ) => Promise<void>;
   refreshRuntimeHealth: () => Promise<void>;
   refreshWorkspaceRuntimeCatalog: (workspaceId: string) => Promise<void>;
+  setComposerDraft: (sessionId: string, draft: string) => void;
+  clearComposerDraft: (sessionId: string) => void;
   applyRuntimeEvent: (event: PiRuntimeEvent) => void;
   applyTerminalEvent: (event: TerminalEvent) => void;
 }
@@ -195,7 +211,9 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
   customActions: {},
   currentMode: "build",
   workspaceCatalogs: {},
+  workspaceCatalogStatus: {},
   workspaceCatalogErrors: {},
+  composerDrafts: {},
   async initialize() {
     if (hasInitialized && get().state) {
       set({ isBootstrapping: false });
@@ -327,21 +345,22 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
       await get().refreshWorkspaceRuntimeCatalog(workspace.id);
     }
   },
-  async createSession(workspaceId) {
+  async createSession(workspaceId, options) {
     const store = get();
     const workspace = store.state?.workspaces.find((w) => w.id === workspaceId);
-    if (workspace) {
+    if (workspace && !options?.forceNew) {
       const emptySession = workspace.sessions.find(
         (s) => !s.timeline.some((t) => t.kind === "user-message"),
       );
       if (emptySession) {
         await store.selectWorkspaceSession(workspaceId, emptySession.id);
-        return;
+        return emptySession.id;
       }
     }
 
     const state = await createSessionCommand({ workspaceId });
     set({ state });
+    return state.activeSessionId;
   },
   async updatePreferences(preferences) {
     const state = await updatePreferencesCommand(preferences);
@@ -366,14 +385,17 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
     const state = await removeWorkspaceCommand(workspaceId);
     set((store) => {
       const nextCatalogs = { ...store.workspaceCatalogs };
+      const nextCatalogStatus = { ...store.workspaceCatalogStatus };
       const nextErrors = { ...store.workspaceCatalogErrors };
       const nextTerminals = { ...store.terminals };
       delete nextCatalogs[workspaceId];
+      delete nextCatalogStatus[workspaceId];
       delete nextErrors[workspaceId];
       delete nextTerminals[workspaceId];
       return {
         state,
         workspaceCatalogs: nextCatalogs,
+        workspaceCatalogStatus: nextCatalogStatus,
         workspaceCatalogErrors: nextErrors,
         terminals: nextTerminals,
       };
@@ -395,8 +417,18 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
     const state = await deleteSessionCommand(workspaceId, sessionId);
     set({ state });
   },
-  async sendPrompt(workspaceId, sessionId, prompt) {
+  async undoUserTurn(workspaceId, sessionId, userMessageId) {
+    const state = await undoUserTurnCommand({
+      workspaceId,
+      sessionId,
+      userMessageId,
+    });
+    set({ state });
+    await get().refreshGit(workspaceId);
+  },
+  async sendPrompt(workspaceId, sessionId, prompt, mode) {
     const createdAt = new Date().toISOString();
+    const userMessageId = crypto.randomUUID();
     set((store) => {
       if (!store.state) {
         return store;
@@ -409,7 +441,7 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
       }
 
       session.timeline.push({
-        id: crypto.randomUUID(),
+        id: userMessageId,
         kind: "user-message",
         content: prompt,
         createdAt,
@@ -421,7 +453,13 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
     });
 
     try {
-      await sendPromptCommand({ workspaceId, sessionId, prompt });
+      await sendPromptCommand({
+        workspaceId,
+        sessionId,
+        userMessageId,
+        prompt,
+        mode,
+      });
     } catch (error) {
       set((store) => {
         if (!store.state) {
@@ -484,13 +522,11 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
     await ensureTerminalSessionCommand({ workspaceId });
   },
   async writeTerminalInput(workspaceId, data) {
-    await get().ensureTerminalSession(workspaceId);
     await writeTerminalInputCommand({ workspaceId, data });
   },
   async resizeTerminal(workspaceId, cols, rows) {
     const safeCols = Math.max(2, Math.floor(cols));
     const safeRows = Math.max(2, Math.floor(rows));
-    await get().ensureTerminalSession(workspaceId);
     await resizeTerminalCommand({
       workspaceId,
       cols: safeCols,
@@ -540,6 +576,8 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
       runtimeGlobalError: undefined,
       workspaceCatalogs:
         payload.install.status === "ready" ? store.workspaceCatalogs : {},
+      workspaceCatalogStatus:
+        payload.install.status === "ready" ? store.workspaceCatalogStatus : {},
       workspaceCatalogErrors:
         payload.install.status === "ready" ? store.workspaceCatalogErrors : {},
     }));
@@ -555,6 +593,17 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
     if (get().runtimeInstall?.status !== "ready") {
       return;
     }
+
+    set((store) => ({
+      workspaceCatalogStatus: {
+        ...store.workspaceCatalogStatus,
+        [workspaceId]: "loading",
+      },
+      workspaceCatalogErrors: {
+        ...store.workspaceCatalogErrors,
+        [workspaceId]: undefined,
+      },
+    }));
 
     try {
       const payload = await refreshWorkspaceRuntimeCatalogCommand({
@@ -589,6 +638,10 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
             ...store.workspaceCatalogs,
             [workspaceId]: payload.providers,
           },
+          workspaceCatalogStatus: {
+            ...store.workspaceCatalogStatus,
+            [workspaceId]: "ready",
+          },
           workspaceCatalogErrors: {
             ...store.workspaceCatalogErrors,
             [workspaceId]: undefined,
@@ -597,12 +650,31 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
       });
     } catch (error) {
       set((store) => ({
+        workspaceCatalogStatus: {
+          ...store.workspaceCatalogStatus,
+          [workspaceId]: "error",
+        },
         workspaceCatalogErrors: {
           ...store.workspaceCatalogErrors,
           [workspaceId]: error instanceof Error ? error.message : String(error),
         },
       }));
     }
+  },
+  setComposerDraft(sessionId, draft) {
+    set((store) => ({
+      composerDrafts: {
+        ...store.composerDrafts,
+        [sessionId]: draft,
+      },
+    }));
+  },
+  clearComposerDraft(sessionId) {
+    set((store) => {
+      const nextDrafts = { ...store.composerDrafts };
+      delete nextDrafts[sessionId];
+      return { composerDrafts: nextDrafts };
+    });
   },
   applyRuntimeEvent(event) {
     set((store) => {
@@ -800,7 +872,7 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
             );
 
           if (existing && existing.kind === "assistant-message") {
-            existing.content = event.content;
+            existing.content = event.content || existing.content;
             existing.streaming = false;
           } else {
             session.timeline.push({
@@ -812,6 +884,20 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
           }
           session.status = "idle";
           applyRuntimeMetadata(session, event.metadata);
+          session.updatedAt = new Date().toISOString();
+          break;
+        }
+        case "session-titled": {
+          const { session } = findSession(
+            state,
+            event.workspaceId,
+            event.sessionId,
+          );
+          if (!session) {
+            return store;
+          }
+          session.title = event.title;
+          session.updatedAt = new Date().toISOString();
           break;
         }
       }

@@ -4,6 +4,7 @@ import type {
   BootstrapPayload,
   GitSnapshot,
   PersistedAppState,
+  PromptMode,
   PiRuntimeEvent,
   RunTerminalCommandResult,
   TerminalEvent,
@@ -63,7 +64,9 @@ export async function updateWorkspaceSettings(payload: {
 export async function sendPrompt(payload: {
   workspaceId: string;
   sessionId: string;
+  userMessageId: string;
   prompt: string;
+  mode: PromptMode;
 }) {
   return normalize(await invoke<PersistedAppState>("send_prompt", { payload }));
 }
@@ -202,6 +205,23 @@ export async function runTerminalCommand(payload: {
 }) {
   return normalize(
     await invoke<RunTerminalCommandResult>("run_terminal_command", { payload }),
+  );
+}
+
+export async function writeTextFile(payload: {
+  path: string;
+  content: string;
+}) {
+  return await invoke<void>("write_text_file", { payload });
+}
+
+export async function undoUserTurn(payload: {
+  workspaceId: string;
+  sessionId: string;
+  userMessageId: string;
+}) {
+  return normalize(
+    await invoke<PersistedAppState>("undo_user_turn", { payload }),
   );
 }
 

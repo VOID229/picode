@@ -217,6 +217,45 @@ export function SettingsScreen() {
     });
   }, [state]);
 
+  const titleProviders = useMemo(() => {
+    if (!state) {
+      return [];
+    }
+
+    const activeCatalog = activeWorkspace
+      ? (workspaceCatalogs[activeWorkspace.id] ?? [])
+      : [];
+    return activeCatalog.length > 0 ? activeCatalog : state.providers;
+  }, [activeWorkspace, state, workspaceCatalogs]);
+
+  const titleProvider =
+    titleProviders.find(
+      (provider) => provider.id === state?.preferences.titleModelProviderId,
+    ) ?? titleProviders[0];
+  const titleModels = titleProvider?.models ?? [];
+  const titleModel =
+    titleModels.find((model) => model.id === state?.preferences.titleModelId) ??
+    titleModels[0];
+
+  useEffect(() => {
+    if (!state || !titleProvider || !titleModel) {
+      return;
+    }
+
+    if (
+      state.preferences.titleModelProviderId === titleProvider.id &&
+      state.preferences.titleModelId === titleModel.id
+    ) {
+      return;
+    }
+
+    void updatePreferences({
+      ...state.preferences,
+      titleModelProviderId: titleProvider.id,
+      titleModelId: titleModel.id,
+    });
+  }, [state, titleModel, titleProvider, updatePreferences]);
+
   return (
     <div
       style={{
@@ -551,12 +590,95 @@ export function SettingsScreen() {
                     control={<Toggle checked={true} />}
                   />
                   <SettingRow
-                    label="Text generation model"
-                    description="Configures the model used for suggested changes over files or workspaces."
+                    label="Auto thread titles"
+                    description="Generate a short thread title after the first successful exchange when the thread is still named New thread."
                     control={
-                      <select style={controlStyle} defaultValue="High">
-                        <option>High</option>
-                        <option>Low</option>
+                      <button
+                        style={{
+                          ...btnStyle,
+                          padding: 0,
+                          border: "none",
+                          background: "transparent",
+                        }}
+                        onClick={() => {
+                          if (!state) {
+                            return;
+                          }
+
+                          void updatePreferences({
+                            ...state.preferences,
+                            autoTitleEnabled:
+                              !state.preferences.autoTitleEnabled,
+                          });
+                        }}
+                        type="button"
+                      >
+                        <Toggle
+                          checked={state?.preferences.autoTitleEnabled ?? true}
+                        />
+                      </button>
+                    }
+                  />
+                  <SettingRow
+                    label="Title model provider"
+                    description="Choose which provider generates automatic thread titles."
+                    control={
+                      <select
+                        style={controlStyle}
+                        value={titleProvider?.id ?? ""}
+                        onChange={(event) => {
+                          if (!state) {
+                            return;
+                          }
+
+                          const nextProvider = titleProviders.find(
+                            (provider) => provider.id === event.target.value,
+                          );
+                          const nextModelId =
+                            nextProvider?.models[0]?.id ??
+                            state.preferences.titleModelId;
+
+                          void updatePreferences({
+                            ...state.preferences,
+                            titleModelProviderId: event.target.value,
+                            titleModelId: nextModelId,
+                          });
+                        }}
+                      >
+                        {titleProviders.map((provider) => (
+                          <option key={provider.id} value={provider.id}>
+                            {provider.label}
+                          </option>
+                        ))}
+                      </select>
+                    }
+                  />
+                  <SettingRow
+                    label="Title generation model"
+                    description="Uses the selected provider and model for background thread naming only."
+                    control={
+                      <select
+                        style={controlStyle}
+                        value={titleModel?.id ?? ""}
+                        onChange={(event) => {
+                          if (!state) {
+                            return;
+                          }
+
+                          void updatePreferences({
+                            ...state.preferences,
+                            titleModelProviderId:
+                              titleProvider?.id ??
+                              state.preferences.titleModelProviderId,
+                            titleModelId: event.target.value,
+                          });
+                        }}
+                      >
+                        {titleModels.map((model) => (
+                          <option key={model.id} value={model.id}>
+                            {model.label}
+                          </option>
+                        ))}
                       </select>
                     }
                   />

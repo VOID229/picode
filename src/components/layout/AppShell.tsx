@@ -178,7 +178,7 @@ export function AppShell() {
   if (isBootstrapping || !state) {
     return (
       <div className="boot-shell" aria-hidden="true">
-        <div className="boot-shell__mark">Pi</div>
+        <div className="boot-shell__mark">picode</div>
       </div>
     );
   }

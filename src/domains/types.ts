@@ -7,6 +7,7 @@ export type ThemeId =
   | "solarized";
 
 export type ApprovalMode = "supervised" | "auto-accept-edits" | "full-access";
+export type PromptMode = "plan" | "build";
 export type ProviderStatus =
   | "ready"
   | "requires_oauth"
@@ -207,6 +208,9 @@ export interface AppPreferences {
   theme: ThemeId;
   providerId: string;
   modelId: string;
+  titleModelProviderId: string;
+  titleModelId: string;
+  autoTitleEnabled: boolean;
   approvalMode: ApprovalMode;
   effort: string;
   fastMode: boolean;
@@ -257,6 +261,8 @@ export interface WorkspaceRuntimeCatalogPayload {
   selectedProviderId: string;
   selectedModelId: string;
 }
+
+export type WorkspaceCatalogStatus = "idle" | "loading" | "ready" | "error";
 
 export type PiRuntimeEvent =
   | {
@@ -323,6 +329,12 @@ export type PiRuntimeEvent =
       sessionId: string;
       content: string;
       metadata?: SessionRuntimeMetadata;
+    }
+  | {
+      type: "session-titled";
+      workspaceId: string;
+      sessionId: string;
+      title: string;
     }
   | {
       type: "auth-browser-open";
