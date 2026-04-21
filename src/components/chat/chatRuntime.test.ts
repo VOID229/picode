@@ -9,6 +9,7 @@ import {
   parseAssistantContent,
   resolveComposerCapabilities,
   resolveAssistantLabel,
+  resolveSessionSelection,
   shortenAssistantLabel,
 } from "./chatRuntime";
 
@@ -25,6 +26,7 @@ const defaultProviders: ProviderOption[] = [
         label: "GPT-5.4",
         providerId: "openai-codex",
         contextWindow: "256k",
+        reasoning: true,
         available: true,
         providerSource: "pi",
       },
@@ -61,6 +63,12 @@ function createSession(overrides?: Partial<ChatSession>): ChatSession {
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     status: "idle",
+    selection: {
+      providerId: "openai-codex",
+      modelId: "gpt-5.4",
+      effort: "high",
+      fastMode: false,
+    },
     runtime: {
       lastKnownReady: false,
     },
@@ -105,29 +113,35 @@ describe("resolveAssistantLabel", () => {
 });
 
 describe("shortenAssistantLabel", () => {
-  it("removes provider suffixes and presentation-only qualifiers", () => {
+  it("removes provider suffixes and keeps semantic variants", () => {
     expect(shortenAssistantLabel("GPT-OSS 120B Medium (Antigravity)")).toBe(
-      "GPT-OSS 120B",
+      "GPT-OSS 120B Medium",
     );
   });
 });
 
 describe("resolveComposerCapabilities", () => {
-  it("only enables fast mode for codex-capable selections", () => {
+  it("supports codex fast mode with the full reasoning ladder", () => {
     expect(
       resolveComposerCapabilities({
         providers: defaultProviders,
-        providerId: "openai-codex",
-        modelId: "gpt-5.4",
-        effort: "extra-high",
-        fastMode: true,
+        selection: {
+          providerId: "openai-codex",
+          modelId: "gpt-5.4",
+          effort: "extra-high",
+          fastMode: true,
+        },
       }),
     ).toMatchObject({
       supportsFastMode: true,
-      normalizedEffort: "extra-high",
-      normalizedFastMode: true,
+      normalizedSelection: {
+        effort: "extra-high",
+        fastMode: true,
+      },
     });
+  });
 
+  it("treats antigravity thinking model pairs as fast/planning modes", () => {
     expect(
       resolveComposerCapabilities({
         providers: [
@@ -144,21 +158,75 @@ describe("resolveComposerCapabilities", () => {
                 label: "Claude Sonnet 4.5",
                 providerId: "anthropic",
                 contextWindow: "200k",
+                reasoning: false,
+                available: true,
+                providerSource: "pi",
+              },
+            ],
+          },
+          {
+            id: "google-antigravity",
+            label: "Antigravity",
+            status: "ready",
+            authKind: "oauth",
+            available: true,
+            models: [
+              {
+                id: "claude-sonnet-4-5",
+                label: "Claude Sonnet 4.5",
+                providerId: "google-antigravity",
+                contextWindow: "200k",
+                reasoning: false,
+                available: true,
+                providerSource: "pi",
+              },
+              {
+                id: "claude-sonnet-4-5-thinking",
+                label: "Claude Sonnet 4.5 Thinking",
+                providerId: "google-antigravity",
+                contextWindow: "200k",
+                reasoning: true,
                 available: true,
                 providerSource: "pi",
               },
             ],
           },
         ],
-        providerId: "anthropic",
-        modelId: "claude-sonnet-4-5",
-        effort: "extra-high",
-        fastMode: true,
+        selection: {
+          providerId: "google-antigravity",
+          modelId: "claude-sonnet-4-5",
+          effort: "planning",
+          fastMode: false,
+        },
       }),
     ).toMatchObject({
       supportsFastMode: false,
-      normalizedEffort: "high",
-      normalizedFastMode: false,
+      normalizedSelection: {
+        modelId: "claude-sonnet-4-5-thinking",
+        effort: "planning",
+        fastMode: false,
+      },
+    });
+  });
+});
+
+describe("resolveSessionSelection", () => {
+  it("prefers session selection over workspace defaults", () => {
+    const workspace = createWorkspace();
+    const session = createSession({
+      selection: {
+        providerId: "openai-codex",
+        modelId: "gpt-5.4",
+        effort: "low",
+        fastMode: true,
+      },
+    });
+
+    expect(resolveSessionSelection(session, workspace)).toEqual({
+      providerId: "openai-codex",
+      modelId: "gpt-5.4",
+      effort: "low",
+      fastMode: true,
     });
   });
 });

@@ -42,6 +42,7 @@ export interface ModelOption {
   label: string;
   providerId: string;
   contextWindow: string;
+  reasoning: boolean;
   available: boolean;
   providerSource: string;
 }
@@ -130,8 +131,16 @@ export interface ChatSession {
   updatedAt: string;
   status: "idle" | "streaming" | "awaiting-approval" | "error";
   archivedAt?: string;
+  selection: SessionModelSelection;
   runtime: SessionRuntimeMetadata;
   timeline: TimelineItem[];
+}
+
+export interface SessionModelSelection {
+  providerId: string;
+  modelId: string;
+  effort: string;
+  fastMode: boolean;
 }
 
 export interface SessionRuntimeMetadata {
@@ -189,13 +198,19 @@ export interface TerminalCommandState {
 }
 
 export interface TerminalSessionState {
-  workspaceId: string;
-  open: boolean;
+  id: string;
   status: TerminalConnectionState;
   buffer: string;
   activeCommand?: TerminalCommandState;
   lastCommand?: TerminalCommandState;
   error?: string;
+}
+
+export interface WorkspaceTerminalState {
+  workspaceId: string;
+  activeTabId: string | null;
+  tabOrder: string[];
+  tabs: Record<string, TerminalSessionState>;
 }
 
 export interface LayoutPreferences {
@@ -210,6 +225,7 @@ export interface AppPreferences {
   modelId: string;
   titleModelProviderId: string;
   titleModelId: string;
+  titleModelEffort: string;
   autoTitleEnabled: boolean;
   approvalMode: ApprovalMode;
   effort: string;
@@ -241,6 +257,7 @@ export interface RuntimeHealthPayload {
 }
 
 export interface RunTerminalCommandResult {
+  terminalTabId: string;
   commandId: string;
 }
 
@@ -365,15 +382,18 @@ export type TerminalEvent =
   | {
       type: "started";
       workspaceId: string;
+      terminalTabId: string;
     }
   | {
       type: "output";
       workspaceId: string;
+      terminalTabId: string;
       chunk: string;
     }
   | {
       type: "command-finished";
       workspaceId: string;
+      terminalTabId: string;
       commandId: string;
       command: string;
       exitCode: number;
@@ -382,10 +402,12 @@ export type TerminalEvent =
   | {
       type: "error";
       workspaceId: string;
+      terminalTabId: string;
       message: string;
     }
   | {
       type: "exit";
       workspaceId: string;
+      terminalTabId: string;
       exitCode?: number;
     };

@@ -1,6 +1,7 @@
 import type {
   ChatSession,
   ProviderOption,
+  SessionModelSelection,
   TimelineItem,
   WorkspaceRecord,
 } from "../../domains/types";
@@ -29,22 +30,23 @@ export interface ComposerEffortOption {
 export interface ComposerCapabilities {
   effortOptions: ComposerEffortOption[];
   supportsFastMode: boolean;
-  normalizedEffort: string;
-  normalizedFastMode: boolean;
+  normalizedSelection: SessionModelSelection;
 }
 
 const PLAN_BLOCK_PATTERN = /<proposed_plan>\s*([\s\S]*?)\s*<\/proposed_plan>/gi;
-const PRESENTATION_QUALIFIER_PATTERN = /\s+(medium|high|low|fast)$/i;
-const CODEX_PATTERN = /\bcodex\b/i;
 const DEFAULT_EFFORT = "high";
-const DEFAULT_EFFORT_OPTIONS: ComposerEffortOption[] = [
-  { id: "high", label: "High (default)" },
-  { id: "medium", label: "Medium" },
+const GENERIC_EFFORT_OPTIONS: ComposerEffortOption[] = [
   { id: "low", label: "Low" },
+  { id: "medium", label: "Medium" },
+  { id: "high", label: "High" },
 ];
 const CODEX_EFFORT_OPTIONS: ComposerEffortOption[] = [
-  { id: "extra-high", label: "Extra High" },
-  ...DEFAULT_EFFORT_OPTIONS,
+  ...GENERIC_EFFORT_OPTIONS,
+  { id: "extra-high", label: "XHigh" },
+];
+const ANTIGRAVITY_EFFORT_OPTIONS: ComposerEffortOption[] = [
+  { id: "fast", label: "Fast" },
+  { id: "planning", label: "Planning" },
 ];
 
 const TRANSIENT_STATUS_MATCHERS: Array<{
@@ -162,8 +164,8 @@ export function resolveAssistantLabel(options: {
     workspaceCatalog.length > 0 ? workspaceCatalog : defaultProviders;
 
   const runtimeModelId = session?.runtime.modelId?.trim();
-  const workspaceModelId = workspace?.modelId?.trim();
-  const modelId = runtimeModelId || workspaceModelId;
+  const selection = resolveSessionSelection(session, workspace);
+  const modelId = runtimeModelId || selection.modelId;
 
   if (modelId) {
     const model = providers
@@ -176,8 +178,7 @@ export function resolveAssistantLabel(options: {
   }
 
   const runtimeProviderId = session?.runtime.providerId?.trim();
-  const workspaceProviderId = workspace?.providerId?.trim();
-  const providerId = runtimeProviderId || workspaceProviderId;
+  const providerId = runtimeProviderId || selection.providerId;
 
   if (providerId) {
     const provider = providers.find((entry) => entry.id === providerId);
@@ -191,51 +192,110 @@ export function resolveAssistantLabel(options: {
 }
 
 export function shortenAssistantLabel(label: string) {
-  let shortened = label.replace(/\s*\([^)]*\)\s*$/g, "").trim();
+  return label.replace(/\s*\((?:[^)]*)\)\s*$/g, "").trim() || label;
+}
 
-  while (PRESENTATION_QUALIFIER_PATTERN.test(shortened)) {
-    shortened = shortened.replace(PRESENTATION_QUALIFIER_PATTERN, "").trim();
-  }
-
-  return shortened || label;
+export function resolveSessionSelection(
+  session: ChatSession | null,
+  workspace: WorkspaceRecord | null,
+): SessionModelSelection {
+  return {
+    providerId: session?.selection?.providerId || workspace?.providerId || "",
+    modelId: session?.selection?.modelId || workspace?.modelId || "",
+    effort: session?.selection?.effort || workspace?.effort || DEFAULT_EFFORT,
+    fastMode: session?.selection?.fastMode ?? workspace?.fastMode ?? false,
+  };
 }
 
 export function resolveComposerCapabilities(options: {
   providers: ProviderOption[];
-  providerId?: string | null;
-  modelId?: string | null;
-  effort?: string | null;
-  fastMode?: boolean | null;
+  selection: SessionModelSelection;
 }): ComposerCapabilities {
-  const { providers, providerId, modelId, effort, fastMode } = options;
-  const provider = providers.find((entry) => entry.id === providerId);
-  const model =
-    provider?.models.find((entry) => entry.id === modelId) ??
-    providers
-      .flatMap((entry) => entry.models)
-      .find((entry) => entry.id === modelId);
+  const normalizedSelection = normalizeSelectionAgainstProviders(
+    options.selection,
+    options.providers,
+  );
+  const provider = options.providers.find(
+    (entry) => entry.id === normalizedSelection.providerId,
+  );
+  const model = provider?.models.find(
+    (entry) => entry.id === normalizedSelection.modelId,
+  );
 
-  const identity = [
-    providerId,
-    modelId,
-    provider?.label,
-    model?.label,
-    model?.providerId,
-  ]
-    .filter(Boolean)
-    .join(" ");
-  const supportsFastMode = CODEX_PATTERN.test(identity);
-  const effortOptions = supportsFastMode
-    ? CODEX_EFFORT_OPTIONS
-    : DEFAULT_EFFORT_OPTIONS;
-  const supportedEfforts = new Set(effortOptions.map((entry) => entry.id));
+  if (provider?.id === "openai-codex") {
+    const effortOptions = CODEX_EFFORT_OPTIONS;
+    const supportedEfforts = new Set(effortOptions.map((entry) => entry.id));
+    return {
+      effortOptions,
+      supportsFastMode: true,
+      normalizedSelection: {
+        ...normalizedSelection,
+        effort: supportedEfforts.has(normalizedSelection.effort)
+          ? normalizedSelection.effort
+          : DEFAULT_EFFORT,
+        fastMode: Boolean(normalizedSelection.fastMode),
+      },
+    };
+  }
+
+  if (provider?.id === "google-antigravity" && model) {
+    const pair = resolveAntigravityPair(provider, model.id);
+    if (pair) {
+      const effort =
+        normalizedSelection.effort === "planning" ||
+        normalizedSelection.effort === "fast"
+          ? normalizedSelection.effort
+          : pair.planningModelId === model.id
+            ? "planning"
+            : "fast";
+
+      return {
+        effortOptions: ANTIGRAVITY_EFFORT_OPTIONS,
+        supportsFastMode: false,
+        normalizedSelection: {
+          ...normalizedSelection,
+          modelId:
+            effort === "planning" ? pair.planningModelId : pair.fastModelId,
+          effort,
+          fastMode: false,
+        },
+      };
+    }
+
+    return {
+      effortOptions: [],
+      supportsFastMode: false,
+      normalizedSelection: {
+        ...normalizedSelection,
+        fastMode: false,
+      },
+    };
+  }
+
+  if (model?.reasoning) {
+    const supportedEfforts = new Set(
+      GENERIC_EFFORT_OPTIONS.map((entry) => entry.id),
+    );
+    return {
+      effortOptions: GENERIC_EFFORT_OPTIONS,
+      supportsFastMode: false,
+      normalizedSelection: {
+        ...normalizedSelection,
+        effort: supportedEfforts.has(normalizedSelection.effort)
+          ? normalizedSelection.effort
+          : DEFAULT_EFFORT,
+        fastMode: false,
+      },
+    };
+  }
 
   return {
-    effortOptions,
-    supportsFastMode,
-    normalizedEffort:
-      effort && supportedEfforts.has(effort) ? effort : DEFAULT_EFFORT,
-    normalizedFastMode: supportsFastMode ? Boolean(fastMode) : false,
+    effortOptions: [],
+    supportsFastMode: false,
+    normalizedSelection: {
+      ...normalizedSelection,
+      fastMode: false,
+    },
   };
 }
 
@@ -348,4 +408,54 @@ function humanizeRuntimeId(value: string) {
 
 function trimEdgeBlankLines(value: string) {
   return value.replace(/^\s*\n/, "").replace(/\n\s*$/, "");
+}
+
+function normalizeSelectionAgainstProviders(
+  selection: SessionModelSelection,
+  providers: ProviderOption[],
+): SessionModelSelection {
+  const firstProvider = providers[0];
+  const fallbackProviderId = firstProvider?.id ?? selection.providerId;
+  const provider =
+    providers.find((entry) => entry.id === selection.providerId) ??
+    firstProvider;
+  const fallbackModelId =
+    provider?.models.find((entry) => entry.id === selection.modelId)?.id ??
+    provider?.models[0]?.id ??
+    selection.modelId;
+
+  return {
+    providerId: provider?.id ?? fallbackProviderId,
+    modelId: fallbackModelId,
+    effort: selection.effort || DEFAULT_EFFORT,
+    fastMode: Boolean(selection.fastMode),
+  };
+}
+
+function resolveAntigravityPair(provider: ProviderOption, modelId: string) {
+  const current = provider.models.find((entry) => entry.id === modelId);
+  if (!current) {
+    return null;
+  }
+
+  if (modelId.endsWith("-thinking")) {
+    const fastModelId = modelId.slice(0, -"-thinking".length);
+    if (provider.models.some((entry) => entry.id === fastModelId)) {
+      return {
+        fastModelId,
+        planningModelId: modelId,
+      };
+    }
+    return null;
+  }
+
+  const planningModelId = `${modelId}-thinking`;
+  if (provider.models.some((entry) => entry.id === planningModelId)) {
+    return {
+      fastModelId: modelId,
+      planningModelId,
+    };
+  }
+
+  return null;
 }

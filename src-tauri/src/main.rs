@@ -5,17 +5,17 @@ mod storage;
 mod terminal;
 
 use crate::models::{
-    AbortPromptPayload, BootstrapPayload, CreateSessionPayload, CreateWorkspacePayload,
-    DeleteSessionPayload, EnsureTerminalSessionPayload, PersistedAppState, RefreshGitPayload,
-    RefreshWorkspaceRuntimeCatalogPayload, RemoveWorkspacePayload, RenameSessionPayload,
-    RenameWorkspacePayload, ResizeTerminalPayload, ResolveApprovalPayload,
+    AbortPromptPayload, BootstrapPayload, CloseTerminalSessionPayload, CreateSessionPayload,
+    CreateWorkspacePayload, DeleteSessionPayload, EnsureTerminalSessionPayload, PersistedAppState,
+    RefreshGitPayload, RefreshWorkspaceRuntimeCatalogPayload, RemoveWorkspacePayload,
+    RenameSessionPayload, RenameWorkspacePayload, ResizeTerminalPayload, ResolveApprovalPayload,
     RunTerminalCommandPayload, RunTerminalCommandResult, RuntimeBootstrapPayload,
     RuntimeHealthPayload, SelectWorkspaceSessionPayload, SendPromptPayload, UndoUserTurnPayload,
     UpdateWorkspaceSettingsPayload, WorkspaceRuntimeCatalogPayload, WriteTerminalInputPayload,
     WriteTextFilePayload, normalize_state,
 };
 use anyhow::Context;
-use models::{GitSnapshot, default_state, new_session};
+use models::{GitSnapshot, SessionModelSelection, default_state, new_session};
 use std::{collections::HashMap, sync::Arc};
 use tauri::{AppHandle, Manager, State};
 use tokio::sync::Mutex;
@@ -98,7 +98,16 @@ async fn create_session(
         .context("workspace not found")
         .map_err(|error| error.to_string())?;
 
-    let session = new_session("New thread");
+    let selection = {
+        let workspace = &state.workspaces[workspace_index];
+        SessionModelSelection {
+            provider_id: workspace.provider_id.clone(),
+            model_id: workspace.model_id.clone(),
+            effort: workspace.effort.clone(),
+            fast_mode: workspace.fast_mode,
+        }
+    };
+    let session = new_session("New thread", selection);
     let workspace_id = state.workspaces[workspace_index].id.clone();
     state.active_session_id = Some(session.id.clone());
     state.active_workspace_id = Some(workspace_id);
@@ -153,6 +162,19 @@ async fn update_workspace_settings(
     workspace.effort = payload.effort.unwrap_or(workspace.effort.clone());
     workspace.fast_mode = payload.fast_mode.unwrap_or(workspace.fast_mode);
     workspace.policy = payload.policy;
+
+    if let Some(session_id) = payload.session_id {
+        if let Some(session) = workspace
+            .sessions
+            .iter_mut()
+            .find(|session| session.id == session_id)
+        {
+            session.selection.provider_id = workspace.provider_id.clone();
+            session.selection.model_id = workspace.model_id.clone();
+            session.selection.effort = workspace.effort.clone();
+            session.selection.fast_mode = workspace.fast_mode;
+        }
+    }
     storage::save(&app, &state).map_err(|error| error.to_string())?;
     Ok(state.clone())
 }
@@ -554,7 +576,23 @@ async fn ensure_terminal_session(
 
     shared
         .terminal
-        .ensure_session(app, payload.workspace_id, workspace_path)
+        .ensure_session(
+            app,
+            payload.workspace_id,
+            payload.terminal_tab_id,
+            workspace_path,
+        )
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn close_terminal_session(
+    shared: State<'_, AppState>,
+    payload: CloseTerminalSessionPayload,
+) -> Result<(), String> {
+    shared
+        .terminal
+        .close_session(&payload.workspace_id, &payload.terminal_tab_id)
         .map_err(|error| error.to_string())
 }
 
@@ -565,7 +603,11 @@ async fn write_terminal_input(
 ) -> Result<(), String> {
     shared
         .terminal
-        .write_input(&payload.workspace_id, &payload.data)
+        .write_input(
+            &payload.workspace_id,
+            &payload.terminal_tab_id,
+            &payload.data,
+        )
         .map_err(|error| error.to_string())
 }
 
@@ -576,7 +618,12 @@ async fn resize_terminal(
 ) -> Result<(), String> {
     shared
         .terminal
-        .resize(&payload.workspace_id, payload.cols, payload.rows)
+        .resize(
+            &payload.workspace_id,
+            &payload.terminal_tab_id,
+            payload.cols,
+            payload.rows,
+        )
         .map_err(|error| error.to_string())
 }
 
@@ -599,12 +646,22 @@ async fn run_terminal_command(
 
     shared
         .terminal
-        .ensure_session(app, payload.workspace_id.clone(), workspace_path)
+        .ensure_session(
+            app,
+            payload.workspace_id.clone(),
+            payload.terminal_tab_id.clone(),
+            workspace_path,
+        )
         .map_err(|error| error.to_string())?;
 
     shared
         .terminal
-        .run_command(&payload.workspace_id, payload.command, payload.refresh_git)
+        .run_command(
+            &payload.workspace_id,
+            &payload.terminal_tab_id,
+            payload.command,
+            payload.refresh_git,
+        )
         .map_err(|error| error.to_string())
 }
 
@@ -664,6 +721,7 @@ fn main() {
             read_dir,
             open_path,
             ensure_terminal_session,
+            close_terminal_session,
             write_terminal_input,
             resize_terminal,
             run_terminal_command,

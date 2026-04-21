@@ -49,6 +49,7 @@ export async function updatePreferences(
 
 export async function updateWorkspaceSettings(payload: {
   workspaceId: string;
+  sessionId?: string;
   approvalMode: WorkspaceRecord["approvalMode"];
   providerId: string;
   modelId: string;
@@ -179,12 +180,23 @@ export async function openPath(path: string) {
   return await invoke<void>("open_path", { path });
 }
 
-export async function ensureTerminalSession(payload: { workspaceId: string }) {
+export async function ensureTerminalSession(payload: {
+  workspaceId: string;
+  terminalTabId: string;
+}) {
   return await invoke<void>("ensure_terminal_session", { payload });
+}
+
+export async function closeTerminalSession(payload: {
+  workspaceId: string;
+  terminalTabId: string;
+}) {
+  return await invoke<void>("close_terminal_session", { payload });
 }
 
 export async function writeTerminalInput(payload: {
   workspaceId: string;
+  terminalTabId: string;
   data: string;
 }) {
   return await invoke<void>("write_terminal_input", { payload });
@@ -192,6 +204,7 @@ export async function writeTerminalInput(payload: {
 
 export async function resizeTerminal(payload: {
   workspaceId: string;
+  terminalTabId: string;
   cols: number;
   rows: number;
 }) {
@@ -200,6 +213,7 @@ export async function resizeTerminal(payload: {
 
 export async function runTerminalCommand(payload: {
   workspaceId: string;
+  terminalTabId: string;
   command: string;
   refreshGit?: boolean;
 }) {

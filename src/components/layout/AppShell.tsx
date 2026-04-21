@@ -45,6 +45,7 @@ export function AppShell() {
   const ensureTerminalSession = useAppStore(
     (store) => store.ensureTerminalSession,
   );
+  const createTerminalTab = useAppStore((store) => store.createTerminalTab);
   const terminalPaneOpen = useAppStore((store) => store.terminalPaneOpen);
   const setTerminalPaneOpen = useAppStore((store) => store.setTerminalPaneOpen);
   const navigate = useNavigate();
@@ -149,7 +150,10 @@ export function AppShell() {
     const next = !terminalPaneOpen;
     setTerminalPaneOpen(next);
     if (next && activeWorkspace) {
-      await ensureTerminalSession(activeWorkspace.id);
+      const terminalTabId =
+        useAppStore.getState().terminals[activeWorkspace.id]?.activeTabId ??
+        (await createTerminalTab(activeWorkspace.id));
+      await ensureTerminalSession(activeWorkspace.id, terminalTabId);
     }
   };
 
@@ -205,11 +209,7 @@ export function AppShell() {
             <span
               style={{ fontWeight: 600, fontSize: "0.9rem", color: "#fff" }}
             >
-              {deferredSession
-                ? deferredSession.title.toLowerCase() === "kickoff"
-                  ? "New thread"
-                  : deferredSession.title
-                : "New thread"}
+              {deferredSession ? deferredSession.title : "New thread"}
             </span>
             {activeWorkspace && (
               <span

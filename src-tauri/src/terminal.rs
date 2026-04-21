@@ -27,7 +27,9 @@ struct TerminalSessionHandle {
 }
 
 struct TerminalSessionInner {
+    instance_id: String,
     workspace_id: String,
+    terminal_tab_id: String,
     workspace_path: String,
     writer: Mutex<Box<dyn Write + Send>>,
     master: Mutex<Box<dyn MasterPty + Send>>,
@@ -43,7 +45,9 @@ struct PendingCommand {
 
 impl TerminalSessionHandle {
     fn new(
+        instance_id: String,
         workspace_id: String,
+        terminal_tab_id: String,
         workspace_path: String,
         writer: Box<dyn Write + Send>,
         master: Box<dyn MasterPty + Send>,
@@ -51,7 +55,9 @@ impl TerminalSessionHandle {
     ) -> Self {
         Self {
             inner: Arc::new(TerminalSessionInner {
+                instance_id,
                 workspace_id,
+                terminal_tab_id,
                 workspace_path,
                 writer: Mutex::new(writer),
                 master: Mutex::new(master),
@@ -119,6 +125,7 @@ impl TerminalSessionHandle {
         Ok(Some((
             TerminalEvent::CommandFinished {
                 workspace_id: self.inner.workspace_id.clone(),
+                terminal_tab_id: self.inner.terminal_tab_id.clone(),
                 command_id: command_id.to_string(),
                 command: pending.command,
                 exit_code,
@@ -133,6 +140,16 @@ impl TerminalSessionHandle {
         let status = child.wait().ok()?;
         Some(status.exit_code().try_into().unwrap_or(i32::MAX))
     }
+
+    fn kill(&self) -> Result<()> {
+        let mut child = self
+            .inner
+            .child
+            .lock()
+            .map_err(|_| anyhow!("terminal child lock poisoned"))?;
+        child.kill()?;
+        Ok(())
+    }
 }
 
 impl TerminalHandle {
@@ -140,13 +157,15 @@ impl TerminalHandle {
         &self,
         app: AppHandle,
         workspace_id: String,
+        terminal_tab_id: String,
         workspace_path: String,
     ) -> Result<()> {
+        let session_key = key_for(&workspace_id, &terminal_tab_id);
         if self
             .sessions
             .lock()
             .map_err(|_| anyhow!("terminal session map lock poisoned"))?
-            .contains_key(&workspace_id)
+            .contains_key(&session_key)
         {
             return Ok(());
         }
@@ -165,6 +184,8 @@ impl TerminalHandle {
         let mut command = CommandBuilder::new(shell);
         command.arg("-i");
         command.cwd(PathBuf::from(&workspace_path));
+        command.env("TERM", "xterm-256color");
+        command.env("COLORTERM", "truecolor");
 
         let child = pair
             .slave
@@ -179,46 +200,83 @@ impl TerminalHandle {
             .take_writer()
             .context("failed to acquire terminal writer")?;
 
-        let session =
-            TerminalSessionHandle::new(workspace_id.clone(), workspace_path, writer, master, child);
+        let instance_id = Uuid::new_v4().to_string();
+        let session = TerminalSessionHandle::new(
+            instance_id.clone(),
+            workspace_id.clone(),
+            terminal_tab_id.clone(),
+            workspace_path,
+            writer,
+            master,
+            child,
+        );
 
         self.sessions
             .lock()
             .map_err(|_| anyhow!("terminal session map lock poisoned"))?
-            .insert(workspace_id.clone(), session.clone());
+            .insert(session_key.clone(), session.clone());
 
         app.emit(
             TERMINAL_EVENT_CHANNEL,
             TerminalEvent::Started {
                 workspace_id: workspace_id.clone(),
+                terminal_tab_id: terminal_tab_id.clone(),
             },
         )?;
 
         let manager = self.clone();
         std::thread::spawn(move || {
-            read_terminal_output(app, manager, session, workspace_id, reader);
+            read_terminal_output(
+                app,
+                manager,
+                session,
+                workspace_id,
+                terminal_tab_id,
+                instance_id,
+                reader,
+            );
         });
 
         Ok(())
     }
 
-    pub fn write_input(&self, workspace_id: &str, data: &str) -> Result<()> {
+    pub fn close_session(&self, workspace_id: &str, terminal_tab_id: &str) -> Result<()> {
+        let session_key = key_for(workspace_id, terminal_tab_id);
         let session = self
             .sessions
             .lock()
             .map_err(|_| anyhow!("terminal session map lock poisoned"))?
-            .get(workspace_id)
+            .get(&session_key)
+            .cloned()
+            .context("terminal session not found")?;
+        session.kill()
+    }
+
+    pub fn write_input(&self, workspace_id: &str, terminal_tab_id: &str, data: &str) -> Result<()> {
+        let session_key = key_for(workspace_id, terminal_tab_id);
+        let session = self
+            .sessions
+            .lock()
+            .map_err(|_| anyhow!("terminal session map lock poisoned"))?
+            .get(&session_key)
             .cloned()
             .context("terminal session not found")?;
         session.write_all(data)
     }
 
-    pub fn resize(&self, workspace_id: &str, cols: u16, rows: u16) -> Result<()> {
+    pub fn resize(
+        &self,
+        workspace_id: &str,
+        terminal_tab_id: &str,
+        cols: u16,
+        rows: u16,
+    ) -> Result<()> {
+        let session_key = key_for(workspace_id, terminal_tab_id);
         let session = self
             .sessions
             .lock()
             .map_err(|_| anyhow!("terminal session map lock poisoned"))?
-            .get(workspace_id)
+            .get(&session_key)
             .cloned()
             .context("terminal session not found")?;
         session.resize(cols, rows)
@@ -227,14 +285,16 @@ impl TerminalHandle {
     pub fn run_command(
         &self,
         workspace_id: &str,
+        terminal_tab_id: &str,
         command: String,
         refresh_git: bool,
     ) -> Result<RunTerminalCommandResult> {
+        let session_key = key_for(workspace_id, terminal_tab_id);
         let session = self
             .sessions
             .lock()
             .map_err(|_| anyhow!("terminal session map lock poisoned"))?
-            .get(workspace_id)
+            .get(&session_key)
             .cloned()
             .context("terminal session not found")?;
 
@@ -252,14 +312,28 @@ impl TerminalHandle {
         );
         session.write_all(&wrapped)?;
 
-        Ok(RunTerminalCommandResult { command_id })
+        Ok(RunTerminalCommandResult {
+            terminal_tab_id: terminal_tab_id.to_string(),
+            command_id,
+        })
     }
 
-    fn remove_session(&self, workspace_id: &str) {
+    fn remove_session(&self, workspace_id: &str, terminal_tab_id: &str, instance_id: &str) {
+        let session_key = key_for(workspace_id, terminal_tab_id);
         if let Ok(mut sessions) = self.sessions.lock() {
-            sessions.remove(workspace_id);
+            let should_remove = sessions
+                .get(&session_key)
+                .map(|session| session.inner.instance_id == instance_id)
+                .unwrap_or(false);
+            if should_remove {
+                sessions.remove(&session_key);
+            }
         }
     }
+}
+
+fn key_for(workspace_id: &str, terminal_tab_id: &str) -> String {
+    format!("{workspace_id}::{terminal_tab_id}")
 }
 
 fn read_terminal_output(
@@ -267,6 +341,8 @@ fn read_terminal_output(
     manager: TerminalHandle,
     session: TerminalSessionHandle,
     workspace_id: String,
+    terminal_tab_id: String,
+    instance_id: String,
     mut reader: Box<dyn Read + Send>,
 ) {
     let mut chunk = [0_u8; 4096];
@@ -280,10 +356,11 @@ fn read_terminal_output(
                     TERMINAL_EVENT_CHANNEL,
                     TerminalEvent::Error {
                         workspace_id: workspace_id.clone(),
+                        terminal_tab_id: terminal_tab_id.clone(),
                         message: error.to_string(),
                     },
                 );
-                manager.remove_session(&workspace_id);
+                manager.remove_session(&workspace_id, &terminal_tab_id, &instance_id);
                 return;
             }
         };
@@ -292,17 +369,20 @@ fn read_terminal_output(
             break;
         }
 
-        let output = String::from_utf8_lossy(&chunk[..read]).to_string();
-        let _ = app.emit(
-            TERMINAL_EVENT_CHANNEL,
-            TerminalEvent::Output {
-                workspace_id: workspace_id.clone(),
-                chunk: output.clone(),
-            },
-        );
+        parser_buffer.push_str(&String::from_utf8_lossy(&chunk[..read]));
+        let (visible_output, markers) = extract_terminal_updates(&mut parser_buffer);
+        if !visible_output.is_empty() {
+            let _ = app.emit(
+                TERMINAL_EVENT_CHANNEL,
+                TerminalEvent::Output {
+                    workspace_id: workspace_id.clone(),
+                    terminal_tab_id: terminal_tab_id.clone(),
+                    chunk: visible_output,
+                },
+            );
+        }
 
-        parser_buffer.push_str(&output);
-        for (command_id, exit_code) in extract_command_markers(&mut parser_buffer) {
+        for (command_id, exit_code) in markers {
             match session.finish_command(&command_id, exit_code) {
                 Ok(Some((event, _))) => {
                     let _ = app.emit(TERMINAL_EVENT_CHANNEL, event);
@@ -313,6 +393,7 @@ fn read_terminal_output(
                         TERMINAL_EVENT_CHANNEL,
                         TerminalEvent::Error {
                             workspace_id: workspace_id.clone(),
+                            terminal_tab_id: terminal_tab_id.clone(),
                             message: error.to_string(),
                         },
                     );
@@ -322,28 +403,39 @@ fn read_terminal_output(
     }
 
     let exit_code = session.wait_for_exit();
-    manager.remove_session(&workspace_id);
+    manager.remove_session(&workspace_id, &terminal_tab_id, &instance_id);
     let _ = app.emit(
         TERMINAL_EVENT_CHANNEL,
         TerminalEvent::Exit {
             workspace_id,
+            terminal_tab_id,
             exit_code,
         },
     );
 }
 
-fn extract_command_markers(buffer: &mut String) -> Vec<(String, i32)> {
+fn extract_terminal_updates(buffer: &mut String) -> (String, Vec<(String, i32)>) {
+    let mut visible = String::new();
     let mut results = Vec::new();
 
     loop {
         let Some(start) = buffer.find(COMMAND_MARKER_PREFIX) else {
-            trim_parser_buffer(buffer);
+            let retain = trailing_prefix_len(buffer, COMMAND_MARKER_PREFIX);
+            let emit_len = buffer.len().saturating_sub(retain);
+            if emit_len > 0 {
+                visible.push_str(&buffer[..emit_len]);
+                buffer.drain(..emit_len);
+            }
             break;
         };
 
-        let payload_start = start + COMMAND_MARKER_PREFIX.len();
+        if start > 0 {
+            visible.push_str(&buffer[..start]);
+            buffer.drain(..start);
+        }
+
+        let payload_start = COMMAND_MARKER_PREFIX.len();
         let Some(end_offset) = buffer[payload_start..].find(COMMAND_MARKER_SUFFIX) else {
-            trim_parser_buffer(buffer);
             break;
         };
 
@@ -357,10 +449,12 @@ fn extract_command_markers(buffer: &mut String) -> Vec<(String, i32)> {
         }
 
         let marker_end = payload_end + COMMAND_MARKER_SUFFIX.len();
-        buffer.replace_range(start..marker_end, "");
+        buffer.drain(..marker_end);
     }
 
-    results
+    trim_parser_buffer(buffer);
+
+    (visible, results)
 }
 
 fn trim_parser_buffer(buffer: &mut String) {
@@ -368,5 +462,45 @@ fn trim_parser_buffer(buffer: &mut String) {
     if buffer.len() > MAX_BUFFER {
         let truncate_at = buffer.len().saturating_sub(MAX_BUFFER);
         buffer.drain(..truncate_at);
+    }
+}
+
+fn trailing_prefix_len(buffer: &str, prefix: &str) -> usize {
+    let max = std::cmp::min(buffer.len(), prefix.len().saturating_sub(1));
+    for retain in (1..=max).rev() {
+        if buffer.ends_with(&prefix[..retain]) {
+            return retain;
+        }
+    }
+    0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::extract_terminal_updates;
+
+    #[test]
+    fn strips_command_markers_from_visible_output() {
+        let mut buffer = concat!(
+            "$ echo hi\r\nhi\r\n",
+            "\u{1b}]1337;PicodeCommandFinished=cmd-1:0\u{7}",
+            "$ "
+        )
+        .to_string();
+
+        let (visible, markers) = extract_terminal_updates(&mut buffer);
+        assert_eq!(visible, "$ echo hi\r\nhi\r\n$ ");
+        assert_eq!(markers, vec![("cmd-1".to_string(), 0)]);
+        assert!(buffer.is_empty());
+    }
+
+    #[test]
+    fn preserves_partial_markers_for_next_chunk() {
+        let mut buffer = "$ echo hi\r\n\u{1b}]1337;Picode".to_string();
+
+        let (visible, markers) = extract_terminal_updates(&mut buffer);
+        assert_eq!(visible, "$ echo hi\r\n");
+        assert!(markers.is_empty());
+        assert_eq!(buffer, "\u{1b}]1337;Picode");
     }
 }

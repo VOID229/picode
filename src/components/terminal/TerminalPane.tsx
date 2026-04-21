@@ -1,6 +1,7 @@
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
+import { Plus, RotateCcw, Trash2, X } from "lucide-react";
 import { useEffect, useRef } from "react";
 import type { WorkspaceRecord } from "../../domains/types";
 import { useAppStore } from "../../state/useAppStore";
@@ -14,25 +15,37 @@ interface TerminalBinding {
   term: Terminal;
   appliedLength: number;
   workspaceId: string | null;
+  terminalTabId: string | null;
 }
 
 export function TerminalPane({ workspace }: TerminalPaneProps) {
   const paneOpen = useAppStore((state) => state.terminalPaneOpen);
   const terminals = useAppStore((state) => state.terminals);
+  const createTerminalTab = useAppStore((state) => state.createTerminalTab);
+  const closeTerminalTab = useAppStore((state) => state.closeTerminalTab);
+  const clearTerminalBuffer = useAppStore((state) => state.clearTerminalBuffer);
   const ensureTerminalSession = useAppStore(
     (state) => state.ensureTerminalSession,
   );
-  const writeTerminalInput = useAppStore((state) => state.writeTerminalInput);
+  const restartTerminalTab = useAppStore((state) => state.restartTerminalTab);
   const resizeTerminal = useAppStore((state) => state.resizeTerminal);
+  const setActiveTerminalTab = useAppStore(
+    (state) => state.setActiveTerminalTab,
+  );
+  const writeTerminalInput = useAppStore((state) => state.writeTerminalInput);
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const bindingRef = useRef<TerminalBinding | null>(null);
-  const activeWorkspaceIdRef = useRef<string | null>(workspace?.id ?? null);
-  const inputReadyWorkspaceIdRef = useRef<string | null>(null);
+  const activeBindingIdRef = useRef<string | null>(null);
   const terminalsRef = useRef(terminals);
 
-  activeWorkspaceIdRef.current = workspace?.id ?? null;
   terminalsRef.current = terminals;
+
+  const workspaceTerminals = workspace ? terminals[workspace.id] : undefined;
+  const activeTerminalTabId = workspaceTerminals?.activeTabId ?? null;
+  const activeTerminal = activeTerminalTabId
+    ? workspaceTerminals?.tabs[activeTerminalTabId]
+    : undefined;
 
   useEffect(() => {
     const container = containerRef.current;
@@ -81,28 +94,23 @@ export function TerminalPane({ workspace }: TerminalPaneProps) {
       term,
       appliedLength: 0,
       workspaceId: null,
+      terminalTabId: null,
     };
 
-    const initialWorkspaceId = activeWorkspaceIdRef.current;
-    const initialBuffer = initialWorkspaceId
-      ? (terminalsRef.current[initialWorkspaceId]?.buffer ?? "")
-      : "";
-    if (initialBuffer) {
-      term.write(initialBuffer);
-      bindingRef.current.appliedLength = initialBuffer.length;
-      bindingRef.current.workspaceId = initialWorkspaceId;
-    }
-
     term.onData((data) => {
-      const activeWorkspaceId = activeWorkspaceIdRef.current;
-      if (
-        !activeWorkspaceId ||
-        inputReadyWorkspaceIdRef.current !== activeWorkspaceId
-      ) {
+      const binding = bindingRef.current;
+      const bindingId =
+        binding?.workspaceId && binding?.terminalTabId
+          ? `${binding.workspaceId}:${binding.terminalTabId}`
+          : null;
+      if (!binding?.workspaceId || !binding?.terminalTabId) {
+        return;
+      }
+      if (activeBindingIdRef.current !== bindingId) {
         return;
       }
 
-      void writeTerminalInput(activeWorkspaceId, data);
+      void writeTerminalInput(binding.workspaceId, binding.terminalTabId, data);
     });
 
     return () => {
@@ -117,16 +125,19 @@ export function TerminalPane({ workspace }: TerminalPaneProps) {
       return;
     }
 
-    const workspaceId = workspace?.id ?? null;
-    const buffer = workspaceId ? (terminals[workspaceId]?.buffer ?? "") : "";
+    const buffer = activeTerminal?.buffer ?? "";
 
-    if (binding.workspaceId !== workspaceId) {
+    if (
+      binding.workspaceId !== workspace?.id ||
+      binding.terminalTabId !== activeTerminalTabId
+    ) {
       binding.term.reset();
       if (buffer) {
         binding.term.write(buffer);
       }
       binding.appliedLength = buffer.length;
-      binding.workspaceId = workspaceId;
+      binding.workspaceId = workspace?.id ?? null;
+      binding.terminalTabId = activeTerminalTabId;
       return;
     }
 
@@ -143,19 +154,24 @@ export function TerminalPane({ workspace }: TerminalPaneProps) {
       binding.term.write(buffer.slice(binding.appliedLength));
       binding.appliedLength = buffer.length;
     }
-  }, [terminals, workspace]);
+  }, [activeTerminal, activeTerminalTabId, workspace?.id]);
 
   useEffect(() => {
     if (!paneOpen || !workspace) {
-      inputReadyWorkspaceIdRef.current = null;
+      activeBindingIdRef.current = null;
       return;
     }
 
     let cancelled = false;
-    inputReadyWorkspaceIdRef.current = null;
 
     const prepareTerminal = async () => {
-      await ensureTerminalSession(workspace.id);
+      const terminalTabId =
+        activeTerminalTabId ?? (await createTerminalTab(workspace.id));
+      if (cancelled) {
+        return;
+      }
+
+      await ensureTerminalSession(workspace.id, terminalTabId);
       if (cancelled) {
         return;
       }
@@ -180,26 +196,34 @@ export function TerminalPane({ workspace }: TerminalPaneProps) {
           binding.fit.fit();
           void resizeTerminal(
             workspace.id,
+            terminalTabId,
             binding.term.cols,
             binding.term.rows,
           );
           binding.term.focus();
-          inputReadyWorkspaceIdRef.current = workspace.id;
+          activeBindingIdRef.current = `${workspace.id}:${terminalTabId}`;
         });
       });
     };
 
     void prepareTerminal().catch(() => {
       if (!cancelled) {
-        inputReadyWorkspaceIdRef.current = null;
+        activeBindingIdRef.current = null;
       }
     });
 
     return () => {
       cancelled = true;
-      inputReadyWorkspaceIdRef.current = null;
+      activeBindingIdRef.current = null;
     };
-  }, [ensureTerminalSession, paneOpen, resizeTerminal, workspace]);
+  }, [
+    activeTerminalTabId,
+    createTerminalTab,
+    ensureTerminalSession,
+    paneOpen,
+    resizeTerminal,
+    workspace,
+  ]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -209,11 +233,11 @@ export function TerminalPane({ workspace }: TerminalPaneProps) {
 
     const observer = new ResizeObserver(() => {
       const binding = bindingRef.current;
-      const activeWorkspaceId = activeWorkspaceIdRef.current;
       if (
         !paneOpen ||
         !binding ||
-        !activeWorkspaceId ||
+        !binding.workspaceId ||
+        !binding.terminalTabId ||
         container.clientWidth === 0 ||
         container.clientHeight === 0
       ) {
@@ -221,20 +245,17 @@ export function TerminalPane({ workspace }: TerminalPaneProps) {
       }
 
       binding.fit.fit();
-      if (inputReadyWorkspaceIdRef.current === activeWorkspaceId) {
-        void resizeTerminal(
-          activeWorkspaceId,
-          binding.term.cols,
-          binding.term.rows,
-        );
-      }
+      void resizeTerminal(
+        binding.workspaceId,
+        binding.terminalTabId,
+        binding.term.cols,
+        binding.term.rows,
+      );
     });
 
     observer.observe(container);
     return () => observer.disconnect();
   }, [paneOpen, resizeTerminal]);
-
-  const activeTerminal = workspace ? terminals[workspace.id] : undefined;
 
   return (
     <section
@@ -242,22 +263,98 @@ export function TerminalPane({ workspace }: TerminalPaneProps) {
       aria-hidden={!paneOpen}
     >
       <div className="terminal-pane__meta">
-        <span className="terminal-pane__title">
-          {workspace ? workspace.name : "Terminal"}
-        </span>
-        <span className="terminal-pane__status">
-          {activeTerminal?.activeCommand
-            ? `Running ${activeTerminal.activeCommand.command}`
-            : activeTerminal?.status === "ready"
-              ? "Interactive shell"
+        <div className="terminal-pane__tabs">
+          {workspaceTerminals?.tabOrder.map((tabId, index) => {
+            const tab = workspaceTerminals.tabs[tabId];
+            return (
+              <button
+                key={tabId}
+                className={`terminal-pane__tab ${
+                  tabId === activeTerminalTabId
+                    ? "terminal-pane__tab--active"
+                    : ""
+                }`}
+                onClick={() => {
+                  setActiveTerminalTab(workspace!.id, tabId);
+                }}
+                type="button"
+              >
+                <span>
+                  {tab.activeCommand?.command || `Shell ${index + 1}`}
+                </span>
+              </button>
+            );
+          })}
+          <button
+            className="terminal-pane__icon-btn"
+            onClick={() => {
+              if (workspace) {
+                void createTerminalTab(workspace.id);
+              }
+            }}
+            type="button"
+            title="New terminal tab"
+          >
+            <Plus size={14} />
+          </button>
+        </div>
+
+        <div className="terminal-pane__actions">
+          <span className="terminal-pane__status">
+            {activeTerminal?.activeCommand
+              ? `Running ${activeTerminal.activeCommand.command}`
               : activeTerminal?.status === "connecting"
                 ? "Connecting shell"
                 : activeTerminal?.status === "error"
                   ? activeTerminal.error || "Terminal error"
                   : activeTerminal?.status === "exited"
                     ? activeTerminal.error || "Shell exited"
-                    : "Ready"}
-        </span>
+                    : activeTerminal
+                      ? "Ready"
+                      : workspace
+                        ? "No shell"
+                        : "Select a workspace"}
+          </span>
+          <button
+            className="terminal-pane__icon-btn"
+            disabled={!workspace || !activeTerminalTabId}
+            onClick={() => {
+              if (workspace && activeTerminalTabId) {
+                clearTerminalBuffer(workspace.id, activeTerminalTabId);
+              }
+            }}
+            type="button"
+            title="Clear terminal"
+          >
+            <Trash2 size={14} />
+          </button>
+          <button
+            className="terminal-pane__icon-btn"
+            disabled={!workspace || !activeTerminalTabId}
+            onClick={() => {
+              if (workspace && activeTerminalTabId) {
+                void restartTerminalTab(workspace.id, activeTerminalTabId);
+              }
+            }}
+            type="button"
+            title="Restart shell"
+          >
+            <RotateCcw size={14} />
+          </button>
+          <button
+            className="terminal-pane__icon-btn"
+            disabled={!workspace || !activeTerminalTabId}
+            onClick={() => {
+              if (workspace && activeTerminalTabId) {
+                void closeTerminalTab(workspace.id, activeTerminalTabId);
+              }
+            }}
+            type="button"
+            title="Close terminal tab"
+          >
+            <X size={14} />
+          </button>
+        </div>
       </div>
 
       <div className="terminal-pane__viewport">

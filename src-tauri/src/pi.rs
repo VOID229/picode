@@ -2,8 +2,9 @@ use crate::models::{
     AbortPromptPayload, ApprovalDecision, ApprovalState, ModelOption, PiInstallState,
     PiInstallStatus, PiRuntimeEvent, PromptMode, ProviderAuthKind, ProviderOption, ProviderStatus,
     RefreshWorkspaceRuntimeCatalogPayload, ResolveApprovalPayload, RuntimeBootstrapPayload,
-    RuntimeHealthPayload, SendPromptPayload, SessionRuntimeMetadata, SessionStatus, TimelineItem,
-    ToolActivity, ToolStatus, WorkspaceRuntimeCatalogPayload, expand_user_path, now_iso,
+    RuntimeHealthPayload, SendPromptPayload, SessionModelSelection, SessionRuntimeMetadata,
+    SessionStatus, TimelineItem, ToolActivity, ToolStatus, WorkspaceRuntimeCatalogPayload,
+    expand_user_path, now_iso,
 };
 use crate::{AppState, git, storage};
 use anyhow::{Context, Result, anyhow};
@@ -175,6 +176,8 @@ struct PiModel {
     id: String,
     name: String,
     provider: String,
+    #[serde(default)]
+    reasoning: bool,
     #[serde(rename = "contextWindow")]
     context_window: Option<u64>,
 }
@@ -825,6 +828,13 @@ fn format_context_window(value: Option<u64>) -> String {
 }
 
 fn provider_label(provider_id: &str) -> String {
+    match provider_id {
+        "google-antigravity" => return "Antigravity".to_string(),
+        "google-gemini-cli" => return "Cloud Code Assist".to_string(),
+        "openai-codex" => return "Codex".to_string(),
+        _ => {}
+    }
+
     provider_id
         .split(['-', '_'])
         .filter(|segment| !segment.is_empty())
@@ -841,6 +851,18 @@ fn provider_label(provider_id: &str) -> String {
         .join(" ")
 }
 
+fn sanitize_model_label(label: &str) -> String {
+    const SUFFIXES: [&str; 2] = [" (Antigravity)", " (Cloud Code Assist)"];
+
+    for suffix in SUFFIXES {
+        if let Some(stripped) = label.strip_suffix(suffix) {
+            return stripped.trim().to_string();
+        }
+    }
+
+    label.trim().to_string()
+}
+
 fn map_models_to_provider_options(models: Vec<PiModel>) -> Vec<ProviderOption> {
     let mut grouped = BTreeMap::<String, Vec<ModelOption>>::new();
 
@@ -850,9 +872,10 @@ fn map_models_to_provider_options(models: Vec<PiModel>) -> Vec<ProviderOption> {
             .or_default()
             .push(ModelOption {
                 id: model.id.clone(),
-                label: model.name.clone(),
+                label: sanitize_model_label(&model.name),
                 provider_id: model.provider.clone(),
                 context_window: format_context_window(model.context_window),
+                reasoning: model.reasoning,
                 available: true,
                 provider_source: "pi".to_string(),
             });
@@ -904,13 +927,111 @@ fn normalize_workspace_selection(
     true
 }
 
-fn map_effort_to_thinking(effort: &str) -> &'static str {
+fn map_codex_effort_to_thinking(effort: &str, fast_mode: bool) -> &'static str {
+    if fast_mode {
+        return "minimal";
+    }
+
     match effort {
         "extra-high" => "xhigh",
         "medium" => "medium",
         "low" => "low",
         _ => "high",
     }
+}
+
+fn map_provider_effort_to_thinking(
+    provider_id: &str,
+    model_id: &str,
+    effort: &str,
+    fast_mode: bool,
+) -> &'static str {
+    if provider_id == "openai-codex" {
+        return map_codex_effort_to_thinking(effort, fast_mode);
+    }
+
+    if provider_id == "google-antigravity" {
+        return match effort {
+            "planning" => "high",
+            "fast" => "minimal",
+            _ if model_id.ends_with("-thinking") || model_id.ends_with("-high") => "high",
+            _ if model_id.ends_with("-low") => "low",
+            _ => "minimal",
+        };
+    }
+
+    match effort {
+        "extra-high" => "xhigh",
+        "medium" => "medium",
+        "low" => "low",
+        "fast" => "minimal",
+        "planning" => "high",
+        _ => "high",
+    }
+}
+
+fn normalize_session_selection(
+    selection: &mut SessionModelSelection,
+    providers: &[ProviderOption],
+) -> bool {
+    normalize_workspace_selection(
+        &mut selection.provider_id,
+        &mut selection.model_id,
+        providers,
+    )
+}
+
+fn resolve_title_selection(
+    providers: &[ProviderOption],
+    preferred_provider_id: &str,
+    preferred_model_id: &str,
+) -> Option<(String, String)> {
+    if let Some(provider) = providers
+        .iter()
+        .find(|provider| provider.id == preferred_provider_id)
+    {
+        if provider
+            .models
+            .iter()
+            .any(|model| model.id == preferred_model_id)
+        {
+            return Some((
+                preferred_provider_id.to_string(),
+                preferred_model_id.to_string(),
+            ));
+        }
+    }
+
+    if let Some(provider) = providers
+        .iter()
+        .find(|provider| provider.id == "openai-codex")
+    {
+        if let Some(model) = provider
+            .models
+            .iter()
+            .find(|model| model.id == "gpt-5.4-mini")
+        {
+            return Some((provider.id.clone(), model.id.clone()));
+        }
+    }
+
+    providers
+        .iter()
+        .find_map(|provider| {
+            provider
+                .models
+                .iter()
+                .find(|model| model.reasoning)
+                .map(|model| (provider.id.clone(), model.id.clone()))
+        })
+        .or_else(|| {
+            providers.first().and_then(|provider| {
+                provider
+                    .models
+                    .first()
+                    .map(|model| (provider.id.clone(), model.id.clone()))
+            })
+        })
 }
 
 fn prompt_for_mode(prompt: &str, mode: &PromptMode) -> String {
@@ -1769,7 +1890,14 @@ async fn generate_thread_title(
     workspace_id: &str,
     session_id: &str,
 ) -> Result<()> {
-    let (workspace_path, provider_id, model_id, user_message, assistant_message) = {
+    let (
+        workspace_path,
+        preferred_provider_id,
+        preferred_model_id,
+        preferred_effort,
+        user_message,
+        assistant_message,
+    ) = {
         let state = shared.state.lock().await;
         let Some(workspace) = state
             .workspaces
@@ -1813,6 +1941,7 @@ async fn generate_thread_title(
             expand_user_path(&workspace.path),
             state.preferences.title_model_provider_id.clone(),
             state.preferences.title_model_id.clone(),
+            state.preferences.title_model_effort.clone(),
             user_message,
             assistant_message,
         )
@@ -1823,6 +1952,18 @@ async fn generate_thread_title(
         .binary_path
         .context("Pi is not installed or failed validation")?;
 
+    let providers = map_models_to_provider_options(
+        fetch_available_models(&binary_path, Path::new(&workspace_path)).await?,
+    );
+    let Some((provider_id, model_id)) =
+        resolve_title_selection(&providers, &preferred_provider_id, &preferred_model_id)
+    else {
+        return Ok(());
+    };
+
+    let title_thinking =
+        map_provider_effort_to_thinking(&provider_id, &model_id, &preferred_effort, false)
+            .to_string();
     let extra_args = vec![
         "--no-session".to_string(),
         "--provider".to_string(),
@@ -1830,7 +1971,7 @@ async fn generate_thread_title(
         "--model".to_string(),
         model_id,
         "--thinking".to_string(),
-        "low".to_string(),
+        title_thinking,
     ];
     let extra_arg_refs = extra_args.iter().map(String::as_str).collect::<Vec<_>>();
     let response = run_rpc_once(
@@ -2138,7 +2279,7 @@ async fn run_prompt_stream(app: AppHandle, shared: AppState, payload: SendPrompt
         let session_file = session_file_path(&app, &workspace_id, &session_id)?;
         let session_file_string = session_file.to_string_lossy().into_owned();
 
-        let (workspace_path, provider_id, model_id, effort) = {
+        let (workspace_path, provider_id, model_id, effort, fast_mode) = {
             let mut state = shared.state.lock().await;
             let workspace = state
                 .workspaces
@@ -2151,22 +2292,23 @@ async fn run_prompt_stream(app: AppHandle, shared: AppState, payload: SendPrompt
                 .find(|session| session.id == session_id)
                 .context("session not found")?;
 
-            session.runtime.provider_id = Some(catalog.selected_provider_id.clone());
-            session.runtime.model_id = Some(catalog.selected_model_id.clone());
+            normalize_session_selection(&mut session.selection, &catalog.providers);
+
+            session.runtime.provider_id = Some(session.selection.provider_id.clone());
+            session.runtime.model_id = Some(session.selection.model_id.clone());
             session.runtime.pi_session_file = Some(session_file_string.clone());
             session.runtime.last_known_ready = true;
             session.runtime.last_error = None;
             session.updated_at = now_iso();
 
-            workspace.provider_id = catalog.selected_provider_id.clone();
-            workspace.model_id = catalog.selected_model_id.clone();
             let workspace_path = expand_user_path(&workspace.path);
-            let provider_id = workspace.provider_id.clone();
-            let model_id = workspace.model_id.clone();
-            let effort = workspace.effort.clone();
+            let provider_id = session.selection.provider_id.clone();
+            let model_id = session.selection.model_id.clone();
+            let effort = session.selection.effort.clone();
+            let fast_mode = session.selection.fast_mode;
             storage::save(&app, &state)?;
 
-            (workspace_path, provider_id, model_id, effort)
+            (workspace_path, provider_id, model_id, effort, fast_mode)
         };
 
         let mut command = command_for_binary(&binary_path);
@@ -2180,7 +2322,12 @@ async fn run_prompt_stream(app: AppHandle, shared: AppState, payload: SendPrompt
             .arg("--model")
             .arg(&model_id)
             .arg("--thinking")
-            .arg(map_effort_to_thinking(&effort))
+            .arg(map_provider_effort_to_thinking(
+                &provider_id,
+                &model_id,
+                &effort,
+                fast_mode,
+            ))
             .current_dir(&workspace_path)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -2408,18 +2555,21 @@ mod tests {
                 id: "gpt-5.4".to_string(),
                 name: "GPT-5.4".to_string(),
                 provider: "openai".to_string(),
+                reasoning: true,
                 context_window: Some(256_000),
             },
             PiModel {
                 id: "claude-sonnet".to_string(),
                 name: "Claude Sonnet".to_string(),
                 provider: "anthropic".to_string(),
+                reasoning: true,
                 context_window: Some(200_000),
             },
             PiModel {
                 id: "gpt-5.4-mini".to_string(),
                 name: "GPT-5.4 Mini".to_string(),
                 provider: "openai".to_string(),
+                reasoning: true,
                 context_window: Some(128_000),
             },
         ]);
@@ -2446,6 +2596,7 @@ mod tests {
                     label: "GPT-5.4".to_string(),
                     provider_id: "openai".to_string(),
                     context_window: "256k".to_string(),
+                    reasoning: true,
                     available: true,
                     provider_source: "pi".to_string(),
                 },
@@ -2454,6 +2605,7 @@ mod tests {
                     label: "GPT-5.4 Mini".to_string(),
                     provider_id: "openai".to_string(),
                     context_window: "128k".to_string(),
+                    reasoning: true,
                     available: true,
                     provider_source: "pi".to_string(),
                 },
@@ -2478,6 +2630,19 @@ mod tests {
         assert!(!changed);
         assert_eq!(provider_id, "openai");
         assert_eq!(model_id, "gpt-5.4");
+    }
+
+    #[test]
+    fn model_labels_drop_provider_suffixes_but_keep_variants() {
+        let providers = map_models_to_provider_options(vec![PiModel {
+            id: "gpt-oss-120b-medium".to_string(),
+            name: "GPT-OSS 120B Medium (Antigravity)".to_string(),
+            provider: "google-antigravity".to_string(),
+            reasoning: false,
+            context_window: Some(131_072),
+        }]);
+
+        assert_eq!(providers[0].models[0].label, "GPT-OSS 120B Medium");
     }
 
     #[test]

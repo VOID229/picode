@@ -231,10 +231,13 @@ export function SettingsScreen() {
   const titleProvider =
     titleProviders.find(
       (provider) => provider.id === state?.preferences.titleModelProviderId,
-    ) ?? titleProviders[0];
+    ) ??
+    titleProviders.find((provider) => provider.id === "openai-codex") ??
+    titleProviders[0];
   const titleModels = titleProvider?.models ?? [];
   const titleModel =
     titleModels.find((model) => model.id === state?.preferences.titleModelId) ??
+    titleModels.find((model) => model.id === "gpt-5.4-mini") ??
     titleModels[0];
 
   useEffect(() => {
@@ -679,6 +682,31 @@ export function SettingsScreen() {
                             {model.label}
                           </option>
                         ))}
+                      </select>
+                    }
+                  />
+                  <SettingRow
+                    label="Title generation effort"
+                    description="Controls the reasoning depth used for automatic thread naming."
+                    control={
+                      <select
+                        style={controlStyle}
+                        value={state?.preferences.titleModelEffort ?? "high"}
+                        onChange={(event) => {
+                          if (!state) {
+                            return;
+                          }
+
+                          void updatePreferences({
+                            ...state.preferences,
+                            titleModelEffort: event.target.value,
+                          });
+                        }}
+                      >
+                        <option value="low">Low</option>
+                        <option value="medium">Medium</option>
+                        <option value="high">High</option>
+                        <option value="extra-high">XHigh</option>
                       </select>
                     }
                   />

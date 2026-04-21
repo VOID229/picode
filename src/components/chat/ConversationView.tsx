@@ -16,6 +16,7 @@ import {
   deriveLivePhase,
   resolveAssistantLabel,
   resolveComposerCapabilities,
+  resolveSessionSelection,
   shortenAssistantLabel,
   type LivePhase,
 } from "./chatRuntime";
@@ -45,6 +46,9 @@ export function ConversationView({
   );
   const workspaceCatalogErrors = useAppStore(
     (store) => store.workspaceCatalogErrors,
+  );
+  const workspaceCatalogLoaded = useAppStore(
+    (store) => store.workspaceCatalogLoaded,
   );
   const composerDrafts = useAppStore((store) => store.composerDrafts);
   const currentMode = useAppStore((store) => store.currentMode);
@@ -134,28 +138,29 @@ export function ConversationView({
     const workspaceProviders = workspaceCatalogs[workspace.id] ?? [];
     const displayProviders =
       workspaceProviders.length > 0 ? workspaceProviders : stateProviders;
+    const selection = resolveSessionSelection(session, workspace);
     const capabilities = resolveComposerCapabilities({
       providers: displayProviders,
-      providerId: workspace.providerId,
-      modelId: workspace.modelId,
-      effort: workspace.effort,
-      fastMode: workspace.fastMode,
+      selection,
     });
 
     if (
-      workspace.effort === capabilities.normalizedEffort &&
-      workspace.fastMode === capabilities.normalizedFastMode
+      selection.providerId === capabilities.normalizedSelection.providerId &&
+      selection.modelId === capabilities.normalizedSelection.modelId &&
+      selection.effort === capabilities.normalizedSelection.effort &&
+      selection.fastMode === capabilities.normalizedSelection.fastMode
     ) {
       return;
     }
 
     void updateWorkspaceSettings({
       workspaceId: workspace.id,
+      sessionId: session.id,
       approvalMode: workspace.approvalMode,
-      providerId: workspace.providerId,
-      modelId: workspace.modelId,
-      effort: capabilities.normalizedEffort,
-      fastMode: capabilities.normalizedFastMode,
+      providerId: capabilities.normalizedSelection.providerId,
+      modelId: capabilities.normalizedSelection.modelId,
+      effort: capabilities.normalizedSelection.effort,
+      fastMode: capabilities.normalizedSelection.fastMode,
       policy: workspace.policy,
     });
   }, [
@@ -184,14 +189,15 @@ export function ConversationView({
   const workspaceCatalogError = workspaceCatalogErrors[workspace.id];
   const displayProviders =
     workspaceProviders.length > 0 ? workspaceProviders : stateProviders;
+  const selection = resolveSessionSelection(session, workspace);
   const activeProvider = displayProviders.find(
-    (provider) => provider.id === workspace.providerId,
+    (provider) => provider.id === selection.providerId,
   );
   const activeModel =
-    activeProvider?.models.find((model) => model.id === workspace.modelId) ??
+    activeProvider?.models.find((model) => model.id === selection.modelId) ??
     displayProviders
       .flatMap((provider) => provider.models)
-      .find((model) => model.id === workspace.modelId);
+      .find((model) => model.id === selection.modelId);
   const assistantLabel = resolveAssistantLabel({
     session,
     workspace,
@@ -201,16 +207,15 @@ export function ConversationView({
   const assistantChromeLabel = shortenAssistantLabel(assistantLabel);
   const composerCapabilities = resolveComposerCapabilities({
     providers: displayProviders,
-    providerId: workspace.providerId,
-    modelId: workspace.modelId,
-    effort: workspace.effort,
-    fastMode: workspace.fastMode,
+    selection,
   });
   const effortLabels = Object.fromEntries(
     composerCapabilities.effortOptions.map((entry) => [entry.id, entry.label]),
   );
+  const normalizedSelection = composerCapabilities.normalizedSelection;
 
   const hasWorkspaceCatalog = workspaceProviders.length > 0;
+  const catalogLoaded = workspaceCatalogLoaded[workspace.id] ?? false;
   const sendDisabledReason =
     runtimeInstall?.status === "missing"
       ? "The local runtime is not installed. Install it from Settings > Connections."
@@ -220,14 +225,14 @@ export function ConversationView({
           ? workspaceCatalogError ||
             "Unable to load models for this project. Refresh the runtime in Settings."
           : runtimeInstall?.status === "ready" &&
+              catalogLoaded &&
               catalogStatus === "ready" &&
               workspaceProviders.length === 0
             ? "No models are configured for this project. Run `pi` in the project and configure a provider, or update your config."
             : undefined;
   const sendDisabled = Boolean(sendDisabledReason);
 
-  const currentEffortLabel =
-    effortLabels[composerCapabilities.normalizedEffort] || "High";
+  const currentEffortLabel = effortLabels[normalizedSelection.effort] || "High";
 
   return (
     <div
@@ -421,16 +426,20 @@ export function ConversationView({
                             closeComposerMenus();
                             void updateWorkspaceSettings({
                               workspaceId: workspace.id,
+                              sessionId: session.id,
                               approvalMode: workspace.approvalMode,
                               providerId: provider.id,
                               modelId:
-                                provider.models[0]?.id ?? workspace.modelId,
+                                provider.models[0]?.id ??
+                                normalizedSelection.modelId,
+                              effort: normalizedSelection.effort,
+                              fastMode: normalizedSelection.fastMode,
                               policy: workspace.policy,
                             });
                           }}
                         >
                           <span>{provider.label}</span>
-                          {workspace.providerId === provider.id && (
+                          {normalizedSelection.providerId === provider.id && (
                             <Check size={14} />
                           )}
                         </div>
@@ -490,15 +499,18 @@ export function ConversationView({
                             closeComposerMenus();
                             void updateWorkspaceSettings({
                               workspaceId: workspace.id,
+                              sessionId: session.id,
                               approvalMode: workspace.approvalMode,
-                              providerId: workspace.providerId,
+                              providerId: normalizedSelection.providerId,
                               modelId: model.id,
+                              effort: normalizedSelection.effort,
+                              fastMode: normalizedSelection.fastMode,
                               policy: workspace.policy,
                             });
                           }}
                         >
                           <span>{model.label}</span>
-                          {workspace.modelId === model.id && (
+                          {normalizedSelection.modelId === model.id && (
                             <Check size={14} />
                           )}
                         </div>
@@ -520,68 +532,31 @@ export function ConversationView({
                   {currentEffortLabel.split(" ")[0]}
                 </span>
                 <ChevronIcon />
-                {effortDropdownOpen && (
-                  <>
-                    <div
-                      style={{
-                        position: "fixed",
-                        inset: 0,
-                        zIndex: 10,
-                        cursor: "default",
-                      }}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        closeComposerMenus();
-                      }}
-                    />
-                    <div
-                      className="custom-dropdown"
-                      style={{ minWidth: "160px" }}
-                    >
-                      <div className="dropdown-section-label">Effort</div>
-                      {composerCapabilities.effortOptions.map(
-                        ({ id, label }) => (
-                          <div
-                            key={id}
-                            className="custom-dropdown-item"
-                            style={{ justifyContent: "space-between" }}
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              closeComposerMenus();
-                              void updateWorkspaceSettings({
-                                workspaceId: workspace.id,
-                                approvalMode: workspace.approvalMode,
-                                providerId: workspace.providerId,
-                                modelId: workspace.modelId,
-                                effort: id,
-                                policy: workspace.policy,
-                              });
-                            }}
-                          >
-                            <span>{label}</span>
-                            {workspace.effort === id && <Check size={14} />}
-                          </div>
-                        ),
-                      )}
-
-                      {composerCapabilities.supportsFastMode && (
-                        <>
-                          <div
-                            style={{
-                              height: "1px",
-                              background: "#333",
-                              margin: "4px 0",
-                            }}
-                          />
-                          <div className="dropdown-section-label">
-                            Fast Mode
-                          </div>
-                          {[
-                            { id: false, label: "off" },
-                            { id: true, label: "on" },
-                          ].map((option) => (
+                {effortDropdownOpen &&
+                  (composerCapabilities.effortOptions.length > 0 ||
+                    composerCapabilities.supportsFastMode) && (
+                    <>
+                      <div
+                        style={{
+                          position: "fixed",
+                          inset: 0,
+                          zIndex: 10,
+                          cursor: "default",
+                        }}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          closeComposerMenus();
+                        }}
+                      />
+                      <div
+                        className="custom-dropdown"
+                        style={{ minWidth: "160px" }}
+                      >
+                        <div className="dropdown-section-label">Effort</div>
+                        {composerCapabilities.effortOptions.map(
+                          ({ id, label }) => (
                             <div
-                              key={option.label}
+                              key={id}
                               className="custom-dropdown-item"
                               style={{ justifyContent: "space-between" }}
                               onClick={(event) => {
@@ -589,25 +564,70 @@ export function ConversationView({
                                 closeComposerMenus();
                                 void updateWorkspaceSettings({
                                   workspaceId: workspace.id,
+                                  sessionId: session.id,
                                   approvalMode: workspace.approvalMode,
-                                  providerId: workspace.providerId,
-                                  modelId: workspace.modelId,
-                                  fastMode: option.id,
+                                  providerId: normalizedSelection.providerId,
+                                  modelId: normalizedSelection.modelId,
+                                  effort: id,
+                                  fastMode: normalizedSelection.fastMode,
                                   policy: workspace.policy,
                                 });
                               }}
                             >
-                              <span>{option.label}</span>
-                              {workspace.fastMode === option.id && (
+                              <span>{label}</span>
+                              {normalizedSelection.effort === id && (
                                 <Check size={14} />
                               )}
                             </div>
-                          ))}
-                        </>
-                      )}
-                    </div>
-                  </>
-                )}
+                          ),
+                        )}
+
+                        {composerCapabilities.supportsFastMode && (
+                          <>
+                            <div
+                              style={{
+                                height: "1px",
+                                background: "#333",
+                                margin: "4px 0",
+                              }}
+                            />
+                            <div className="dropdown-section-label">
+                              Fast Mode
+                            </div>
+                            {[
+                              { id: false, label: "off" },
+                              { id: true, label: "on" },
+                            ].map((option) => (
+                              <div
+                                key={option.label}
+                                className="custom-dropdown-item"
+                                style={{ justifyContent: "space-between" }}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  closeComposerMenus();
+                                  void updateWorkspaceSettings({
+                                    workspaceId: workspace.id,
+                                    sessionId: session.id,
+                                    approvalMode: workspace.approvalMode,
+                                    providerId: normalizedSelection.providerId,
+                                    modelId: normalizedSelection.modelId,
+                                    effort: normalizedSelection.effort,
+                                    fastMode: option.id,
+                                    policy: workspace.policy,
+                                  });
+                                }}
+                              >
+                                <span>{option.label}</span>
+                                {normalizedSelection.fastMode === option.id && (
+                                  <Check size={14} />
+                                )}
+                              </div>
+                            ))}
+                          </>
+                        )}
+                      </div>
+                    </>
+                  )}
               </div>
 
               <div

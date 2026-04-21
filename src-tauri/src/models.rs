@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::{env, path::PathBuf};
 use uuid::Uuid;
 
-pub const SCHEMA_VERSION: u32 = 3;
+pub const SCHEMA_VERSION: u32 = 4;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -53,6 +53,8 @@ pub struct ModelOption {
     pub label: String,
     pub provider_id: String,
     pub context_window: String,
+    #[serde(default)]
+    pub reasoning: bool,
     #[serde(default)]
     pub available: bool,
     #[serde(default = "default_provider_source")]
@@ -196,8 +198,34 @@ pub struct ChatSession {
     pub status: SessionStatus,
     pub archived_at: Option<String>,
     #[serde(default)]
+    pub selection: SessionModelSelection,
+    #[serde(default)]
     pub runtime: SessionRuntimeMetadata,
     pub timeline: Vec<TimelineItem>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionModelSelection {
+    #[serde(default = "default_provider_id")]
+    pub provider_id: String,
+    #[serde(default = "default_model_id")]
+    pub model_id: String,
+    #[serde(default = "default_effort")]
+    pub effort: String,
+    #[serde(default = "default_fast_mode")]
+    pub fast_mode: bool,
+}
+
+impl Default for SessionModelSelection {
+    fn default() -> Self {
+        Self {
+            provider_id: String::new(),
+            model_id: String::new(),
+            effort: String::new(),
+            fast_mode: default_fast_mode(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -287,6 +315,8 @@ pub struct AppPreferences {
     pub title_model_provider_id: String,
     #[serde(default = "default_model_id")]
     pub title_model_id: String,
+    #[serde(default = "default_effort")]
+    pub title_model_effort: String,
     #[serde(default = "default_auto_title_enabled")]
     pub auto_title_enabled: bool,
     pub approval_mode: ApprovalMode,
@@ -391,6 +421,8 @@ pub struct SelectWorkspaceSessionPayload {
 #[serde(rename_all = "camelCase")]
 pub struct UpdateWorkspaceSettingsPayload {
     pub workspace_id: String,
+    #[serde(default)]
+    pub session_id: Option<String>,
     pub approval_mode: ApprovalMode,
     pub provider_id: String,
     pub model_id: String,
@@ -478,12 +510,14 @@ pub struct AbortPromptPayload {
 #[serde(rename_all = "camelCase")]
 pub struct EnsureTerminalSessionPayload {
     pub workspace_id: String,
+    pub terminal_tab_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WriteTerminalInputPayload {
     pub workspace_id: String,
+    pub terminal_tab_id: String,
     pub data: String,
 }
 
@@ -491,6 +525,7 @@ pub struct WriteTerminalInputPayload {
 #[serde(rename_all = "camelCase")]
 pub struct ResizeTerminalPayload {
     pub workspace_id: String,
+    pub terminal_tab_id: String,
     pub cols: u16,
     pub rows: u16,
 }
@@ -499,9 +534,17 @@ pub struct ResizeTerminalPayload {
 #[serde(rename_all = "camelCase")]
 pub struct RunTerminalCommandPayload {
     pub workspace_id: String,
+    pub terminal_tab_id: String,
     pub command: String,
     #[serde(default)]
     pub refresh_git: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CloseTerminalSessionPayload {
+    pub workspace_id: String,
+    pub terminal_tab_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -514,6 +557,7 @@ pub struct WriteTextFilePayload {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RunTerminalCommandResult {
+    pub terminal_tab_id: String,
     pub command_id: String,
 }
 
@@ -607,13 +651,16 @@ pub enum PiRuntimeEvent {
 pub enum TerminalEvent {
     Started {
         workspace_id: String,
+        terminal_tab_id: String,
     },
     Output {
         workspace_id: String,
+        terminal_tab_id: String,
         chunk: String,
     },
     CommandFinished {
         workspace_id: String,
+        terminal_tab_id: String,
         command_id: String,
         command: String,
         exit_code: i32,
@@ -621,10 +668,12 @@ pub enum TerminalEvent {
     },
     Error {
         workspace_id: String,
+        terminal_tab_id: String,
         message: String,
     },
     Exit {
         workspace_id: String,
+        terminal_tab_id: String,
         exit_code: Option<i32>,
     },
 }
@@ -639,6 +688,10 @@ fn default_provider_id() -> String {
 
 fn default_model_id() -> String {
     "gpt-5.4".to_string()
+}
+
+fn default_title_model_id() -> String {
+    "gpt-5.4-mini".to_string()
 }
 
 fn default_effort() -> String {
@@ -680,6 +733,7 @@ pub fn default_providers() -> Vec<ProviderOption> {
                     label: "GPT-5.4".to_string(),
                     provider_id: "openai-codex".to_string(),
                     context_window: "256k".to_string(),
+                    reasoning: true,
                     available: false,
                     provider_source: default_provider_source(),
                 },
@@ -688,6 +742,7 @@ pub fn default_providers() -> Vec<ProviderOption> {
                     label: "GPT-5.4 Mini".to_string(),
                     provider_id: "openai-codex".to_string(),
                     context_window: "128k".to_string(),
+                    reasoning: true,
                     available: false,
                     provider_source: default_provider_source(),
                 },
@@ -705,6 +760,7 @@ pub fn default_providers() -> Vec<ProviderOption> {
                 label: "Claude Opus 4.6".to_string(),
                 provider_id: "anthropic".to_string(),
                 context_window: "200k".to_string(),
+                reasoning: true,
                 available: false,
                 provider_source: default_provider_source(),
             }],
@@ -721,6 +777,7 @@ pub fn default_providers() -> Vec<ProviderOption> {
                 label: "Claude Opus 4.6".to_string(),
                 provider_id: "opencode".to_string(),
                 context_window: "200k".to_string(),
+                reasoning: true,
                 available: false,
                 provider_source: default_provider_source(),
             }],
@@ -737,6 +794,7 @@ pub fn default_providers() -> Vec<ProviderOption> {
                 label: "Kimi K2.5".to_string(),
                 provider_id: "opencode-go".to_string(),
                 context_window: "128k".to_string(),
+                reasoning: true,
                 available: false,
                 provider_source: default_provider_source(),
             }],
@@ -759,7 +817,8 @@ pub fn default_preferences() -> AppPreferences {
         provider_id: default_provider_id(),
         model_id: default_model_id(),
         title_model_provider_id: default_provider_id(),
-        title_model_id: default_model_id(),
+        title_model_id: default_title_model_id(),
+        title_model_effort: default_effort(),
         auto_title_enabled: default_auto_title_enabled(),
         approval_mode: ApprovalMode::Supervised,
         effort: default_effort(),
@@ -797,7 +856,7 @@ pub fn expand_user_path(path: &str) -> String {
     trimmed.to_string()
 }
 
-pub fn new_session(title: impl Into<String>) -> ChatSession {
+pub fn new_session(title: impl Into<String>, selection: SessionModelSelection) -> ChatSession {
     let now = now_iso();
     ChatSession {
         id: Uuid::new_v4().to_string(),
@@ -807,6 +866,7 @@ pub fn new_session(title: impl Into<String>) -> ChatSession {
         updated_at: now.clone(),
         status: SessionStatus::Idle,
         archived_at: None,
+        selection,
         runtime: SessionRuntimeMetadata::default(),
         timeline: vec![TimelineItem::SystemNotice {
             id: Uuid::new_v4().to_string(),
@@ -841,7 +901,15 @@ pub fn new_workspace(
         model_id: default_model_id(),
         effort: default_effort(),
         fast_mode: default_fast_mode(),
-        sessions: vec![new_session("Kickoff")],
+        sessions: vec![new_session(
+            "New thread",
+            SessionModelSelection {
+                provider_id: default_provider_id(),
+                model_id: default_model_id(),
+                effort: default_effort(),
+                fast_mode: default_fast_mode(),
+            },
+        )],
     }
 }
 
@@ -878,6 +946,11 @@ fn normalize_stored_model_selection(provider_id: &mut String, model_id: &mut Str
     }
 }
 
+fn normalize_session_selection(selection: &mut SessionModelSelection) {
+    normalize_effort(&mut selection.effort);
+    normalize_stored_model_selection(&mut selection.provider_id, &mut selection.model_id);
+}
+
 pub fn normalize_state(mut state: PersistedAppState) -> PersistedAppState {
     state.schema_version = SCHEMA_VERSION;
     if state.providers.is_empty() {
@@ -893,11 +966,43 @@ pub fn normalize_state(mut state: PersistedAppState) -> PersistedAppState {
         &mut state.preferences.title_model_provider_id,
         &mut state.preferences.title_model_id,
     );
+    normalize_effort(&mut state.preferences.title_model_effort);
 
     for workspace in &mut state.workspaces {
         normalize_workspace_path(&mut workspace.path);
         normalize_effort(&mut workspace.effort);
         normalize_stored_model_selection(&mut workspace.provider_id, &mut workspace.model_id);
+
+        if workspace.sessions.is_empty() {
+            workspace.sessions.push(new_session(
+                "New thread",
+                SessionModelSelection {
+                    provider_id: workspace.provider_id.clone(),
+                    model_id: workspace.model_id.clone(),
+                    effort: workspace.effort.clone(),
+                    fast_mode: workspace.fast_mode,
+                },
+            ));
+        }
+
+        for session in &mut workspace.sessions {
+            if session.title.trim().eq_ignore_ascii_case("kickoff") {
+                session.title = "New thread".to_string();
+            }
+
+            if session.selection.provider_id.trim().is_empty()
+                && session.selection.model_id.trim().is_empty()
+            {
+                session.selection = SessionModelSelection {
+                    provider_id: workspace.provider_id.clone(),
+                    model_id: workspace.model_id.clone(),
+                    effort: workspace.effort.clone(),
+                    fast_mode: workspace.fast_mode,
+                };
+            }
+
+            normalize_session_selection(&mut session.selection);
+        }
     }
 
     state
@@ -1026,11 +1131,15 @@ mod tests {
 
         let normalized = normalize_state(parsed);
 
-        assert_eq!(normalized.schema_version, 3);
+        assert_eq!(normalized.schema_version, 4);
         assert_eq!(normalized.preferences.provider_id, "pi-core");
         assert_eq!(normalized.preferences.model_id, "gpt-5.4");
         assert_eq!(normalized.workspaces[0].provider_id, "pi-cloud");
         assert_eq!(normalized.workspaces[0].model_id, "gpt-5.4-mini");
+        assert_eq!(
+            normalized.workspaces[0].sessions[0].selection.provider_id,
+            "pi-cloud"
+        );
         assert_eq!(normalized.providers[0].id, "pi-cloud");
         assert_eq!(normalized.providers[0].models[0].id, "pi-cloud-lite");
     }
@@ -1090,6 +1199,8 @@ mod tests {
     fn default_preferences_leave_pi_binary_path_unset() {
         let preferences = default_preferences();
         assert_eq!(preferences.pi_binary_path, None);
+        assert_eq!(preferences.title_model_id, "gpt-5.4-mini");
+        assert_eq!(preferences.title_model_effort, "high");
     }
 
     #[test]
@@ -1133,6 +1244,7 @@ mod tests {
 
         assert_eq!(normalized.preferences.model_id, "gpt-5.4");
         assert_eq!(normalized.workspaces[0].model_id, "gpt-5.4-mini");
+        assert_eq!(normalized.workspaces[0].sessions[0].title, "New thread");
     }
 
     #[test]
