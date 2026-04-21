@@ -1,5 +1,6 @@
 import { Copy, Download, MoreHorizontal, SquarePen } from "lucide-react";
 import { useMemo, useState } from "react";
+import { copyTextToClipboard } from "../../lib/clipboard";
 import { writeTextFile } from "../../lib/tauri";
 import { useAppStore } from "../../state/useAppStore";
 import { ContextMenu, type ContextMenuItem } from "../layout/ContextMenu";
@@ -24,9 +25,7 @@ export function PlanCard({ content, workspaceId }: PlanCardProps) {
         label: "Copy as Markdown",
         icon: <Copy size={14} />,
         onClick: async () => {
-          const { writeText } =
-            await import("@tauri-apps/plugin-clipboard-manager");
-          await writeText(content);
+          await copyTextToClipboard(content, "plan");
         },
       },
       {

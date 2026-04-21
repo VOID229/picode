@@ -101,6 +101,8 @@ body {
   display: grid;
   grid-template-columns: var(--sidebar-width) 1fr;
   height: 100vh;
+  min-height: 0;
+  overflow: hidden;
   position: relative;
   background: var(--bg);
 }
@@ -131,6 +133,8 @@ body {
   display: flex;
   flex-direction: column;
   height: 100%;
+  min-height: 0;
+  overflow: hidden;
   z-index: 10;
   transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
@@ -155,7 +159,8 @@ body {
 
 .sidebar__content {
   flex: 1;
-  overflow-y: auto;
+  min-height: 0;
+  overflow: hidden;
   padding: 12px;
   display: flex;
   flex-direction: column;
@@ -313,6 +318,13 @@ body {
   gap: 8px;
 }
 
+.chat-assistant-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
 .chat-message-actions {
   display: inline-flex;
   align-items: center;
@@ -322,6 +334,10 @@ body {
 }
 
 .chat-row--user:hover .chat-message-actions {
+  opacity: 1;
+}
+
+.chat-message-actions--assistant {
   opacity: 1;
 }
 

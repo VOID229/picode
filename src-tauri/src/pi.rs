@@ -13,6 +13,7 @@ use serde_json::{Value, json};
 use std::{
     collections::{BTreeMap, HashMap},
     env,
+    ffi::OsString,
     path::{Path, PathBuf},
     process::Stdio,
     sync::{
@@ -35,6 +36,7 @@ const PI_INSTALL_URL: &str =
 const PI_INSTALL_COMMAND: &str = "npm install -g @mariozechner/pi-coding-agent";
 const RPC_PROBE_TIMEOUT: Duration = Duration::from_secs(8);
 const SESSION_REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
+const NO_VISIBLE_ASSISTANT_OUTPUT_ERROR: &str = "Pi finished without any visible assistant output.";
 
 #[derive(Clone, Default)]
 pub struct PiRuntimeHandle {
@@ -445,6 +447,34 @@ fn command_for_binary(binary_path: &Path) -> Command {
     Command::new(binary_path)
 }
 
+fn command_path_for_binary(binary_path: &Path) -> Option<OsString> {
+    let mut entries = Vec::new();
+
+    if let Some(parent) = binary_path.parent() {
+        push_candidate(&mut entries, parent.to_path_buf());
+    }
+
+    if let Ok(canonical) = std::fs::canonicalize(binary_path) {
+        if let Some(parent) = canonical.parent() {
+            push_candidate(&mut entries, parent.to_path_buf());
+        }
+    }
+
+    if let Some(existing_path) = env::var_os("PATH") {
+        for entry in env::split_paths(&existing_path) {
+            push_candidate(&mut entries, entry);
+        }
+    }
+
+    env::join_paths(entries).ok()
+}
+
+fn configure_command_for_binary(command: &mut Command, binary_path: &Path) {
+    if let Some(path) = command_path_for_binary(binary_path) {
+        command.env("PATH", path);
+    }
+}
+
 fn candidate_names() -> &'static [&'static str] {
     #[cfg(target_os = "windows")]
     {
@@ -534,6 +564,7 @@ fn select_version_output(stdout: &[u8], stderr: &[u8]) -> Option<String> {
 
 async fn run_version_command(binary_path: &Path) -> Result<String> {
     let mut command = command_for_binary(binary_path);
+    configure_command_for_binary(&mut command, binary_path);
     let output = command
         .arg("--version")
         .stderr(Stdio::piped())
@@ -622,6 +653,7 @@ async fn run_rpc_once(
 ) -> Result<Value> {
     let request_id = Uuid::new_v4().to_string();
     let mut command = command_for_binary(binary_path);
+    configure_command_for_binary(&mut command, binary_path);
     command
         .arg("--mode")
         .arg("rpc")
@@ -689,6 +721,54 @@ async fn run_rpc_once(
             .error
             .or_else(|| (!stderr_output.is_empty()).then_some(stderr_output))
             .unwrap_or_else(|| "Pi RPC request failed.".to_string())
+    ))
+}
+
+async fn run_prompt_once_text(
+    binary_path: &Path,
+    cwd: Option<&Path>,
+    extra_args: &[&str],
+    prompt: &str,
+) -> Result<String> {
+    let mut command = command_for_binary(binary_path);
+    configure_command_for_binary(&mut command, binary_path);
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+
+    for arg in extra_args {
+        command.arg(arg);
+    }
+    if let Some(cwd) = cwd {
+        command.current_dir(cwd);
+    }
+
+    command.arg("--print").arg(prompt);
+
+    let output = timeout(RPC_PROBE_TIMEOUT, command.output())
+        .await
+        .context("timed out waiting for Pi print response")??;
+
+    if output.status.success() {
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if !stdout.is_empty() {
+            return Ok(stdout);
+        }
+    }
+
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    Err(anyhow!(
+        "{}",
+        if !stderr.is_empty() {
+            stderr
+        } else if !stdout.is_empty() {
+            stdout
+        } else {
+            "Pi print request failed.".to_string()
+        }
     ))
 }
 
@@ -1105,35 +1185,27 @@ fn assistant_message_text(message: &PiMessage) -> String {
     }
 }
 
-fn extract_text_from_prompt_response(value: &Value) -> Option<String> {
-    if let Some(text) = value.as_str() {
-        return Some(text.to_string());
+enum AssistantTerminalEvent {
+    Done(String),
+    Error(String),
+    Ignore,
+}
+
+fn classify_assistant_message(message: &PiMessage) -> AssistantTerminalEvent {
+    if message.stop_reason.as_deref() == Some("toolUse") {
+        return AssistantTerminalEvent::Ignore;
     }
 
-    if let Some(title) = value.get("title").and_then(Value::as_str) {
-        return Some(title.to_string());
+    if let Some(error_message) = message.error_message.clone() {
+        return AssistantTerminalEvent::Error(error_message);
     }
 
-    if let Some(text) = value.get("text").and_then(Value::as_str) {
-        return Some(text.to_string());
+    let content = assistant_message_text(message);
+    if content.trim().is_empty() {
+        return AssistantTerminalEvent::Ignore;
     }
 
-    if let Some(message) = value.get("message") {
-        let parsed = serde_json::from_value::<PiMessage>(message.clone()).ok()?;
-        return Some(assistant_message_text(&parsed));
-    }
-
-    if let Some(messages) = value.get("messages").and_then(Value::as_array) {
-        for message in messages.iter().rev() {
-            if let Ok(parsed) = serde_json::from_value::<PiMessage>(message.clone()) {
-                if parsed.role == "assistant" {
-                    return Some(assistant_message_text(&parsed));
-                }
-            }
-        }
-    }
-
-    None
+    AssistantTerminalEvent::Done(content)
 }
 
 fn assistant_message_metadata(
@@ -1159,38 +1231,43 @@ async fn emit_assistant_terminal_event(
     session_id: &str,
     session_file: &str,
     message: &PiMessage,
-) -> Result<()> {
+) -> Result<bool> {
     if message.stop_reason.as_deref() == Some("aborted") || session_handle.abort_requested() {
-        return Ok(());
+        return Ok(false);
     }
 
-    if let Some(error_message) = message.error_message.clone() {
-        emit_error(
-            app,
-            shared,
-            Some(workspace_id),
-            Some(session_id),
-            error_message.clone(),
-            Some(assistant_message_metadata(
-                message,
-                session_file,
-                true,
-                Some(error_message),
-            )),
-        )
-        .await?;
-        return Ok(());
+    match classify_assistant_message(message) {
+        AssistantTerminalEvent::Error(error_message) => {
+            emit_error(
+                app,
+                shared,
+                Some(workspace_id),
+                Some(session_id),
+                error_message.clone(),
+                Some(assistant_message_metadata(
+                    message,
+                    session_file,
+                    true,
+                    Some(error_message),
+                )),
+            )
+            .await?;
+            Ok(true)
+        }
+        AssistantTerminalEvent::Done(content) => {
+            emit_done(
+                app,
+                shared,
+                workspace_id,
+                session_id,
+                content,
+                assistant_message_metadata(message, session_file, true, None),
+            )
+            .await?;
+            Ok(true)
+        }
+        AssistantTerminalEvent::Ignore => Ok(false),
     }
-
-    emit_done(
-        app,
-        shared,
-        workspace_id,
-        session_id,
-        assistant_message_text(message),
-        assistant_message_metadata(message, session_file, true, None),
-    )
-    .await
 }
 
 fn summarize_tool_start(tool_name: &str, args: &Value) -> String {
@@ -1481,6 +1558,15 @@ fn maybe_enqueue_thread_title(
     });
 }
 
+pub fn enqueue_thread_title(
+    app: AppHandle,
+    shared: AppState,
+    workspace_id: String,
+    session_id: String,
+) {
+    maybe_enqueue_thread_title(app, shared, workspace_id, session_id);
+}
+
 async fn process_stdout_line(
     app: &AppHandle,
     shared: &AppState,
@@ -1540,9 +1626,8 @@ async fn process_stdout_line(
             message: Some(message),
             assistant_message_event: AssistantMessageEvent::TextEnd { .. },
         } => {
-            if message.role == "assistant" && message.stop_reason.as_deref() != Some("toolUse") {
-                *completed = true;
-                emit_assistant_terminal_event(
+            if message.role == "assistant"
+                && emit_assistant_terminal_event(
                     app,
                     shared,
                     session_handle,
@@ -1551,7 +1636,9 @@ async fn process_stdout_line(
                     session_file,
                     &message,
                 )
-                .await?;
+                .await?
+            {
+                *completed = true;
             }
         }
         RpcEvent::MessageUpdate {
@@ -1716,9 +1803,8 @@ async fn process_stdout_line(
             .await?;
         }
         RpcEvent::MessageEnd { message } => {
-            if message.role == "assistant" {
-                *completed = true;
-                emit_assistant_terminal_event(
+            if message.role == "assistant"
+                && emit_assistant_terminal_event(
                     app,
                     shared,
                     session_handle,
@@ -1727,18 +1813,21 @@ async fn process_stdout_line(
                     session_file,
                     &message,
                 )
-                .await?;
+                .await?
+            {
+                *completed = true;
             }
         }
         RpcEvent::AgentEnd { messages } => {
             if !*completed {
-                if let Some(message) = messages
-                    .iter()
-                    .rev()
-                    .find(|message| message.role == "assistant")
-                {
-                    *completed = true;
-                    emit_assistant_terminal_event(
+                if let Some(message) = messages.iter().rev().find(|message| {
+                    message.role == "assistant"
+                        && !matches!(
+                            classify_assistant_message(message),
+                            AssistantTerminalEvent::Ignore
+                        )
+                }) {
+                    if emit_assistant_terminal_event(
                         app,
                         shared,
                         session_handle,
@@ -1747,7 +1836,10 @@ async fn process_stdout_line(
                         session_file,
                         message,
                     )
-                    .await?;
+                    .await?
+                    {
+                        *completed = true;
+                    }
                 }
             }
         }
@@ -1847,7 +1939,7 @@ async fn handle_session_stdout(
             &shared,
             Some(&workspace_id),
             Some(&session_id),
-            "Pi ended before completing the prompt.".to_string(),
+            NO_VISIBLE_ASSISTANT_OUTPUT_ERROR.to_string(),
             Some(SessionRuntimeMetadata {
                 provider_id: None,
                 model_id: None,
@@ -1919,21 +2011,7 @@ async fn generate_thread_title(
             return Ok(());
         }
 
-        let user_message = session.timeline.iter().find_map(|item| match item {
-            TimelineItem::UserMessage { content, .. } if !content.trim().is_empty() => {
-                Some(content.clone())
-            }
-            _ => None,
-        });
-        let assistant_message = session.timeline.iter().find_map(|item| match item {
-            TimelineItem::AssistantMessage { content, .. } if !content.trim().is_empty() => {
-                Some(content.clone())
-            }
-            _ => None,
-        });
-
-        let (Some(user_message), Some(assistant_message)) = (user_message, assistant_message)
-        else {
+        let Some((user_message, assistant_message)) = session_title_seed(session) else {
             return Ok(());
         };
 
@@ -1974,20 +2052,15 @@ async fn generate_thread_title(
         title_thinking,
     ];
     let extra_arg_refs = extra_args.iter().map(String::as_str).collect::<Vec<_>>();
-    let response = run_rpc_once(
+    let response = run_prompt_once_text(
         &binary_path,
         Some(Path::new(&workspace_path)),
         &extra_arg_refs,
-        json!({
-            "type": "prompt",
-            "message": prompt_for_title(&user_message, &assistant_message)
-        }),
+        &prompt_for_title(&user_message, &assistant_message),
     )
     .await?;
 
-    let Some(title) = extract_text_from_prompt_response(&response)
-        .and_then(|value| sanitize_generated_title(&value))
-    else {
+    let Some(title) = sanitize_generated_title(&response) else {
         return Ok(());
     };
 
@@ -2034,6 +2107,13 @@ pub fn reconcile_persisted_state(state: &mut crate::models::PersistedAppState) {
             if matches!(session.status, SessionStatus::Streaming) {
                 session.status = SessionStatus::Idle;
             }
+
+            session.timeline.retain(|item| {
+                !matches!(
+                    item,
+                    TimelineItem::AssistantMessage { content, .. } if content.trim().is_empty()
+                )
+            });
 
             let Some(session_file) = session.runtime.pi_session_file.clone() else {
                 continue;
@@ -2111,6 +2191,45 @@ pub fn reconcile_persisted_state(state: &mut crate::models::PersistedAppState) {
             }
         }
     }
+}
+
+fn session_title_seed(session: &crate::models::ChatSession) -> Option<(String, String)> {
+    let user_message = session.timeline.iter().find_map(|item| match item {
+        TimelineItem::UserMessage { content, .. } if !content.trim().is_empty() => {
+            Some(content.clone())
+        }
+        _ => None,
+    });
+    let assistant_message = session.timeline.iter().find_map(|item| match item {
+        TimelineItem::AssistantMessage { content, .. } if !content.trim().is_empty() => {
+            Some(content.clone())
+        }
+        _ => None,
+    });
+
+    Some((user_message?, assistant_message?))
+}
+
+pub fn sessions_requiring_title_backfill(
+    state: &crate::models::PersistedAppState,
+) -> Vec<(String, String)> {
+    if !state.preferences.auto_title_enabled {
+        return Vec::new();
+    }
+
+    state
+        .workspaces
+        .iter()
+        .flat_map(|workspace| {
+            workspace.sessions.iter().filter_map(|session| {
+                if session.title == "New thread" && session_title_seed(session).is_some() {
+                    Some((workspace.id.clone(), session.id.clone()))
+                } else {
+                    None
+                }
+            })
+        })
+        .collect()
 }
 
 async fn fetch_workspace_catalog_and_normalize(
@@ -2312,6 +2431,7 @@ async fn run_prompt_stream(app: AppHandle, shared: AppState, payload: SendPrompt
         };
 
         let mut command = command_for_binary(&binary_path);
+        configure_command_for_binary(&mut command, &binary_path);
         command
             .arg("--mode")
             .arg("rpc")
@@ -2485,6 +2605,7 @@ pub async fn resolve_approval(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::default_state;
 
     #[test]
     fn candidate_selection_prefers_override_then_path_then_common_locations() {
@@ -2546,6 +2667,98 @@ mod tests {
         .expect("message_start should parse");
 
         assert!(matches!(message_start, RpcEvent::MessageStart { .. }));
+    }
+
+    #[test]
+    fn classify_assistant_message_ignores_tool_use_and_empty_content() {
+        let tool_use = PiMessage {
+            role: "assistant".to_string(),
+            content: PiMessageContent::Blocks(vec![]),
+            provider: Some("openai-codex".to_string()),
+            model: Some("gpt-5.4".to_string()),
+            stop_reason: Some("toolUse".to_string()),
+            error_message: None,
+        };
+        assert!(matches!(
+            classify_assistant_message(&tool_use),
+            AssistantTerminalEvent::Ignore
+        ));
+
+        let empty = PiMessage {
+            role: "assistant".to_string(),
+            content: PiMessageContent::Blocks(vec![PiContentBlock::Other]),
+            provider: Some("openai-codex".to_string()),
+            model: Some("gpt-5.4".to_string()),
+            stop_reason: None,
+            error_message: None,
+        };
+        assert!(matches!(
+            classify_assistant_message(&empty),
+            AssistantTerminalEvent::Ignore
+        ));
+    }
+
+    #[test]
+    fn classify_assistant_message_prefers_explicit_errors() {
+        let message = PiMessage {
+            role: "assistant".to_string(),
+            content: PiMessageContent::Blocks(vec![]),
+            provider: Some("openai-codex".to_string()),
+            model: Some("gpt-5.4".to_string()),
+            stop_reason: Some("error".to_string()),
+            error_message: Some("Connection error.".to_string()),
+        };
+
+        match classify_assistant_message(&message) {
+            AssistantTerminalEvent::Error(error) => {
+                assert_eq!(error, "Connection error.".to_string())
+            }
+            _ => panic!("expected error classification"),
+        }
+    }
+
+    #[test]
+    fn sessions_requiring_title_backfill_only_includes_real_replies() {
+        let mut state = default_state("/tmp/demo".to_string(), "Demo".to_string());
+        {
+            let workspace = state.workspaces.first_mut().expect("workspace");
+            let session = workspace.sessions.first_mut().expect("session");
+            session.timeline = vec![
+                TimelineItem::UserMessage {
+                    id: "user-1".to_string(),
+                    created_at: now_iso(),
+                    content: "hello".to_string(),
+                },
+                TimelineItem::AssistantMessage {
+                    id: "assistant-1".to_string(),
+                    created_at: now_iso(),
+                    content: "world".to_string(),
+                    streaming: false,
+                },
+            ];
+        }
+
+        let queued = sessions_requiring_title_backfill(&state);
+        assert_eq!(queued.len(), 1);
+
+        state.workspaces[0].sessions[0]
+            .timeline
+            .push(TimelineItem::AssistantMessage {
+                id: "assistant-2".to_string(),
+                created_at: now_iso(),
+                content: "".to_string(),
+                streaming: false,
+            });
+        reconcile_persisted_state(&mut state);
+        let session = &state.workspaces[0].sessions[0];
+        assert_eq!(
+            session
+                .timeline
+                .iter()
+                .filter(|item| matches!(item, TimelineItem::AssistantMessage { .. }))
+                .count(),
+            1
+        );
     }
 
     #[test]

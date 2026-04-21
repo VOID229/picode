@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import type { TimelineItem } from "../../domains/types";
 import { cn } from "../../lib/cn";
+import { copyTextToClipboard } from "../../lib/clipboard";
 import { useAppStore } from "../../state/useAppStore";
 import { MarkdownRenderer } from "./MarkdownRenderer";
 import { PlanCard } from "./PlanCard";
@@ -69,9 +70,7 @@ export function TimelineItemView({
               title="Copy"
               type="button"
               onClick={async () => {
-                const { writeText } =
-                  await import("@tauri-apps/plugin-clipboard-manager");
-                await writeText(item.content);
+                await copyTextToClipboard(item.content, "message");
               }}
             >
               <Copy size={13} />
@@ -133,24 +132,39 @@ export function TimelineItemView({
   if (item.kind === "assistant-message") {
     return (
       <article className="chat-row chat-row--assistant animate-slide-up">
-        <div className="chat-assistant-copy">
-          <div className="chat-speaker-label">{assistantLabel}</div>
-          <div className="chat-copy-text">
-            {parseAssistantContent(item.content).map((block, index) =>
-              block.type === "proposed-plan" ? (
-                <PlanCard
-                  key={`${item.id}-plan-${index}`}
-                  content={block.content}
-                  workspaceId={workspaceId}
-                />
-              ) : (
-                <MarkdownRenderer
-                  key={`${item.id}-md-${index}`}
-                  className="markdown-content"
-                  content={block.content}
-                />
-              ),
-            )}
+        <div className="chat-assistant-stack">
+          <div className="chat-message-actions chat-message-actions--assistant">
+            <button
+              className="chat-message-action"
+              title="Copy response"
+              type="button"
+              aria-label="Copy response"
+              onClick={async () => {
+                await copyTextToClipboard(item.content, "response");
+              }}
+            >
+              <Copy size={13} />
+            </button>
+          </div>
+          <div className="chat-assistant-copy">
+            <div className="chat-speaker-label">{assistantLabel}</div>
+            <div className="chat-copy-text">
+              {parseAssistantContent(item.content).map((block, index) =>
+                block.type === "proposed-plan" ? (
+                  <PlanCard
+                    key={`${item.id}-plan-${index}`}
+                    content={block.content}
+                    workspaceId={workspaceId}
+                  />
+                ) : (
+                  <MarkdownRenderer
+                    key={`${item.id}-md-${index}`}
+                    className="markdown-content"
+                    content={block.content}
+                  />
+                ),
+              )}
+            </div>
           </div>
         </div>
       </article>

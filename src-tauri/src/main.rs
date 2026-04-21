@@ -51,6 +51,7 @@ async fn bootstrap_state(
     shared: State<'_, AppState>,
 ) -> Result<BootstrapPayload, String> {
     let state = shared.state.lock().await.clone();
+    let title_backfills = pi::sessions_requiring_title_backfill(&state);
     let git = state
         .workspaces
         .iter()
@@ -58,6 +59,15 @@ async fn bootstrap_state(
         .collect::<HashMap<_, _>>();
 
     storage::save(&app, &state).map_err(|error| error.to_string())?;
+
+    for (workspace_id, session_id) in title_backfills {
+        pi::enqueue_thread_title(
+            app.clone(),
+            shared.inner().clone(),
+            workspace_id,
+            session_id,
+        );
+    }
 
     Ok(BootstrapPayload { state, git })
 }

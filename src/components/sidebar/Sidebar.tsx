@@ -14,7 +14,13 @@ import {
   Archive,
   SquarePen,
 } from "lucide-react";
-import { useMemo, useState, useTransition, useCallback, useEffect } from "react";
+import {
+  useMemo,
+  useState,
+  useTransition,
+  useCallback,
+  useEffect,
+} from "react";
 import { Link } from "react-router-dom";
 import type {
   PersistedAppState,
@@ -22,6 +28,7 @@ import type {
   ChatSession,
 } from "../../domains/types";
 import { cn } from "../../lib/cn";
+import { copyTextToClipboard } from "../../lib/clipboard";
 import { useAppStore } from "../../state/useAppStore";
 import { ContextMenu, type ContextMenuItem } from "../layout/ContextMenu";
 import { ProjectPicker } from "./ProjectPicker";
@@ -37,10 +44,18 @@ export function Sidebar({ state }: SidebarProps) {
   const [isPending, startTransition] = useTransition();
   const createWorkspace = useAppStore((store) => store.createWorkspace);
 
-  const [projectSortOrder, setProjectSortOrder] = useState<"last-message" | "created" | "manual">("last-message");
-  const [threadSortOrder, setThreadSortOrder] = useState<"last-message" | "created">("last-message");
-  const [projectGrouping, setProjectGrouping] = useState<"repo" | "path" | "none">("repo");
-  const [sortMenu, setSortMenu] = useState<{ x: number, y: number } | null>(null);
+  const [projectSortOrder, setProjectSortOrder] = useState<
+    "last-message" | "created" | "manual"
+  >("last-message");
+  const [threadSortOrder, setThreadSortOrder] = useState<
+    "last-message" | "created"
+  >("last-message");
+  const [projectGrouping, setProjectGrouping] = useState<
+    "repo" | "path" | "none"
+  >("repo");
+  const [sortMenu, setSortMenu] = useState<{ x: number; y: number } | null>(
+    null,
+  );
   const [isModifierHeld, setIsModifierHeld] = useState(false);
 
   useEffect(() => {
@@ -80,8 +95,14 @@ export function Sidebar({ state }: SidebarProps) {
         return a.recentRank - b.recentRank;
       }
       if (projectSortOrder === "last-message") {
-        const lastA = Math.max(...a.sessions.map(s => new Date(s.updatedAt).getTime()), 0);
-        const lastB = Math.max(...b.sessions.map(s => new Date(s.updatedAt).getTime()), 0);
+        const lastA = Math.max(
+          ...a.sessions.map((s) => new Date(s.updatedAt).getTime()),
+          0,
+        );
+        const lastB = Math.max(
+          ...b.sessions.map((s) => new Date(s.updatedAt).getTime()),
+          0,
+        );
         return lastB - lastA;
       }
       return 0; // Manual
@@ -95,57 +116,118 @@ export function Sidebar({ state }: SidebarProps) {
     setSortMenu({ x: e.clientX, y: e.clientY });
   };
 
-  const sortMenuItems = useMemo<ContextMenuItem[]>(() => [
-    { label: "Sort projects", isHeader: true },
-    { label: "Last user message", isChecked: projectSortOrder === "last-message", onClick: () => setProjectSortOrder("last-message") },
-    { label: "Created at", isChecked: projectSortOrder === "created", onClick: () => setProjectSortOrder("created") },
-    { label: "Manual", isChecked: projectSortOrder === "manual", onClick: () => setProjectSortOrder("manual") },
-    { label: "Sort threads", isHeader: true, separator: true },
-    { label: "Last user message", isChecked: threadSortOrder === "last-message", onClick: () => setThreadSortOrder("last-message") },
-    { label: "Created at", isChecked: threadSortOrder === "created", onClick: () => setThreadSortOrder("created") },
-    { label: "Group projects", isHeader: true, separator: true },
-    { label: "Group by repository", isChecked: projectGrouping === "repo", onClick: () => setProjectGrouping("repo") },
-    { label: "Group by repository path", isChecked: projectGrouping === "path", onClick: () => setProjectGrouping("path") },
-    { label: "Keep separate", isChecked: projectGrouping === "none", onClick: () => setProjectGrouping("none") },
-  ], [projectSortOrder, threadSortOrder, projectGrouping]);
+  const sortMenuItems = useMemo<ContextMenuItem[]>(
+    () => [
+      { label: "Sort projects", isHeader: true },
+      {
+        label: "Last user message",
+        isChecked: projectSortOrder === "last-message",
+        onClick: () => setProjectSortOrder("last-message"),
+      },
+      {
+        label: "Created at",
+        isChecked: projectSortOrder === "created",
+        onClick: () => setProjectSortOrder("created"),
+      },
+      {
+        label: "Manual",
+        isChecked: projectSortOrder === "manual",
+        onClick: () => setProjectSortOrder("manual"),
+      },
+      { label: "Sort threads", isHeader: true, separator: true },
+      {
+        label: "Last user message",
+        isChecked: threadSortOrder === "last-message",
+        onClick: () => setThreadSortOrder("last-message"),
+      },
+      {
+        label: "Created at",
+        isChecked: threadSortOrder === "created",
+        onClick: () => setThreadSortOrder("created"),
+      },
+      { label: "Group projects", isHeader: true, separator: true },
+      {
+        label: "Group by repository",
+        isChecked: projectGrouping === "repo",
+        onClick: () => setProjectGrouping("repo"),
+      },
+      {
+        label: "Group by repository path",
+        isChecked: projectGrouping === "path",
+        onClick: () => setProjectGrouping("path"),
+      },
+      {
+        label: "Keep separate",
+        isChecked: projectGrouping === "none",
+        onClick: () => setProjectGrouping("none"),
+      },
+    ],
+    [projectSortOrder, threadSortOrder, projectGrouping],
+  );
 
   return (
     <aside
       className="sidebar"
-      style={{ backgroundColor: "#111", color: "#ccc", fontSize: "0.85rem" }}
+      style={{
+        backgroundColor: "#111",
+        color: "#ccc",
+        fontSize: "0.85rem",
+        minHeight: 0,
+        overflow: "hidden",
+      }}
     >
       <div
         className="sidebar__header"
-        style={{
-          height: "54px",
-          width: "100%",
-          WebkitAppRegion: "drag",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "flex-start",
-          paddingLeft: "88px",
-        } as React.CSSProperties}
+        style={
+          {
+            height: "54px",
+            width: "100%",
+            WebkitAppRegion: "drag",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "flex-start",
+            paddingLeft: "88px",
+          } as React.CSSProperties
+        }
       >
-        <div style={{ display: "flex", alignItems: "center", gap: "6px", marginTop: "-16px" }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "6px",
+            marginTop: "-16px",
+          }}
+        >
           <span style={{ fontWeight: 600, color: "#fff", fontSize: "1.05rem" }}>
             picode
           </span>
-          <span style={{ 
-            fontSize: "0.6rem", 
-            fontWeight: 700, 
-            letterSpacing: "0.05em",
-            color: "#888", 
-            background: "rgba(255,255,255,0.08)", 
-            padding: "2px 6px", 
-            borderRadius: "10px",
-            marginTop: "1px"
-          }}>
+          <span
+            style={{
+              fontSize: "0.6rem",
+              fontWeight: 700,
+              letterSpacing: "0.05em",
+              color: "#888",
+              background: "rgba(255,255,255,0.08)",
+              padding: "2px 6px",
+              borderRadius: "10px",
+              marginTop: "1px",
+            }}
+          >
             ALPHA
           </span>
         </div>
       </div>
 
-      <div style={{ padding: "0 16px", marginBottom: "24px", display: "flex", flexDirection: "column", gap: "12px" }}>
+      <div
+        style={{
+          padding: "0 16px",
+          marginBottom: "24px",
+          display: "flex",
+          flexDirection: "column",
+          gap: "12px",
+          flexShrink: 0,
+        }}
+      >
         <label
           style={{
             display: "flex",
@@ -193,6 +275,8 @@ export function Sidebar({ state }: SidebarProps) {
           display: "flex",
           flexDirection: "column",
           gap: "8px",
+          minHeight: 0,
+          overflow: "hidden",
         }}
       >
         <div
@@ -215,9 +299,9 @@ export function Sidebar({ state }: SidebarProps) {
             PROJECTS
           </span>
           <div style={{ display: "flex", gap: "12px", color: "#666" }}>
-            <ArrowDownUp 
-              size={12} 
-              className="pointer action-icon" 
+            <ArrowDownUp
+              size={12}
+              className="pointer action-icon"
               onClick={handleSortClick}
             />
             <Plus
@@ -228,7 +312,16 @@ export function Sidebar({ state }: SidebarProps) {
           </div>
         </div>
 
-        <div style={{ display: "flex", flexDirection: "column" }}>
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            flex: 1,
+            minHeight: 0,
+            overflowY: "auto",
+            paddingBottom: "8px",
+          }}
+        >
           {filteredWorkspaces.map((workspace) => (
             <ProjectNode
               key={workspace.id}
@@ -250,7 +343,7 @@ export function Sidebar({ state }: SidebarProps) {
         />
       )}
 
-      <div style={{ marginTop: "auto", padding: "16px" }}>
+      <div style={{ marginTop: "auto", padding: "16px", flexShrink: 0 }}>
         <Link
           to="/settings"
           style={{
@@ -262,7 +355,7 @@ export function Sidebar({ state }: SidebarProps) {
             fontSize: "0.85rem",
             padding: "6px 8px",
             borderRadius: "6px",
-            transition: "background 0.2s, color 0.2s"
+            transition: "background 0.2s, color 0.2s",
           }}
           onMouseEnter={(e) => {
             e.currentTarget.style.background = "#222";
@@ -309,7 +402,7 @@ function ProjectNode({
     x: number;
     y: number;
   } | null>(null);
-  
+
   const [renamePromptOpen, setRenamePromptOpen] = useState(false);
 
   const selectWorkspaceSession = useAppStore(
@@ -324,24 +417,32 @@ function ProjectNode({
 
   const activeSessionId = state.activeSessionId;
 
-  const [selectedSessionIds, setSelectedSessionIds] = useState<Set<string>>(new Set());
-  const [lastSelectedSessionId, setLastSelectedSessionId] = useState<string | null>(null);
+  const [selectedSessionIds, setSelectedSessionIds] = useState<Set<string>>(
+    new Set(),
+  );
+  const [lastSelectedSessionId, setLastSelectedSessionId] = useState<
+    string | null
+  >(null);
 
   const visibleSessions = useMemo(() => {
     return workspace.sessions
       .filter((s) => !s.archivedAt)
       .sort((a, b) => {
         if (threadSortOrder === "created") {
-          return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+          return (
+            new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+          );
         }
-        return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+        return (
+          new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+        );
       });
   }, [workspace.sessions, threadSortOrder]);
 
   // Global shortcut handler for 1-9 to switch threads
   useEffect(() => {
     if (workspace.id !== state.activeWorkspaceId) return;
-    
+
     const handleShortcut = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && /^[1-9]$/.test(e.key)) {
         const index = parseInt(e.key, 10) - 1;
@@ -354,7 +455,12 @@ function ProjectNode({
 
     window.addEventListener("keydown", handleShortcut);
     return () => window.removeEventListener("keydown", handleShortcut);
-  }, [workspace.id, state.activeWorkspaceId, selectWorkspaceSession, visibleSessions]);
+  }, [
+    workspace.id,
+    state.activeWorkspaceId,
+    selectWorkspaceSession,
+    visibleSessions,
+  ]);
 
   const handleProjectContextMenu = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -379,8 +485,7 @@ function ProjectNode({
         icon: <Copy size={14} />,
         separator: true,
         onClick: async () => {
-          const { writeText } = await import('@tauri-apps/plugin-clipboard-manager');
-          await writeText(workspace.path);
+          await copyTextToClipboard(workspace.path, "project path");
         },
       },
       {
@@ -388,11 +493,14 @@ function ProjectNode({
         icon: <Trash2 size={14} />,
         variant: "danger",
         onClick: async () => {
-          const { ask } = await import('@tauri-apps/plugin-dialog');
-          const confirmed = await ask(`Are you sure you want to remove ${workspace.name}?`, {
-            title: 'Remove Project',
-            kind: 'warning',
-          });
+          const { ask } = await import("@tauri-apps/plugin-dialog");
+          const confirmed = await ask(
+            `Are you sure you want to remove ${workspace.name}?`,
+            {
+              title: "Remove Project",
+              kind: "warning",
+            },
+          );
           if (confirmed) {
             void removeWorkspace(workspace.id);
           }
@@ -481,7 +589,11 @@ function ProjectNode({
                   isSelected={isSelected}
                   selectedCount={selectedSessionIds.size}
                   isModifierHeld={isModifierHeld}
-                  shortcutKey={workspace.id === state.activeWorkspaceId && index < 9 ? String(index + 1) : undefined}
+                  shortcutKey={
+                    workspace.id === state.activeWorkspaceId && index < 9
+                      ? String(index + 1)
+                      : undefined
+                  }
                   onSelect={(e) => {
                     if (e.metaKey || e.ctrlKey) {
                       e.preventDefault();
@@ -497,8 +609,12 @@ function ProjectNode({
                     } else if (e.shiftKey && lastSelectedSessionId) {
                       e.preventDefault();
                       e.stopPropagation();
-                      const currentIndex = visibleSessions.findIndex(s => s.id === session.id);
-                      const lastIndex = visibleSessions.findIndex(s => s.id === lastSelectedSessionId);
+                      const currentIndex = visibleSessions.findIndex(
+                        (s) => s.id === session.id,
+                      );
+                      const lastIndex = visibleSessions.findIndex(
+                        (s) => s.id === lastSelectedSessionId,
+                      );
                       if (currentIndex !== -1 && lastIndex !== -1) {
                         const start = Math.min(currentIndex, lastIndex);
                         const end = Math.max(currentIndex, lastIndex);
@@ -530,7 +646,7 @@ function ProjectNode({
                     setSelectedSessionIds(new Set());
                   }}
                 />
-              )
+              );
             })
           )}
         </div>
@@ -544,7 +660,7 @@ function ProjectNode({
           onClose={() => setContextMenu(null)}
         />
       )}
-      
+
       {renamePromptOpen && (
         <PromptModal
           title="Rename project"
@@ -640,11 +756,14 @@ function SessionItem({
           variant: "danger",
           separator: true,
           onClick: async () => {
-            const { ask } = await import('@tauri-apps/plugin-dialog');
-            const confirmed = await ask(`Are you sure you want to delete ${selectedCount} threads?`, {
-              title: 'Delete Threads',
-              kind: 'warning',
-            });
+            const { ask } = await import("@tauri-apps/plugin-dialog");
+            const confirmed = await ask(
+              `Are you sure you want to delete ${selectedCount} threads?`,
+              {
+                title: "Delete Threads",
+                kind: "warning",
+              },
+            );
             if (confirmed) {
               onDeleteMultiple();
             }
@@ -673,8 +792,10 @@ function SessionItem({
         label: "Copy Path",
         icon: <Copy size={14} />,
         onClick: async () => {
-          const { writeText } = await import('@tauri-apps/plugin-clipboard-manager');
-          await writeText(`${workspace.path}/${session.title}`);
+          await copyTextToClipboard(
+            `${workspace.path}/${session.title}`,
+            "thread path",
+          );
         },
       },
       {
@@ -682,8 +803,7 @@ function SessionItem({
         icon: <Hash size={14} />,
         separator: true,
         onClick: async () => {
-          const { writeText } = await import('@tauri-apps/plugin-clipboard-manager');
-          await writeText(session.id);
+          await copyTextToClipboard(session.id, "thread ID");
         },
       },
       {
@@ -691,18 +811,30 @@ function SessionItem({
         icon: <Trash2 size={14} />,
         variant: "danger",
         onClick: async () => {
-          const { ask } = await import('@tauri-apps/plugin-dialog');
-          const confirmed = await ask("Are you sure you want to delete this thread?", {
-            title: 'Delete Thread',
-            kind: 'warning',
-          });
+          const { ask } = await import("@tauri-apps/plugin-dialog");
+          const confirmed = await ask(
+            "Are you sure you want to delete this thread?",
+            {
+              title: "Delete Thread",
+              kind: "warning",
+            },
+          );
           if (confirmed) {
             onDelete();
           }
         },
       },
     ];
-  }, [session, workspace, isSelected, selectedCount, onRename, onArchive, onDelete, onDeleteMultiple]);
+  }, [
+    session,
+    workspace,
+    isSelected,
+    selectedCount,
+    onRename,
+    onArchive,
+    onDelete,
+    onDeleteMultiple,
+  ]);
 
   const isMultiSelected = isSelected && selectedCount > 1;
 
@@ -716,8 +848,12 @@ function SessionItem({
           userSelect: "none",
           padding: "6px 8px",
           borderRadius: "6px",
-          color: isMultiSelected ? "#fff" : (isActive ? "#fff" : "#888"),
-          background: isMultiSelected ? "#274377" : (isActive ? "rgba(255,255,255,0.05)" : "transparent"),
+          color: isMultiSelected ? "#fff" : isActive ? "#fff" : "#888",
+          background: isMultiSelected
+            ? "#274377"
+            : isActive
+              ? "rgba(255,255,255,0.05)"
+              : "transparent",
           display: "flex",
           justifyContent: "space-between",
           alignItems: "center",
@@ -747,10 +883,25 @@ function SessionItem({
         <span className="truncate" style={{ flex: 1, marginRight: "8px" }}>
           {session.title}
         </span>
-        <div className="session-actions" style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-          <span style={{ fontSize: "0.65rem", color: "#555" }} className="session-status">
+        <div
+          className="session-actions"
+          style={{ display: "flex", alignItems: "center", gap: "6px" }}
+        >
+          <span
+            style={{ fontSize: "0.65rem", color: "#555" }}
+            className="session-status"
+          >
             {isModifierHeld && shortcutKey ? (
-              <span style={{ background: "rgba(255,255,255,0.1)", color: "#fff", padding: "1px 4px", borderRadius: "4px", fontFamily: "monospace", fontSize: "0.6rem" }}>
+              <span
+                style={{
+                  background: "rgba(255,255,255,0.1)",
+                  color: "#fff",
+                  padding: "1px 4px",
+                  borderRadius: "4px",
+                  fontFamily: "monospace",
+                  fontSize: "0.6rem",
+                }}
+              >
                 ⌘{shortcutKey}
               </span>
             ) : session.status === "streaming" ? (
@@ -759,13 +910,13 @@ function SessionItem({
               formatTimeAgo(session.updatedAt)
             )}
           </span>
-          <Archive 
-            size={14} 
+          <Archive
+            size={14}
             className="archive-btn action-icon"
-            style={{ 
-              color: "#666", 
+            style={{
+              color: "#666",
               display: "none",
-            }} 
+            }}
             onClick={(e) => {
               e.stopPropagation();
               onArchive();

@@ -41,6 +41,7 @@ import {
   resizeTerminal as resizeTerminalCommand,
   runTerminalCommand as runTerminalCommandCommand,
 } from "../lib/tauri";
+import { getUndoComposerDraft } from "./sessionUndo";
 
 let initializePromise: Promise<void> | null = null;
 let hasInitialized = false;
@@ -509,12 +510,21 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
     set({ state });
   },
   async undoUserTurn(workspaceId, sessionId, userMessageId) {
+    const composerDraft = getUndoComposerDraft(
+      get().state,
+      workspaceId,
+      sessionId,
+      userMessageId,
+    );
     const state = await undoUserTurnCommand({
       workspaceId,
       sessionId,
       userMessageId,
     });
     set({ state });
+    if (composerDraft) {
+      get().setComposerDraft(sessionId, composerDraft);
+    }
     await get().refreshGit(workspaceId);
   },
   async sendPrompt(workspaceId, sessionId, prompt, mode) {
