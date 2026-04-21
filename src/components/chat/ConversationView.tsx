@@ -8,17 +8,28 @@ import {
   Wrench,
   Zap,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
-import type { ChatSession, WorkspaceRecord } from "../../domains/types";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type {
+  ChatSession,
+  TimelineItem,
+  ToolActivityItem,
+  WorkspaceRecord,
+} from "../../domains/types";
 import { useAppStore } from "../../state/useAppStore";
+import { FilesChangedBlock } from "./FilesChangedBlock";
 import { TimelineItemView } from "./TimelineItemView";
+import { ToolActivityGroup } from "./ToolActivityGroup";
+import { WorkedForBlock } from "./WorkedForBlock";
 import {
   deriveLivePhase,
+  extractFileChanges,
   resolveAssistantLabel,
   resolveComposerCapabilities,
   resolveSessionSelection,
+  segmentTurnItems,
   shortenAssistantLabel,
   type LivePhase,
+  type TurnSegment,
 } from "./chatRuntime";
 
 interface ConversationViewProps {
@@ -58,6 +69,7 @@ export function ConversationView({
   const sendPrompt = useAppStore((state) => state.sendPrompt);
   const abortPrompt = useAppStore((state) => state.abortPrompt);
   const resolveApproval = useAppStore((state) => state.resolveApproval);
+  const undoUserTurn = useAppStore((state) => state.undoUserTurn);
   const updateWorkspaceSettings = useAppStore(
     (store) => store.updateWorkspaceSettings,
   );
@@ -129,6 +141,40 @@ export function ConversationView({
   }, [session?.id]);
 
   const livePhase = useMemo(() => deriveLivePhase(session), [session]);
+
+  // Split timeline into "turns" — segments between user messages —
+  // so we can group tool activities and wrap completed turns.
+  const turns = useMemo(() => {
+    if (!session) return [];
+    return computeTurns(session.timeline, session.status);
+  }, [session]);
+
+  const handleUndo = useCallback(
+    async (userMessageId: string) => {
+      if (!workspace || !session) return;
+      const git = useAppStore.getState().git[workspace.id];
+      if (!git?.isRepo) {
+        window.alert(
+          "Undo is only available for git workspaces with a saved checkpoint for this turn.",
+        );
+        return;
+      }
+      const confirmed = window.confirm(
+        "Undo this message and everything after it? This restores the working tree and index to the saved checkpoint only if HEAD has not changed.",
+      );
+      if (!confirmed) return;
+      try {
+        await undoUserTurn(workspace.id, session.id, userMessageId);
+      } catch (error) {
+        window.alert(
+          error instanceof Error
+            ? error.message
+            : "Undo is unavailable for this message.",
+        );
+      }
+    },
+    [workspace, session, undoUserTurn],
+  );
 
   useEffect(() => {
     if (!workspace || !session) {
@@ -271,16 +317,19 @@ export function ConversationView({
         >
           <div
             className="message-outer"
-            style={{ display: "flex", flexDirection: "column", gap: "32px" }}
+            style={{ display: "flex", flexDirection: "column", gap: "14px" }}
           >
-            {session.timeline.map((item) => (
-              <TimelineItemView
-                key={item.id}
-                item={item}
+            {turns.map((turn, turnIndex) => (
+              <TurnRenderer
+                key={turn.userMessageId ?? `turn-${turnIndex}`}
+                turn={turn}
                 workspaceId={workspace.id}
                 sessionId={session.id}
                 assistantLabel={assistantChromeLabel}
                 onResolveApproval={resolveApproval}
+                onUndo={handleUndo}
+                isLastTurn={turnIndex === turns.length - 1}
+                sessionStatus={session.status}
               />
             ))}
             {livePhase && (
@@ -818,5 +867,242 @@ function ChevronIcon() {
     >
       <path d="m6 9 6 6 6-6" />
     </svg>
+  );
+}
+
+// ── Turn-based rendering infrastructure ────────────────────────────
+
+interface Turn {
+  userMessageId?: string;
+  segments: TurnSegment[];
+  isCompleted: boolean;
+  startTime?: string;
+  endTime?: string;
+}
+
+function computeTurns(
+  timeline: TimelineItem[],
+  sessionStatus: ChatSession["status"],
+): Turn[] {
+  const turns: Turn[] = [];
+  let currentItems: TimelineItem[] = [];
+  let userMessageId: string | undefined;
+  let startTime: string | undefined;
+
+  const flushTurn = (completed: boolean) => {
+    if (currentItems.length === 0) return;
+    const segments = segmentTurnItems(currentItems);
+
+    // Find the last assistant-message createdAt as endTime
+    const lastAssistant = [...currentItems]
+      .reverse()
+      .find((item) => item.kind === "assistant-message");
+    const endTime = lastAssistant?.createdAt ?? currentItems[currentItems.length - 1].createdAt;
+
+    turns.push({
+      userMessageId,
+      segments,
+      isCompleted: completed,
+      startTime,
+      endTime,
+    });
+    currentItems = [];
+    userMessageId = undefined;
+    startTime = undefined;
+  };
+
+  for (const item of timeline) {
+    if (item.kind === "user-message") {
+      // Start a new turn when we see a user message.
+      // If there were items before this user message (assistant preamble), flush them.
+      if (currentItems.length > 0) {
+        flushTurn(true);
+      }
+      userMessageId = item.id;
+      startTime = item.createdAt;
+      currentItems.push(item);
+    } else {
+      currentItems.push(item);
+    }
+  }
+
+  // Flush remaining items
+  if (currentItems.length > 0) {
+    const isStreaming = sessionStatus === "streaming" || sessionStatus === "awaiting-approval";
+    flushTurn(!isStreaming);
+  }
+
+  return turns;
+}
+
+function TurnRenderer({
+  turn,
+  workspaceId,
+  sessionId,
+  assistantLabel,
+  onResolveApproval,
+  onUndo,
+  isLastTurn,
+  sessionStatus,
+}: {
+  turn: Turn;
+  workspaceId: string;
+  sessionId: string;
+  assistantLabel: string;
+  onResolveApproval: (
+    workspaceId: string,
+    sessionId: string,
+    approvalId: string,
+    decision: "approved" | "rejected",
+  ) => Promise<void>;
+  onUndo: (userMessageId: string) => void;
+  isLastTurn: boolean;
+  sessionStatus: ChatSession["status"];
+}) {
+  const isStreaming = sessionStatus === "streaming";
+
+  // Separate tool-group segments from text/other segments
+  const toolGroupSegments = turn.segments.filter((s) => s.type === "tool-group");
+  const hasToolActivity = toolGroupSegments.length > 0;
+
+  // For completed turns with tool activity, extract file changes
+  const allToolItems = toolGroupSegments.flatMap((s) =>
+    s.items.filter(
+      (item): item is ToolActivityItem => item.kind === "tool-activity",
+    ),
+  );
+  const fileChanges =
+    turn.isCompleted && allToolItems.length > 0
+      ? extractFileChanges(allToolItems)
+      : [];
+
+  // Build the inner content (tool groups + interleaved text)
+  const innerContent = turn.segments.map((segment, segIndex) => {
+    if (segment.type === "tool-group") {
+      return (
+        <ToolActivityGroup
+          key={`seg-${segIndex}`}
+          items={segment.items}
+          isStreaming={isLastTurn && isStreaming}
+        />
+      );
+    }
+
+    // Text (assistant-message) or other items
+    return segment.items.map((item) => (
+      <TimelineItemView
+        key={item.id}
+        item={item}
+        workspaceId={workspaceId}
+        sessionId={sessionId}
+        assistantLabel={assistantLabel}
+        onResolveApproval={onResolveApproval}
+      />
+    ));
+  });
+
+  // For completed turns with tool activity, wrap tool segments in WorkedForBlock
+  if (turn.isCompleted && hasToolActivity && turn.startTime && turn.endTime) {
+    // Split into: user message, worked-for-block wrapping tools, then final assistant text + files changed
+    const userSegments: React.ReactNode[] = [];
+    const toolContent: React.ReactNode[] = [];
+    const finalTextSegments: React.ReactNode[] = [];
+
+    let passedTools = false;
+    for (let i = 0; i < turn.segments.length; i++) {
+      const segment = turn.segments[i];
+      if (segment.type === "tool-group") {
+        passedTools = true;
+        toolContent.push(
+          <ToolActivityGroup
+            key={`seg-${i}`}
+            items={segment.items}
+            isStreaming={false}
+          />,
+        );
+      } else if (!passedTools && segment.items[0]?.kind === "user-message") {
+        userSegments.push(
+          ...segment.items.map((item) => (
+            <TimelineItemView
+              key={item.id}
+              item={item}
+              workspaceId={workspaceId}
+              sessionId={sessionId}
+              assistantLabel={assistantLabel}
+              onResolveApproval={onResolveApproval}
+            />
+          )),
+        );
+      } else if (passedTools) {
+        // Text after tool activity (or other segments after tools)
+        finalTextSegments.push(
+          ...segment.items.map((item) => (
+            <TimelineItemView
+              key={item.id}
+              item={item}
+              workspaceId={workspaceId}
+              sessionId={sessionId}
+              assistantLabel={assistantLabel}
+              onResolveApproval={onResolveApproval}
+            />
+          )),
+        );
+      } else {
+        // Pre-tool text (inline between user message and tools)
+        userSegments.push(
+          ...segment.items.map((item) => (
+            <TimelineItemView
+              key={item.id}
+              item={item}
+              workspaceId={workspaceId}
+              sessionId={sessionId}
+              assistantLabel={assistantLabel}
+              onResolveApproval={onResolveApproval}
+            />
+          )),
+        );
+      }
+    }
+
+    return (
+      <div className="turn-block" style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+        {userSegments}
+        {toolContent.length > 0 && (
+          <WorkedForBlock startTime={turn.startTime} endTime={turn.endTime}>
+            <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+              {toolContent}
+            </div>
+          </WorkedForBlock>
+        )}
+        {finalTextSegments}
+        {fileChanges.length > 0 && (
+          <FilesChangedBlock
+            toolFileChanges={fileChanges}
+            onUndo={
+              turn.userMessageId
+                ? () => onUndo(turn.userMessageId!)
+                : undefined
+            }
+          />
+        )}
+      </div>
+    );
+  }
+
+  // For streaming/incomplete turns, render inline
+  return (
+    <div className="turn-block" style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+      {innerContent}
+      {fileChanges.length > 0 && (
+        <FilesChangedBlock
+          toolFileChanges={fileChanges}
+          onUndo={
+            turn.userMessageId
+              ? () => onUndo(turn.userMessageId!)
+              : undefined
+          }
+        />
+      )}
+    </div>
   );
 }

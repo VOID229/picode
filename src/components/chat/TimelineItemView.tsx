@@ -7,13 +7,13 @@ import {
   RotateCcw,
   Search,
   TerminalSquare,
-  Wrench,
   XCircle,
 } from "lucide-react";
 import type { TimelineItem } from "../../domains/types";
 import { cn } from "../../lib/cn";
 import { copyTextToClipboard } from "../../lib/clipboard";
 import { useAppStore } from "../../state/useAppStore";
+import { ActivityBlock } from "./ActivityBlock";
 import { MarkdownRenderer } from "./MarkdownRenderer";
 import { PlanCard } from "./PlanCard";
 import { isTransientTimelineItem, parseAssistantContent } from "./chatRuntime";
@@ -133,61 +133,68 @@ export function TimelineItemView({
     return (
       <article className="chat-row chat-row--assistant animate-slide-up">
         <div className="chat-assistant-stack">
-          <div className="chat-message-actions chat-message-actions--assistant">
-            <button
-              className="chat-message-action"
-              title="Copy response"
-              type="button"
-              aria-label="Copy response"
-              onClick={async () => {
-                await copyTextToClipboard(item.content, "response");
-              }}
-            >
-              <Copy size={13} />
-            </button>
-          </div>
           <div className="chat-assistant-copy">
             <div className="chat-speaker-label">{assistantLabel}</div>
             <div className="chat-copy-text">
-              {parseAssistantContent(item.content).map((block, index) =>
-                block.type === "proposed-plan" ? (
-                  <PlanCard
-                    key={`${item.id}-plan-${index}`}
-                    content={block.content}
-                    workspaceId={workspaceId}
-                  />
-                ) : (
+              {parseAssistantContent(item.content).map((block, index) => {
+                if (block.type === "proposed-plan") {
+                  return (
+                    <PlanCard
+                      key={`${item.id}-plan-${index}`}
+                      content={block.content}
+                      workspaceId={workspaceId}
+                      isActive={item.streaming && !block.isClosed}
+                    />
+                  );
+                }
+                if (block.type === "thinking") {
+                  return (
+                    <ActivityBlock
+                      key={`${item.id}-thinking-${index}`}
+                      title="Thinking"
+                      icon={<LoaderCircle size={14} className={item.streaming && !block.isClosed ? "chat-inline-status__spin" : ""} />}
+                      isActive={item.streaming && !block.isClosed}
+                    >
+                      <MarkdownRenderer
+                        className="markdown-content text-muted"
+                        content={block.content}
+                      />
+                    </ActivityBlock>
+                  );
+                }
+                return (
                   <MarkdownRenderer
                     key={`${item.id}-md-${index}`}
                     className="markdown-content"
                     content={block.content}
                   />
-                ),
-              )}
+                );
+              })}
             </div>
           </div>
+          {!item.streaming && (
+            <div className="chat-message-actions chat-message-actions--assistant">
+              <button
+                className="chat-message-action"
+                title="Copy response"
+                type="button"
+                aria-label="Copy response"
+                onClick={async () => {
+                  await copyTextToClipboard(item.content, "response");
+                }}
+              >
+                <Copy size={13} />
+              </button>
+            </div>
+          )}
         </div>
       </article>
     );
   }
 
+  // Tool activities are rendered by ToolActivityGroup in ConversationView
   if (item.kind === "tool-activity") {
-    const isSearchTool =
-      item.activity.toolName.toLowerCase().includes("search") ||
-      item.activity.toolName.toLowerCase().includes("find");
-    return (
-      <article className="chat-row chat-row--assistant animate-slide-up">
-        <div className="chat-inline-status">
-          {isSearchTool ? <Search size={14} /> : <Wrench size={14} />}
-          <span>
-            {isSearchTool ? "Searched" : "Tool"}: {item.activity.toolName}
-          </span>
-          <span className="chat-inline-status__meta">
-            {item.activity.summary}
-          </span>
-        </div>
-      </article>
-    );
+    return null;
   }
 
   if (item.kind === "approval-request") {

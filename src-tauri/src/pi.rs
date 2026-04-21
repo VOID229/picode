@@ -2522,10 +2522,12 @@ async fn run_prompt_stream(app: AppHandle, shared: AppState, payload: SendPrompt
     }
 }
 
-pub async fn abort_prompt(
-    app: AppHandle,
-    shared: AppState,
-    payload: AbortPromptPayload,
+async fn stop_prompt_internal(
+    app: &AppHandle,
+    shared: &AppState,
+    payload: &AbortPromptPayload,
+    emit_aborted_status: bool,
+    ignore_abort_error: bool,
 ) -> Result<crate::models::PersistedAppState> {
     let key = session_key(&payload.workspace_id, &payload.session_id);
     let Some(handle) = shared.runtime.get_session(&key).await else {
@@ -2546,22 +2548,43 @@ pub async fn abort_prompt(
             session.updated_at = now_iso();
             session.runtime.last_known_ready = true;
             session.runtime.last_error = None;
-            storage::save(&app, &state)?;
+            storage::save(app, &state)?;
         }
     }
 
-    emit_status(
-        &app,
-        &shared,
-        &payload.workspace_id,
-        &payload.session_id,
-        "Aborted".to_string(),
-        None,
-    )
-    .await?;
+    if emit_aborted_status {
+        emit_status(
+            app,
+            shared,
+            &payload.workspace_id,
+            &payload.session_id,
+            "Aborted".to_string(),
+            None,
+        )
+        .await?;
+    }
 
-    abort_result?;
+    if !ignore_abort_error {
+        abort_result?;
+    }
+
     Ok(shared.state.lock().await.clone())
+}
+
+pub async fn stop_prompt_silently(
+    app: AppHandle,
+    shared: AppState,
+    payload: AbortPromptPayload,
+) -> Result<crate::models::PersistedAppState> {
+    stop_prompt_internal(&app, &shared, &payload, false, true).await
+}
+
+pub async fn abort_prompt(
+    app: AppHandle,
+    shared: AppState,
+    payload: AbortPromptPayload,
+) -> Result<crate::models::PersistedAppState> {
+    stop_prompt_internal(&app, &shared, &payload, true, false).await
 }
 
 pub async fn resolve_approval(

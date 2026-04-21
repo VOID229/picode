@@ -5,13 +5,15 @@ import { writeTextFile } from "../../lib/tauri";
 import { useAppStore } from "../../state/useAppStore";
 import { ContextMenu, type ContextMenuItem } from "../layout/ContextMenu";
 import { MarkdownRenderer } from "./MarkdownRenderer";
+import { ActivityBlock } from "./ActivityBlock";
 
 interface PlanCardProps {
   content: string;
   workspaceId: string;
+  isActive?: boolean;
 }
 
-export function PlanCard({ content, workspaceId }: PlanCardProps) {
+export function PlanCard({ content, workspaceId, isActive }: PlanCardProps) {
   const createSession = useAppStore((store) => store.createSession);
   const setComposerDraft = useAppStore((store) => store.setComposerDraft);
   const [menuPosition, setMenuPosition] = useState<{
@@ -64,35 +66,41 @@ export function PlanCard({ content, workspaceId }: PlanCardProps) {
   );
 
   return (
-    <section className="plan-card">
-      <header className="plan-card__header">
-        <div className="plan-card__eyebrow">Plan</div>
-        <button
-          className="plan-card__menu-button"
-          onClick={(event) => {
-            const rect = event.currentTarget.getBoundingClientRect();
-            setMenuPosition({
-              x: rect.right - 200,
-              y: rect.bottom + 8,
-            });
-          }}
-          type="button"
-        >
-          <MoreHorizontal size={16} />
-        </button>
-      </header>
-      <div className="plan-card__body">
-        <MarkdownRenderer className="markdown-content" content={content} />
-      </div>
-      {menuPosition && (
-        <ContextMenu
-          x={menuPosition.x}
-          y={menuPosition.y}
-          items={menuItems}
-          onClose={() => setMenuPosition(null)}
-        />
-      )}
-    </section>
+    <ActivityBlock
+      title="Proposed Plan"
+      icon={<SquarePen size={14} />}
+      isActive={isActive}
+    >
+      <section className="plan-card" style={{ marginTop: 0, border: 'none', background: 'transparent' }}>
+        <header className="plan-card__header" style={{ padding: '4px 0' }}>
+          <div className="plan-card__eyebrow" style={{ visibility: 'hidden', height: 0, margin: 0 }}>Plan</div>
+          <button
+            className="plan-card__menu-button"
+            onClick={(event) => {
+              const rect = event.currentTarget.getBoundingClientRect();
+              setMenuPosition({
+                x: rect.right - 200,
+                y: rect.bottom + 8,
+              });
+            }}
+            type="button"
+          >
+            <MoreHorizontal size={16} />
+          </button>
+        </header>
+        <div className="plan-card__body" style={{ padding: '0 0 12px 0' }}>
+          <MarkdownRenderer className="markdown-content" content={content} />
+        </div>
+        {menuPosition && (
+          <ContextMenu
+            x={menuPosition.x}
+            y={menuPosition.y}
+            items={menuItems}
+            onClose={() => setMenuPosition(null)}
+          />
+        )}
+      </section>
+    </ActivityBlock>
   );
 }
 
