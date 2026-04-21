@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import {
   useMemo,
+  useRef,
   useState,
   useTransition,
   useCallback,
@@ -857,6 +858,7 @@ function SessionItem({
           display: "flex",
           justifyContent: "space-between",
           alignItems: "center",
+          minWidth: 0,
           transition: "background 0.2s, color 0.2s",
         }}
         onMouseEnter={(e) => {
@@ -880,8 +882,8 @@ function SessionItem({
           }
         }}
       >
-        <span className="truncate" style={{ flex: 1, marginRight: "8px" }}>
-          {session.title}
+        <span style={{ flex: 1, minWidth: 0, marginRight: "8px" }}>
+          <TruncatedSessionTitle title={session.title} />
         </span>
         <div
           className="session-actions"
@@ -944,6 +946,118 @@ function SessionItem({
         />
       )}
     </>
+  );
+}
+
+function TruncatedSessionTitle({ title }: { title: string }) {
+  const containerRef = useRef<HTMLSpanElement | null>(null);
+  const [displayTitle, setDisplayTitle] = useState(title);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) {
+      return;
+    }
+
+    const canvas = document.createElement("canvas");
+    const context = canvas.getContext("2d");
+    if (!context) {
+      setDisplayTitle(title);
+      return;
+    }
+
+    const suffix = " ...";
+    let frameId = 0;
+
+    const measureWidth = (value: string) => {
+      const styles = window.getComputedStyle(container);
+      const font =
+        styles.font ||
+        `${styles.fontStyle} ${styles.fontVariant} ${styles.fontWeight} ${styles.fontSize} / ${styles.lineHeight} ${styles.fontFamily}`;
+      const letterSpacing =
+        styles.letterSpacing === "normal"
+          ? 0
+          : Number.parseFloat(styles.letterSpacing) || 0;
+
+      context.font = font;
+
+      return (
+        context.measureText(value).width +
+        Math.max(value.length - 1, 0) * letterSpacing
+      );
+    };
+
+    const updateTitle = () => {
+      frameId = 0;
+
+      const availableWidth = container.clientWidth;
+      if (availableWidth <= 0) {
+        return;
+      }
+
+      if (measureWidth(title) <= availableWidth) {
+        setDisplayTitle((current) => (current === title ? current : title));
+        return;
+      }
+
+      if (measureWidth(suffix) > availableWidth) {
+        setDisplayTitle((current) => (current === "..." ? current : "..."));
+        return;
+      }
+
+      let low = 0;
+      let high = title.length;
+
+      while (low < high) {
+        const mid = Math.ceil((low + high) / 2);
+        const candidate = `${title.slice(0, mid).trimEnd()}${suffix}`;
+
+        if (measureWidth(candidate) <= availableWidth) {
+          low = mid;
+        } else {
+          high = mid - 1;
+        }
+      }
+
+      const nextTitle = `${title.slice(0, low).trimEnd()}${suffix}`;
+      setDisplayTitle((current) =>
+        current === nextTitle ? current : nextTitle,
+      );
+    };
+
+    const scheduleUpdate = () => {
+      if (frameId) {
+        cancelAnimationFrame(frameId);
+      }
+      frameId = requestAnimationFrame(updateTitle);
+    };
+
+    scheduleUpdate();
+
+    const observer = new ResizeObserver(scheduleUpdate);
+    observer.observe(container);
+
+    return () => {
+      if (frameId) {
+        cancelAnimationFrame(frameId);
+      }
+      observer.disconnect();
+    };
+  }, [title]);
+
+  return (
+    <span
+      ref={containerRef}
+      style={{
+        display: "block",
+        overflow: "hidden",
+        whiteSpace: "nowrap",
+        minWidth: 0,
+      }}
+      title={title}
+    >
+      {displayTitle}
+    </span>
   );
 }
 

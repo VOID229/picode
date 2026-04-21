@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+.truncate {
+  width: 100px;
+  border: 1px solid red;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: " ...";
+}
+.truncate2 {
+  width: 100px;
+  border: 1px solid blue;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: " \2026";
+}
+</style>
+</head>
+<body>
+  <div class="truncate">This is a long sentence that should truncate.</div>
+  <div class="truncate2">This is a long sentence that should truncate.</div>
+</body>
+</html>
