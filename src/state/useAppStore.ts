@@ -2,7 +2,9 @@ import { startTransition } from "react";
 import { create } from "zustand";
 import type {
   ChatSession,
+  ComposerImageDraft,
   GitSnapshot,
+  MessageImageAttachment,
   PersistedAppState,
   PiInstallStatus,
   PromptMode,
@@ -41,7 +43,7 @@ import {
   resizeTerminal as resizeTerminalCommand,
   runTerminalCommand as runTerminalCommandCommand,
 } from "../lib/tauri";
-import { getUndoComposerDraft } from "./sessionUndo";
+import { getUndoComposerMessage } from "./sessionUndo";
 
 let initializePromise: Promise<void> | null = null;
 let hasInitialized = false;
@@ -72,6 +74,7 @@ interface AppStoreState {
   workspaceCatalogLoaded: Record<string, boolean>;
   workspaceCatalogErrors: Record<string, string | undefined>;
   composerDrafts: Record<string, string>;
+  composerImageDrafts: Record<string, ComposerImageDraft[]>;
   initialize: () => Promise<void>;
   setConnectionReady: (ready: boolean) => void;
   setCommandPaletteOpen: (open: boolean) => void;
@@ -123,6 +126,7 @@ interface AppStoreState {
     sessionId: string,
     prompt: string,
     mode: PromptMode,
+    images?: MessageImageAttachment[],
   ) => Promise<void>;
   abortPrompt: (workspaceId: string, sessionId: string) => Promise<void>;
   resolveApproval: (
@@ -169,7 +173,17 @@ interface AppStoreState {
   refreshRuntimeHealth: () => Promise<void>;
   refreshWorkspaceRuntimeCatalog: (workspaceId: string) => Promise<void>;
   setComposerDraft: (sessionId: string, draft: string) => void;
+  setComposerImages: (
+    sessionId: string,
+    images: ComposerImageDraft[],
+  ) => void;
+  addComposerImages: (
+    sessionId: string,
+    images: ComposerImageDraft[],
+  ) => void;
+  removeComposerImage: (sessionId: string, imageId: string) => void;
   clearComposerDraft: (sessionId: string) => void;
+  clearComposerImages: (sessionId: string) => void;
   applyRuntimeEvent: (event: PiRuntimeEvent) => void;
   applyTerminalEvent: (event: TerminalEvent) => void;
 }
@@ -303,6 +317,7 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
   workspaceCatalogLoaded: {},
   workspaceCatalogErrors: {},
   composerDrafts: {},
+  composerImageDrafts: {},
   async initialize() {
     if (hasInitialized && get().state) {
       set({ isBootstrapping: false });
@@ -510,7 +525,7 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
     set({ state });
   },
   async undoUserTurn(workspaceId, sessionId, userMessageId) {
-    const composerDraft = getUndoComposerDraft(
+    const composerMessage = getUndoComposerMessage(
       get().state,
       workspaceId,
       sessionId,
@@ -522,12 +537,19 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
       userMessageId,
     });
     set({ state });
-    if (composerDraft) {
-      get().setComposerDraft(sessionId, composerDraft);
+    if (composerMessage) {
+      get().setComposerDraft(sessionId, composerMessage.content);
+      get().setComposerImages(
+        sessionId,
+        composerMessage.images.map((image) => ({
+          id: crypto.randomUUID(),
+          ...image,
+        })),
+      );
     }
     await get().refreshGit(workspaceId);
   },
-  async sendPrompt(workspaceId, sessionId, prompt, mode) {
+  async sendPrompt(workspaceId, sessionId, prompt, mode, images = []) {
     const createdAt = new Date().toISOString();
     const userMessageId = crypto.randomUUID();
     set((store) => {
@@ -545,6 +567,7 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
         id: userMessageId,
         kind: "user-message",
         content: prompt,
+        images,
         createdAt,
       });
       session.status = "streaming";
@@ -560,6 +583,7 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
         userMessageId,
         prompt,
         mode,
+        images,
       });
     } catch (error) {
       set((store) => {
@@ -923,11 +947,51 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
       },
     }));
   },
+  setComposerImages(sessionId, images) {
+    set((store) => ({
+      composerImageDrafts: {
+        ...store.composerImageDrafts,
+        [sessionId]: images,
+      },
+    }));
+  },
+  addComposerImages(sessionId, images) {
+    if (images.length === 0) {
+      return;
+    }
+    set((store) => ({
+      composerImageDrafts: {
+        ...store.composerImageDrafts,
+        [sessionId]: [
+          ...(store.composerImageDrafts[sessionId] ?? []),
+          ...images,
+        ],
+      },
+    }));
+  },
+  removeComposerImage(sessionId, imageId) {
+    set((store) => {
+      const currentImages = store.composerImageDrafts[sessionId] ?? [];
+      return {
+        composerImageDrafts: {
+          ...store.composerImageDrafts,
+          [sessionId]: currentImages.filter((image) => image.id !== imageId),
+        },
+      };
+    });
+  },
   clearComposerDraft(sessionId) {
     set((store) => {
       const nextDrafts = { ...store.composerDrafts };
       delete nextDrafts[sessionId];
       return { composerDrafts: nextDrafts };
+    });
+  },
+  clearComposerImages(sessionId) {
+    set((store) => {
+      const nextImages = { ...store.composerImageDrafts };
+      delete nextImages[sessionId];
+      return { composerImageDrafts: nextImages };
     });
   },
   applyRuntimeEvent(event) {

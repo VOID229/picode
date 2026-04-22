@@ -318,6 +318,111 @@ body {
   gap: 8px;
 }
 
+.message-image-gallery {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.message-image-gallery--start {
+  justify-content: flex-start;
+}
+
+.message-image-gallery--end {
+  justify-content: flex-end;
+}
+
+.message-image-thumbnail {
+  position: relative;
+  width: 112px;
+  height: 84px;
+  border-radius: 10px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.message-image-thumbnail__button {
+  display: block;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.message-image-thumbnail__button img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.message-image-thumbnail__button:hover {
+  filter: brightness(1.05);
+}
+
+.message-image-remove,
+.message-image-preview__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: #f3f3f1;
+  cursor: pointer;
+  transition: background 0.15s ease, opacity 0.15s ease;
+}
+
+.message-image-remove {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  opacity: 0;
+}
+
+.message-image-thumbnail:hover .message-image-remove,
+.message-image-thumbnail:focus-within .message-image-remove {
+  opacity: 1;
+}
+
+.message-image-remove:hover,
+.message-image-preview__close:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.message-image-preview {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  background: rgba(0, 0, 0, 0.76);
+}
+
+.message-image-preview__frame {
+  position: relative;
+  max-width: min(1000px, calc(100vw - 64px));
+  max-height: calc(100vh - 64px);
+}
+
+.message-image-preview__image {
+  display: block;
+  max-width: 100%;
+  max-height: calc(100vh - 64px);
+  border-radius: 12px;
+}
+
+.message-image-preview__close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+}
+
 .chat-assistant-stack {
   display: flex;
   flex-direction: column;
@@ -336,9 +441,6 @@ body {
 .chat-row--user:hover .chat-message-actions {
   opacity: 1;
 }
-
-
-
 
 .chat-message-action {
   display: inline-flex;
@@ -520,6 +622,35 @@ body {
   padding: 16px 16px 18px;
 }
 
+.plan-card__body--expanded {
+  padding-bottom: 22px;
+}
+
+.plan-card__footer {
+  display: flex;
+  justify-content: center;
+  padding: 0 16px 14px;
+}
+
+.plan-card__resize-button {
+  border: none;
+  background: transparent;
+  color: #bdbdb7;
+  cursor: pointer;
+  font-size: 0.8rem;
+  padding: 0;
+}
+
+.plan-card__resize-button:hover {
+  color: #ededea;
+}
+
+.plan-card--expanded .markdown-content,
+.plan-card--expanded .markdown-content pre {
+  max-height: none !important;
+  overflow: visible !important;
+}
+
 .chat-copy-text--muted {
   color: #c5c5c0;
 }
@@ -579,7 +710,6 @@ body {
   pointer-events: none;
 }
 
-.chat-live-phase--reading-files .chat-live-phase__icon,
 .chat-live-phase--listing-directory .chat-live-phase__icon,
 .chat-live-phase--writing-files .chat-live-phase__icon {
   animation: statusBounce 0.9s ease-in-out infinite;
@@ -590,7 +720,11 @@ body {
   animation: spin 1.05s linear infinite;
 }
 
-.chat-live-phase--thinking .chat-live-phase__text::after {
+.chat-live-phase--thinking .chat-live-phase__text::after,
+.chat-live-phase--reading-files .chat-live-phase__text::after,
+.chat-live-phase--listing-directory .chat-live-phase__text::after,
+.chat-live-phase--writing-files .chat-live-phase__text::after,
+.chat-live-phase--verifying .chat-live-phase__text::after {
   opacity: 1;
   animation: innerTextGlow 1.55s ease-in-out infinite;
 }
@@ -908,7 +1042,9 @@ body {
 .activity-block__content {
   display: grid;
   grid-template-rows: 0fr;
-  transition: grid-template-rows 0.3s ease-out, opacity 0.3s ease-out;
+  transition:
+    grid-template-rows 0.3s ease-out,
+    opacity 0.3s ease-out;
   opacity: 0;
   padding-left: 22px;
 }
@@ -935,9 +1071,15 @@ body {
   overflow-y: auto;
 }
 
+.markdown-content--thinking {
+  color: #8f8f89;
+  font-style: italic;
+}
+
 .text-shimmer {
   background: linear-gradient(90deg, #7f7f79 0%, #ffffff 50%, #7f7f79 100%);
-  background-size: 200% auto;
+  background-size: 220% 100%;
+  background-position: -140% 50%;
   color: transparent;
   background-clip: text;
   -webkit-background-clip: text;
@@ -945,8 +1087,11 @@ body {
 }
 
 @keyframes shimmer {
+  from {
+    background-position: -140% 50%;
+  }
   to {
-    background-position: 200% center;
+    background-position: 180% 50%;
   }
 }
 
@@ -985,11 +1130,6 @@ body {
   transform: rotate(90deg);
 }
 
-.tool-activity-group__icon {
-  color: #7f7f79;
-  flex-shrink: 0;
-}
-
 .tool-activity-group__label {
   font-weight: 500;
 }
@@ -997,7 +1137,9 @@ body {
 .tool-activity-group__content {
   display: grid;
   grid-template-rows: 0fr;
-  transition: grid-template-rows 0.25s ease-out, opacity 0.25s ease-out;
+  transition:
+    grid-template-rows 0.25s ease-out,
+    opacity 0.25s ease-out;
   opacity: 0;
   padding-left: 22px;
 }
@@ -1012,7 +1154,57 @@ body {
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 6px;
+}
+
+.tool-activity-group__file {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  line-height: 1.45;
+  min-width: 0;
+}
+
+.tool-activity-group__file-path {
+  color: #c9c9c3;
+  font-size: 0.82rem;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-activity-group__file-actions {
+  color: #70706b;
+  font-size: 0.76rem;
+  white-space: nowrap;
+}
+
+.tool-activity-group__subsection {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.tool-activity-group__subtoggle {
+  border: none;
+  background: transparent;
+  color: #8f8f89;
+  cursor: pointer;
+  font-size: 0.78rem;
+  padding: 0;
+  text-align: left;
+}
+
+.tool-activity-group__subtoggle:hover {
+  color: #d7d7d2;
+}
+
+.tool-activity-group__empty {
+  color: #6f6f69;
+  font-size: 0.78rem;
 }
 
 .tool-activity-group__item {
@@ -1084,7 +1276,9 @@ body {
 .worked-for-block__content {
   display: grid;
   grid-template-rows: 0fr;
-  transition: grid-template-rows 0.3s ease-out, opacity 0.3s ease-out;
+  transition:
+    grid-template-rows 0.3s ease-out,
+    opacity 0.3s ease-out;
   opacity: 0;
   padding-left: 0;
 }
@@ -1169,7 +1363,10 @@ body {
   font-size: 0.78rem;
   font-family: inherit;
   cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease,
+    border-color 0.15s ease;
 }
 
 .files-changed-block__undo:hover {

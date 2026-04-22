@@ -1,14 +1,12 @@
+import { ArrowUp, Bot, Check, FileText, Square, Zap } from "lucide-react";
 import {
-  ArrowUp,
-  Bot,
-  Check,
-  FileText,
-  LoaderCircle,
-  Search,
-  Wrench,
-  Zap,
-} from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ClipboardEvent,
+} from "react";
 import type {
   ChatSession,
   TimelineItem,
@@ -17,20 +15,22 @@ import type {
 } from "../../domains/types";
 import { useAppStore } from "../../state/useAppStore";
 import { FilesChangedBlock } from "./FilesChangedBlock";
+import { ImageAttachmentGallery } from "./ImageAttachmentGallery";
 import { TimelineItemView } from "./TimelineItemView";
 import { ToolActivityGroup } from "./ToolActivityGroup";
 import { WorkedForBlock } from "./WorkedForBlock";
 import {
   deriveLivePhase,
   extractFileChanges,
-  resolveAssistantLabel,
   resolveComposerCapabilities,
   resolveSessionSelection,
   segmentTurnItems,
-  shortenAssistantLabel,
-  type LivePhase,
   type TurnSegment,
 } from "./chatRuntime";
+import {
+  fileToComposerImageDraft,
+  rgbaClipboardImageToComposerImageDraft,
+} from "../../lib/messageImages";
 
 interface ConversationViewProps {
   workspace: WorkspaceRecord | null;
@@ -62,10 +62,14 @@ export function ConversationView({
     (store) => store.workspaceCatalogLoaded,
   );
   const composerDrafts = useAppStore((store) => store.composerDrafts);
+  const composerImageDrafts = useAppStore((store) => store.composerImageDrafts);
   const currentMode = useAppStore((store) => store.currentMode);
   const setCurrentMode = useAppStore((store) => store.setCurrentMode);
   const setComposerDraft = useAppStore((store) => store.setComposerDraft);
+  const addComposerImages = useAppStore((store) => store.addComposerImages);
+  const removeComposerImage = useAppStore((store) => store.removeComposerImage);
   const clearComposerDraft = useAppStore((store) => store.clearComposerDraft);
+  const clearComposerImages = useAppStore((store) => store.clearComposerImages);
   const sendPrompt = useAppStore((state) => state.sendPrompt);
   const abortPrompt = useAppStore((state) => state.abortPrompt);
   const resolveApproval = useAppStore((state) => state.resolveApproval);
@@ -89,26 +93,98 @@ export function ConversationView({
   };
 
   const sessionDraft = session ? (composerDrafts[session.id] ?? "") : "";
+  const sessionImages = session ? (composerImageDrafts[session.id] ?? []) : [];
+  const canSubmit = sessionDraft.trim().length > 0 || sessionImages.length > 0;
 
   const handleSubmit = async () => {
     const value = sessionDraft.trim();
-    if (!workspace || !session || !value) {
+    const images = sessionImages.map(({ id, ...image }) => image);
+    if (!workspace || !session || (!value && images.length === 0)) {
       return;
     }
 
     closeComposerMenus();
     clearComposerDraft(session.id);
+    clearComposerImages(session.id);
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
     }
 
     try {
-      await sendPrompt(workspace.id, session.id, value, currentMode);
+      await sendPrompt(workspace.id, session.id, value, currentMode, images);
     } catch (error) {
       setComposerDraft(session.id, value);
+      addComposerImages(
+        session.id,
+        images.map((image) => ({
+          id: crypto.randomUUID(),
+          ...image,
+        })),
+      );
       throw error;
     }
   };
+
+  const handleComposerPaste = useCallback(
+    async (event: ClipboardEvent<HTMLTextAreaElement>) => {
+      const sessionId = session?.id;
+      if (!sessionId) {
+        return;
+      }
+
+      const clipboard = event.clipboardData;
+      const clipboardItems = Array.from(clipboard?.items ?? []);
+      const imageFiles = clipboardItems
+        .filter((item) => item.type.startsWith("image/"))
+        .map((item) => item.getAsFile())
+        .filter((file): file is File => file !== null);
+      const hasTextPayload = Boolean(
+        clipboard?.getData("text/plain") || clipboard?.getData("text/html"),
+      );
+
+      if (imageFiles.length > 0) {
+        if (!hasTextPayload) {
+          event.preventDefault();
+        }
+
+        try {
+          const nextImages = await Promise.all(
+            imageFiles.map((file) => fileToComposerImageDraft(file)),
+          );
+          addComposerImages(sessionId, nextImages);
+        } catch (error) {
+          window.alert(
+            error instanceof Error
+              ? error.message
+              : "Unable to read the pasted image.",
+          );
+        }
+        return;
+      }
+
+      if (hasTextPayload) {
+        return;
+      }
+
+      try {
+        const { readImage } =
+          await import("@tauri-apps/plugin-clipboard-manager");
+        const clipboardImage = await readImage();
+        const size = await clipboardImage.size();
+        const rgba = await clipboardImage.rgba();
+        const nextImage = await rgbaClipboardImageToComposerImageDraft({
+          rgba,
+          width: size.width,
+          height: size.height,
+        });
+        event.preventDefault();
+        addComposerImages(sessionId, [nextImage]);
+      } catch {
+        // Ignore fallback failures so regular text pastes continue untouched.
+      }
+    },
+    [addComposerImages, session?.id],
+  );
 
   useEffect(() => {
     const textarea = textareaRef.current;
@@ -146,8 +222,8 @@ export function ConversationView({
   // so we can group tool activities and wrap completed turns.
   const turns = useMemo(() => {
     if (!session) return [];
-    return computeTurns(session.timeline, session.status);
-  }, [session]);
+    return computeTurns(session.timeline, session.status, livePhase);
+  }, [livePhase, session]);
 
   const handleUndo = useCallback(
     async (userMessageId: string) => {
@@ -244,13 +320,6 @@ export function ConversationView({
     displayProviders
       .flatMap((provider) => provider.models)
       .find((model) => model.id === selection.modelId);
-  const assistantLabel = resolveAssistantLabel({
-    session,
-    workspace,
-    workspaceCatalog: workspaceProviders,
-    defaultProviders: stateProviders,
-  });
-  const assistantChromeLabel = shortenAssistantLabel(assistantLabel);
   const composerCapabilities = resolveComposerCapabilities({
     providers: displayProviders,
     selection,
@@ -325,19 +394,10 @@ export function ConversationView({
                 turn={turn}
                 workspaceId={workspace.id}
                 sessionId={session.id}
-                assistantLabel={assistantChromeLabel}
                 onResolveApproval={resolveApproval}
                 onUndo={handleUndo}
-                isLastTurn={turnIndex === turns.length - 1}
-                sessionStatus={session.status}
               />
             ))}
-            {livePhase && (
-              <LivePhaseIndicator
-                assistantLabel={assistantChromeLabel}
-                phase={livePhase}
-              />
-            )}
           </div>
         </div>
       )}
@@ -366,6 +426,20 @@ export function ConversationView({
             {sendDisabledReason}
           </div>
         )}
+        {sessionImages.length > 0 && (
+          <div style={{ marginBottom: "10px" }}>
+            <ImageAttachmentGallery
+              images={sessionImages}
+              align="start"
+              onRemove={(image) => {
+                if (!image.id || !session) {
+                  return;
+                }
+                removeComposerImage(session.id, image.id);
+              }}
+            />
+          </div>
+        )}
         <div
           style={{
             background: "#18181A",
@@ -390,11 +464,14 @@ export function ConversationView({
               }
               setComposerDraft(session.id, event.target.value);
             }}
+            onPaste={(event) => {
+              void handleComposerPaste(event);
+            }}
             placeholder="Ask for follow-up changes or attach images"
             onKeyDown={(event) => {
               if (event.key === "Enter" && !event.shiftKey) {
                 event.preventDefault();
-                if (!sendDisabled) {
+                if (!sendDisabled && canSubmit) {
                   void handleSubmit();
                 }
               }
@@ -711,13 +788,13 @@ export function ConversationView({
                 background:
                   session.status === "streaming"
                     ? "#ef4444"
-                    : !sendDisabled && sessionDraft.trim()
+                    : !sendDisabled && canSubmit
                       ? "#2563eb"
                       : "#333",
                 color:
                   session.status === "streaming"
                     ? "#fff"
-                    : !sendDisabled && sessionDraft.trim()
+                    : !sendDisabled && canSubmit
                       ? "#fff"
                       : "#666",
                 display: "flex",
@@ -725,15 +802,13 @@ export function ConversationView({
                 justifyContent: "center",
                 border: "none",
                 cursor:
-                  session.status === "streaming" ||
-                  (!sendDisabled && Boolean(sessionDraft.trim()))
+                  session.status === "streaming" || (!sendDisabled && canSubmit)
                     ? "pointer"
                     : "default",
                 transition: "background 0.2s, color 0.2s",
               }}
               disabled={
-                session.status !== "streaming" &&
-                (sendDisabled || !sessionDraft.trim())
+                session.status !== "streaming" && (sendDisabled || !canSubmit)
               }
               onClick={() =>
                 session.status === "streaming"
@@ -743,7 +818,11 @@ export function ConversationView({
                     : undefined
               }
             >
-              <ArrowUp size={16} />
+              {session.status === "streaming" ? (
+                <Square size={12} fill="currentColor" strokeWidth={0} />
+              ) : (
+                <ArrowUp size={16} />
+              )}
             </button>
           </div>
         </div>
@@ -809,49 +888,6 @@ export function ConversationView({
   );
 }
 
-function LivePhaseIndicator({
-  assistantLabel,
-  phase,
-}: {
-  assistantLabel: string;
-  phase: LivePhase;
-}) {
-  return (
-    <div className="chat-row chat-row--assistant">
-      <div className={`chat-live-phase chat-live-phase--${phase.phase}`}>
-        <div className="chat-speaker-label">{assistantLabel}</div>
-        <div className="chat-inline-status chat-inline-status--live">
-          <span className="chat-live-phase__icon">
-            <LivePhaseIcon phase={phase} />
-          </span>
-          <span className="chat-live-phase__text" data-text={phase.label}>
-            {phase.label}
-          </span>
-          {phase.detail && (
-            <span className="chat-inline-status__meta">{phase.detail}</span>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function LivePhaseIcon({ phase }: { phase: LivePhase }) {
-  switch (phase.phase) {
-    case "reading-files":
-      return <Search size={14} />;
-    case "listing-directory":
-      return <Wrench size={14} />;
-    case "writing-files":
-      return <FileText size={14} />;
-    case "verifying":
-      return <Check size={14} />;
-    case "thinking":
-    default:
-      return <LoaderCircle size={14} className="chat-inline-status__spin" />;
-  }
-}
-
 function ChevronIcon() {
   return (
     <svg
@@ -883,21 +919,29 @@ interface Turn {
 function computeTurns(
   timeline: TimelineItem[],
   sessionStatus: ChatSession["status"],
+  livePhase: ReturnType<typeof deriveLivePhase>,
 ): Turn[] {
   const turns: Turn[] = [];
   let currentItems: TimelineItem[] = [];
   let userMessageId: string | undefined;
   let startTime: string | undefined;
 
-  const flushTurn = (completed: boolean) => {
+  const flushTurn = (
+    completed: boolean,
+    activeLivePhase?: typeof livePhase,
+  ) => {
     if (currentItems.length === 0) return;
-    const segments = segmentTurnItems(currentItems);
+    const segments = segmentTurnItems(currentItems, {
+      livePhase: activeLivePhase,
+    });
 
     // Find the last assistant-message createdAt as endTime
     const lastAssistant = [...currentItems]
       .reverse()
       .find((item) => item.kind === "assistant-message");
-    const endTime = lastAssistant?.createdAt ?? currentItems[currentItems.length - 1].createdAt;
+    const endTime =
+      lastAssistant?.createdAt ??
+      currentItems[currentItems.length - 1].createdAt;
 
     turns.push({
       userMessageId,
@@ -928,8 +972,9 @@ function computeTurns(
 
   // Flush remaining items
   if (currentItems.length > 0) {
-    const isStreaming = sessionStatus === "streaming" || sessionStatus === "awaiting-approval";
-    flushTurn(!isStreaming);
+    const isStreaming =
+      sessionStatus === "streaming" || sessionStatus === "awaiting-approval";
+    flushTurn(!isStreaming, isStreaming ? livePhase : null);
   }
 
   return turns;
@@ -939,16 +984,12 @@ function TurnRenderer({
   turn,
   workspaceId,
   sessionId,
-  assistantLabel,
   onResolveApproval,
   onUndo,
-  isLastTurn,
-  sessionStatus,
 }: {
   turn: Turn;
   workspaceId: string;
   sessionId: string;
-  assistantLabel: string;
   onResolveApproval: (
     workspaceId: string,
     sessionId: string,
@@ -956,13 +997,11 @@ function TurnRenderer({
     decision: "approved" | "rejected",
   ) => Promise<void>;
   onUndo: (userMessageId: string) => void;
-  isLastTurn: boolean;
-  sessionStatus: ChatSession["status"];
 }) {
-  const isStreaming = sessionStatus === "streaming";
-
-  // Separate tool-group segments from text/other segments
-  const toolGroupSegments = turn.segments.filter((s) => s.type === "tool-group");
+  const activitySegments = turn.segments.filter((s) => s.type === "activity");
+  const toolGroupSegments = activitySegments.filter((segment) =>
+    segment.items.some((item) => item.kind === "tool-activity"),
+  );
   const hasToolActivity = toolGroupSegments.length > 0;
 
   // For completed turns with tool activity, extract file changes
@@ -978,12 +1017,26 @@ function TurnRenderer({
 
   // Build the inner content (tool groups + interleaved text)
   const innerContent = turn.segments.map((segment, segIndex) => {
-    if (segment.type === "tool-group") {
+    if (segment.type === "activity") {
+      if (segment.isLive && segment.livePhase) {
+        return (
+          <LiveThinkingRow
+            key={`seg-${segIndex}`}
+            label={segment.livePhase.label}
+            detail={segment.livePhase.detail}
+          />
+        );
+      }
+
       return (
         <ToolActivityGroup
           key={`seg-${segIndex}`}
-          items={segment.items}
-          isStreaming={isLastTurn && isStreaming}
+          segment={{
+            phase: segment.activityPhase ?? "other",
+            items: segment.items,
+            isLive: segment.isLive,
+            livePhase: segment.livePhase,
+          }}
         />
       );
     }
@@ -995,7 +1048,6 @@ function TurnRenderer({
         item={item}
         workspaceId={workspaceId}
         sessionId={sessionId}
-        assistantLabel={assistantLabel}
         onResolveApproval={onResolveApproval}
       />
     ));
@@ -1011,13 +1063,28 @@ function TurnRenderer({
     let passedTools = false;
     for (let i = 0; i < turn.segments.length; i++) {
       const segment = turn.segments[i];
-      if (segment.type === "tool-group") {
+      if (segment.type === "activity") {
+        if (segment.isLive && segment.livePhase) {
+          toolContent.push(
+            <LiveThinkingRow
+              key={`seg-${i}`}
+              label={segment.livePhase.label}
+              detail={segment.livePhase.detail}
+            />,
+          );
+          continue;
+        }
+
         passedTools = true;
         toolContent.push(
           <ToolActivityGroup
             key={`seg-${i}`}
-            items={segment.items}
-            isStreaming={false}
+            segment={{
+              phase: segment.activityPhase ?? "other",
+              items: segment.items,
+              isLive: segment.isLive,
+              livePhase: segment.livePhase,
+            }}
           />,
         );
       } else if (!passedTools && segment.items[0]?.kind === "user-message") {
@@ -1028,7 +1095,6 @@ function TurnRenderer({
               item={item}
               workspaceId={workspaceId}
               sessionId={sessionId}
-              assistantLabel={assistantLabel}
               onResolveApproval={onResolveApproval}
             />
           )),
@@ -1042,7 +1108,6 @@ function TurnRenderer({
               item={item}
               workspaceId={workspaceId}
               sessionId={sessionId}
-              assistantLabel={assistantLabel}
               onResolveApproval={onResolveApproval}
             />
           )),
@@ -1056,7 +1121,6 @@ function TurnRenderer({
               item={item}
               workspaceId={workspaceId}
               sessionId={sessionId}
-              assistantLabel={assistantLabel}
               onResolveApproval={onResolveApproval}
             />
           )),
@@ -1065,11 +1129,16 @@ function TurnRenderer({
     }
 
     return (
-      <div className="turn-block" style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+      <div
+        className="turn-block"
+        style={{ display: "flex", flexDirection: "column", gap: "14px" }}
+      >
         {userSegments}
         {toolContent.length > 0 && (
           <WorkedForBlock startTime={turn.startTime} endTime={turn.endTime}>
-            <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+            <div
+              style={{ display: "flex", flexDirection: "column", gap: "8px" }}
+            >
               {toolContent}
             </div>
           </WorkedForBlock>
@@ -1079,9 +1148,7 @@ function TurnRenderer({
           <FilesChangedBlock
             toolFileChanges={fileChanges}
             onUndo={
-              turn.userMessageId
-                ? () => onUndo(turn.userMessageId!)
-                : undefined
+              turn.userMessageId ? () => onUndo(turn.userMessageId!) : undefined
             }
           />
         )}
@@ -1091,18 +1158,36 @@ function TurnRenderer({
 
   // For streaming/incomplete turns, render inline
   return (
-    <div className="turn-block" style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+    <div
+      className="turn-block"
+      style={{ display: "flex", flexDirection: "column", gap: "14px" }}
+    >
       {innerContent}
       {fileChanges.length > 0 && (
         <FilesChangedBlock
           toolFileChanges={fileChanges}
           onUndo={
-            turn.userMessageId
-              ? () => onUndo(turn.userMessageId!)
-              : undefined
+            turn.userMessageId ? () => onUndo(turn.userMessageId!) : undefined
           }
         />
       )}
+    </div>
+  );
+}
+
+function LiveThinkingRow({
+  label,
+  detail,
+}: {
+  label: string;
+  detail?: string;
+}) {
+  return (
+    <div className="chat-row chat-row--assistant animate-slide-up">
+      <div className="chat-inline-status chat-inline-status--live">
+        <span className="text-shimmer">{label}</span>
+        {detail && <span className="chat-inline-status__meta">{detail}</span>}
+      </div>
     </div>
   );
 }

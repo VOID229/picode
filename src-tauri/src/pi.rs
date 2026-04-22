@@ -1326,10 +1326,10 @@ fn apply_metadata(
 ) {
     if let Some(metadata) = metadata {
         if metadata.provider_id.is_some() {
-            session.runtime.provider_id = metadata.provider_id;
+            session.runtime.provider_id = metadata.provider_id.clone();
         }
         if metadata.model_id.is_some() {
-            session.runtime.model_id = metadata.model_id;
+            session.runtime.model_id = metadata.model_id.clone();
         }
         if metadata.pi_session_file.is_some() {
             session.runtime.pi_session_file = metadata.pi_session_file;
@@ -1338,7 +1338,24 @@ fn apply_metadata(
         if metadata.last_error.is_some() {
             session.runtime.last_error = metadata.last_error;
         }
+        sync_session_selection_from_runtime_metadata(session);
     }
+}
+
+fn sync_session_selection_from_runtime_metadata(session: &mut crate::models::ChatSession) {
+    let Some(provider_id) = session.runtime.provider_id.clone() else {
+        return;
+    };
+    let Some(model_id) = session.runtime.model_id.clone() else {
+        return;
+    };
+
+    if provider_id.trim().is_empty() || model_id.trim().is_empty() {
+        return;
+    }
+
+    session.selection.provider_id = provider_id;
+    session.selection.model_id = model_id;
 }
 
 fn find_session_mut<'a>(
@@ -2345,6 +2362,7 @@ pub async fn launch_prompt_stream(
                 id: payload.user_message_id.clone(),
                 created_at: now_iso(),
                 content: payload.prompt.clone(),
+                images: payload.images.clone(),
             });
         }
         session.status = SessionStatus::Streaming;
@@ -2751,6 +2769,7 @@ mod tests {
                     id: "user-1".to_string(),
                     created_at: now_iso(),
                     content: "hello".to_string(),
+                    images: Vec::new(),
                 },
                 TimelineItem::AssistantMessage {
                     id: "assistant-1".to_string(),
@@ -2782,6 +2801,32 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn apply_metadata_restores_session_selection_from_runtime_metadata() {
+        let mut state = default_state("/tmp/demo".to_string(), "Demo".to_string());
+        let workspace = state.workspaces.first_mut().expect("workspace");
+        let session = workspace.sessions.first_mut().expect("session");
+
+        session.selection.provider_id = "openai-codex".to_string();
+        session.selection.model_id = "gpt-5.4".to_string();
+        session.runtime.provider_id = Some("google-antigravity".to_string());
+        session.runtime.model_id = Some("claude-sonnet-4-6".to_string());
+
+        apply_metadata(
+            session,
+            Some(SessionRuntimeMetadata {
+                provider_id: Some("google-antigravity".to_string()),
+                model_id: Some("claude-sonnet-4-6".to_string()),
+                pi_session_file: None,
+                last_known_ready: true,
+                last_error: None,
+            }),
+        );
+
+        assert_eq!(session.selection.provider_id, "google-antigravity");
+        assert_eq!(session.selection.model_id, "claude-sonnet-4-6");
     }
 
     #[test]

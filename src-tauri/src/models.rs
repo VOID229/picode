@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::{env, path::PathBuf};
 use uuid::Uuid;
 
-pub const SCHEMA_VERSION: u32 = 4;
+pub const SCHEMA_VERSION: u32 = 5;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -81,12 +81,21 @@ pub enum ProviderAuthKind {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MessageImageAttachment {
+    pub mime_type: String,
+    pub data: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum TimelineItem {
     UserMessage {
         id: String,
         created_at: String,
         content: String,
+        #[serde(default)]
+        images: Vec<MessageImageAttachment>,
     },
     AssistantMessage {
         id: String,
@@ -319,6 +328,8 @@ pub struct AppPreferences {
     pub title_model_effort: String,
     #[serde(default = "default_auto_title_enabled")]
     pub auto_title_enabled: bool,
+    #[serde(default = "default_show_raw_tool_calls")]
+    pub show_raw_tool_calls: bool,
     pub approval_mode: ApprovalMode,
     #[serde(default = "default_effort")]
     pub effort: String,
@@ -439,6 +450,8 @@ pub struct SendPromptPayload {
     pub user_message_id: String,
     pub prompt: String,
     pub mode: PromptMode,
+    #[serde(default)]
+    pub images: Vec<MessageImageAttachment>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -706,6 +719,10 @@ fn default_auto_title_enabled() -> bool {
     true
 }
 
+fn default_show_raw_tool_calls() -> bool {
+    false
+}
+
 fn default_provider_status() -> ProviderStatus {
     ProviderStatus::Unavailable
 }
@@ -820,6 +837,7 @@ pub fn default_preferences() -> AppPreferences {
         title_model_id: default_title_model_id(),
         title_model_effort: default_effort(),
         auto_title_enabled: default_auto_title_enabled(),
+        show_raw_tool_calls: default_show_raw_tool_calls(),
         approval_mode: ApprovalMode::Supervised,
         effort: default_effort(),
         fast_mode: default_fast_mode(),
@@ -1078,6 +1096,7 @@ mod tests {
         assert_eq!(parsed.preferences.effort, "high");
         assert!(!parsed.preferences.fast_mode);
         assert_eq!(parsed.preferences.pi_binary_path, None);
+        assert!(!parsed.preferences.show_raw_tool_calls);
         assert_eq!(parsed.workspaces[0].effort, "high");
         assert!(!parsed.workspaces[0].fast_mode);
     }
@@ -1131,9 +1150,10 @@ mod tests {
 
         let normalized = normalize_state(parsed);
 
-        assert_eq!(normalized.schema_version, 4);
+        assert_eq!(normalized.schema_version, 5);
         assert_eq!(normalized.preferences.provider_id, "pi-core");
         assert_eq!(normalized.preferences.model_id, "gpt-5.4");
+        assert!(!normalized.preferences.show_raw_tool_calls);
         assert_eq!(normalized.workspaces[0].provider_id, "pi-cloud");
         assert_eq!(normalized.workspaces[0].model_id, "gpt-5.4-mini");
         assert_eq!(
@@ -1201,6 +1221,7 @@ mod tests {
         assert_eq!(preferences.pi_binary_path, None);
         assert_eq!(preferences.title_model_id, "gpt-5.4-mini");
         assert_eq!(preferences.title_model_effort, "high");
+        assert!(!preferences.show_raw_tool_calls);
     }
 
     #[test]

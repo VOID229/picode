@@ -1,5 +1,6 @@
 import {
   AlertTriangle,
+  Check,
   CheckCircle2,
   Copy,
   GitFork,
@@ -10,10 +11,12 @@ import {
   XCircle,
 } from "lucide-react";
 import type { TimelineItem } from "../../domains/types";
+import { useEffect, useRef, useState } from "react";
 import { cn } from "../../lib/cn";
 import { copyTextToClipboard } from "../../lib/clipboard";
 import { useAppStore } from "../../state/useAppStore";
 import { ActivityBlock } from "./ActivityBlock";
+import { ImageAttachmentGallery } from "./ImageAttachmentGallery";
 import { MarkdownRenderer } from "./MarkdownRenderer";
 import { PlanCard } from "./PlanCard";
 import { isTransientTimelineItem, parseAssistantContent } from "./chatRuntime";
@@ -22,7 +25,6 @@ interface TimelineItemViewProps {
   item: TimelineItem;
   workspaceId: string;
   sessionId: string;
-  assistantLabel: string;
   onResolveApproval: (
     workspaceId: string,
     sessionId: string,
@@ -35,11 +37,34 @@ export function TimelineItemView({
   item,
   workspaceId,
   sessionId,
-  assistantLabel,
   onResolveApproval,
 }: TimelineItemViewProps) {
+  const [copyFeedbackVisible, setCopyFeedbackVisible] = useState(false);
+  const copyFeedbackTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (copyFeedbackTimerRef.current !== null) {
+        window.clearTimeout(copyFeedbackTimerRef.current);
+      }
+    };
+  }, []);
+
+  const showCopyFeedback = () => {
+    if (copyFeedbackTimerRef.current !== null) {
+      window.clearTimeout(copyFeedbackTimerRef.current);
+    }
+
+    setCopyFeedbackVisible(true);
+    copyFeedbackTimerRef.current = window.setTimeout(() => {
+      setCopyFeedbackVisible(false);
+      copyFeedbackTimerRef.current = null;
+    }, 1500);
+  };
+
   const createSession = useAppStore((store) => store.createSession);
   const setComposerDraft = useAppStore((store) => store.setComposerDraft);
+  const setComposerImages = useAppStore((store) => store.setComposerImages);
   const undoUserTurn = useAppStore((store) => store.undoUserTurn);
   const git = useAppStore((store) => store.git[workspaceId]);
 
@@ -63,17 +88,25 @@ export function TimelineItemView({
     return (
       <article className="chat-row chat-row--user animate-slide-up">
         <div className="chat-user-stack">
-          <div className="chat-bubble chat-bubble--user">{item.content}</div>
+          {item.images && item.images.length > 0 && (
+            <ImageAttachmentGallery images={item.images} align="end" />
+          )}
+          {item.content.trim() && (
+            <div className="chat-bubble chat-bubble--user">{item.content}</div>
+          )}
           <div className="chat-message-actions">
             <button
               className="chat-message-action"
               title="Copy"
               type="button"
               onClick={async () => {
-                await copyTextToClipboard(item.content, "message");
+                const copied = await copyTextToClipboard(item.content, "message");
+                if (copied) {
+                  showCopyFeedback();
+                }
               }}
             >
-              <Copy size={13} />
+              {copyFeedbackVisible ? <Check size={13} /> : <Copy size={13} />}
             </button>
             <button
               className="chat-message-action"
@@ -87,6 +120,13 @@ export function TimelineItemView({
                   return;
                 }
                 setComposerDraft(nextSessionId, item.content);
+                setComposerImages(
+                  nextSessionId,
+                  (item.images ?? []).map((image) => ({
+                    id: crypto.randomUUID(),
+                    ...image,
+                  })),
+                );
               }}
             >
               <GitFork size={13} />
@@ -134,7 +174,6 @@ export function TimelineItemView({
       <article className="chat-row chat-row--assistant animate-slide-up">
         <div className="chat-assistant-stack">
           <div className="chat-assistant-copy">
-            <div className="chat-speaker-label">{assistantLabel}</div>
             <div className="chat-copy-text">
               {parseAssistantContent(item.content).map((block, index) => {
                 if (block.type === "proposed-plan") {
@@ -152,11 +191,20 @@ export function TimelineItemView({
                     <ActivityBlock
                       key={`${item.id}-thinking-${index}`}
                       title="Thinking"
-                      icon={<LoaderCircle size={14} className={item.streaming && !block.isClosed ? "chat-inline-status__spin" : ""} />}
+                      icon={
+                        <LoaderCircle
+                          size={14}
+                          className={
+                            item.streaming && !block.isClosed
+                              ? "chat-inline-status__spin"
+                              : ""
+                          }
+                        />
+                      }
                       isActive={item.streaming && !block.isClosed}
                     >
                       <MarkdownRenderer
-                        className="markdown-content text-muted"
+                        className="markdown-content markdown-content--thinking"
                         content={block.content}
                       />
                     </ActivityBlock>
@@ -180,10 +228,13 @@ export function TimelineItemView({
                 type="button"
                 aria-label="Copy response"
                 onClick={async () => {
-                  await copyTextToClipboard(item.content, "response");
+                  const copied = await copyTextToClipboard(item.content, "response");
+                  if (copied) {
+                    showCopyFeedback();
+                  }
                 }}
               >
-                <Copy size={13} />
+                {copyFeedbackVisible ? <Check size={13} /> : <Copy size={13} />}
               </button>
             </div>
           )}
@@ -201,7 +252,6 @@ export function TimelineItemView({
     return (
       <article className="chat-row chat-row--assistant animate-slide-up">
         <div className="chat-approval">
-          <div className="chat-speaker-label">{assistantLabel}</div>
           <div className="chat-inline-status">
             <AlertTriangle size={14} />
             <span>Awaiting approval</span>

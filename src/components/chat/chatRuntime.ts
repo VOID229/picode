@@ -24,6 +24,15 @@ export interface LivePhase {
   detail?: string;
 }
 
+export type ActivityPhase = LivePhase["phase"] | "other";
+
+export interface ActivitySegment {
+  phase: ActivityPhase;
+  items: TimelineItem[];
+  isLive?: boolean;
+  livePhase?: LivePhase;
+}
+
 export interface ComposerEffortOption {
   id: string;
   label: string;
@@ -139,9 +148,17 @@ export function parseAssistantContent(
     const blockContent = (match[2] ?? "").trim();
     if (blockContent) {
       if (tag === "proposed_plan") {
-        blocks.push({ type: "proposed-plan", content: blockContent, isClosed: true });
+        blocks.push({
+          type: "proposed-plan",
+          content: blockContent,
+          isClosed: true,
+        });
       } else if (tag === "think" || tag === "thought") {
-        blocks.push({ type: "thinking", content: blockContent, isClosed: true });
+        blocks.push({
+          type: "thinking",
+          content: blockContent,
+          isClosed: true,
+        });
       }
     }
 
@@ -149,20 +166,26 @@ export function parseAssistantContent(
   }
 
   const trailing = content.slice(lastIndex);
-  
+
   // Try to match unclosed tags in the trailing content for streaming support
-  const unclosedMatch = trailing.match(/<(proposed_plan|think|thought)>([\s\S]*)$/i);
+  const unclosedMatch = trailing.match(
+    /<(proposed_plan|think|thought)>([\s\S]*)$/i,
+  );
   if (unclosedMatch) {
     const leadingTrailing = trailing.slice(0, unclosedMatch.index);
     const normalizedLeadingTrailing = trimEdgeBlankLines(leadingTrailing);
     if (normalizedLeadingTrailing.trim()) {
       blocks.push({ type: "markdown", content: normalizedLeadingTrailing });
     }
-    
+
     const tag = unclosedMatch[1].toLowerCase();
     const blockContent = (unclosedMatch[2] ?? "").trim();
     if (tag === "proposed_plan") {
-      blocks.push({ type: "proposed-plan", content: blockContent, isClosed: false });
+      blocks.push({
+        type: "proposed-plan",
+        content: blockContent,
+        isClosed: false,
+      });
     } else if (tag === "think" || tag === "thought") {
       blocks.push({ type: "thinking", content: blockContent, isClosed: false });
     }
@@ -428,6 +451,30 @@ function buildLivePhase(phase: LivePhase["phase"], detail?: string): LivePhase {
 }
 
 export type ToolCategory = "explored" | "edited" | "ran" | "searched";
+export type ToolFileAction = "read" | "edit" | "search" | "list";
+
+export interface ToolFileSummary {
+  path: string;
+  actions: ToolFileAction[];
+}
+
+export interface ToolActivityDetails {
+  files: ToolFileSummary[];
+  rawCalls: ToolActivityItem[];
+}
+
+const TOOL_FILE_ACTION_ORDER: ToolFileAction[] = [
+  "read",
+  "edit",
+  "search",
+  "list",
+];
+
+const TOOL_PATH_PATTERNS = [
+  /"path"\s*:\s*"([^"]+)"/g,
+  /(^|[\s("'`])((?:\/|\.{1,2}\/)[^\s"'`),:;)}\]]+\/?)(?=$|[\s)"'`,:;)}\]])/g,
+  /(^|[\s("'`])((?:[\w-]+\/)+[\w.@-]+\/?)(?=$|[\s)"'`,:;)}\]])/g,
+];
 
 export function classifyToolCategory(
   toolName: string,
@@ -436,8 +483,18 @@ export function classifyToolCategory(
   const text = `${toolName} ${summary}`.toLowerCase();
 
   if (/\b(search|find|grep|rg)\b/.test(text)) return "searched";
-  if (/\b(write|edit|patch|apply_patch|create|delete|rename|move|update)\b/.test(text)) return "edited";
-  if (/\b(run|exec|command|terminal|shell|build|compile|test|lint|format|verify|check|validate)\b/.test(text)) return "ran";
+  if (
+    /\b(write|edit|patch|apply_patch|create|delete|rename|move|update)\b/.test(
+      text,
+    )
+  )
+    return "edited";
+  if (
+    /\b(run|exec|command|terminal|shell|build|compile|test|lint|format|verify|check|validate)\b/.test(
+      text,
+    )
+  )
+    return "ran";
   return "explored";
 }
 
@@ -451,7 +508,12 @@ export interface ToolGroupSummary {
 export function groupToolActivities(
   items: ToolActivityItem[],
 ): ToolGroupSummary {
-  const summary: ToolGroupSummary = { explored: 0, edited: 0, ran: 0, searched: 0 };
+  const summary: ToolGroupSummary = {
+    explored: 0,
+    edited: 0,
+    ran: 0,
+    searched: 0,
+  };
   for (const item of items) {
     const category = classifyToolCategory(
       item.activity.toolName,
@@ -464,13 +526,58 @@ export function groupToolActivities(
 
 export function formatToolGroupLabel(summary: ToolGroupSummary): string {
   const parts: string[] = [];
-  if (summary.explored > 0) parts.push(`Explored ${summary.explored} file${summary.explored !== 1 ? "s" : ""}`);
-  if (summary.edited > 0) parts.push(`edited ${summary.edited} file${summary.edited !== 1 ? "s" : ""}`);
-  if (summary.ran > 0) parts.push(`ran ${summary.ran} command${summary.ran !== 1 ? "s" : ""}`);
-  if (summary.searched > 0) parts.push(`searched ${summary.searched} time${summary.searched !== 1 ? "s" : ""}`);
+  if (summary.explored > 0)
+    parts.push(
+      `Explored ${summary.explored} file${summary.explored !== 1 ? "s" : ""}`,
+    );
+  if (summary.edited > 0)
+    parts.push(
+      `edited ${summary.edited} file${summary.edited !== 1 ? "s" : ""}`,
+    );
+  if (summary.ran > 0)
+    parts.push(`ran ${summary.ran} command${summary.ran !== 1 ? "s" : ""}`);
+  if (summary.searched > 0)
+    parts.push(
+      `searched ${summary.searched} time${summary.searched !== 1 ? "s" : ""}`,
+    );
   if (parts.length === 0) return "Working...";
   // Capitalize only the very first part
   return parts.join(", ");
+}
+
+export function summarizeToolActivityDetails(
+  items: ToolActivityItem[],
+): ToolActivityDetails {
+  const files = new Map<
+    string,
+    {
+      path: string;
+      actions: Set<ToolFileAction>;
+    }
+  >();
+
+  for (const item of items) {
+    const action = classifyToolFileAction(item);
+    const paths = extractToolPaths(item.activity.summary);
+    for (const path of paths) {
+      const existing = files.get(path) ?? {
+        path,
+        actions: new Set<ToolFileAction>(),
+      };
+      existing.actions.add(action);
+      files.set(path, existing);
+    }
+  }
+
+  return {
+    files: Array.from(files.values()).map((entry) => ({
+      path: entry.path,
+      actions: TOOL_FILE_ACTION_ORDER.filter((action) =>
+        entry.actions.has(action),
+      ),
+    })),
+    rawCalls: items,
+  };
 }
 
 export interface FileChange {
@@ -502,14 +609,22 @@ export function extractFileChanges(
 
     // Try to parse +N -M from output
     if (item.activity.output) {
-      const addMatch = item.activity.output.match(/(\d+)\s*(?:insertions?|additions?|lines? added|\+)/i);
-      const delMatch = item.activity.output.match(/(\d+)\s*(?:deletions?|removals?|lines? (?:removed|deleted)|\-)/i);
+      const addMatch = item.activity.output.match(
+        /(\d+)\s*(?:insertions?|additions?|lines? added|\+)/i,
+      );
+      const delMatch = item.activity.output.match(
+        /(\d+)\s*(?:deletions?|removals?|lines? (?:removed|deleted)|\-)/i,
+      );
       if (addMatch) existing.additions += parseInt(addMatch[1], 10);
       if (delMatch) existing.deletions += parseInt(delMatch[1], 10);
     }
 
     // If we couldn't parse stats, estimate from output length
-    if (existing.additions === 0 && existing.deletions === 0 && item.activity.output) {
+    if (
+      existing.additions === 0 &&
+      existing.deletions === 0 &&
+      item.activity.output
+    ) {
       existing.additions = item.activity.output.length;
     }
 
@@ -520,45 +635,104 @@ export function extractFileChanges(
 }
 
 export interface TurnSegment {
-  type: "text" | "tool-group" | "other";
+  type: "text" | "activity" | "other";
   items: TimelineItem[];
+  activityPhase?: ActivityPhase;
+  isLive?: boolean;
+  livePhase?: LivePhase;
 }
 
 /**
  * Groups timeline items from a single turn into segments of consecutive
- * tool activities vs. text/other items for cleaner rendering.
+ * activity vs. text/other items for cleaner rendering.
  */
-export function segmentTurnItems(items: TimelineItem[]): TurnSegment[] {
+export function segmentTurnItems(
+  items: TimelineItem[],
+  options?: {
+    idleGapMs?: number;
+    livePhase?: LivePhase | null;
+  },
+): TurnSegment[] {
   const segments: TurnSegment[] = [];
-  let currentToolItems: TimelineItem[] = [];
+  let currentActivityItems: TimelineItem[] = [];
+  let currentActivityPhase: ActivityPhase | null = null;
+  let lastActivityTimestamp: number | null = null;
+  const idleGapMs = options?.idleGapMs ?? 1500;
 
-  const flushTools = () => {
-    if (currentToolItems.length > 0) {
-      segments.push({ type: "tool-group", items: [...currentToolItems] });
-      currentToolItems = [];
+  const flushActivity = () => {
+    if (currentActivityItems.length > 0 && currentActivityPhase) {
+      segments.push({
+        type: "activity",
+        items: [...currentActivityItems],
+        activityPhase: currentActivityPhase,
+      });
+      currentActivityItems = [];
+      currentActivityPhase = null;
+      lastActivityTimestamp = null;
     }
   };
 
   for (const item of items) {
-    if (item.kind === "tool-activity") {
-      currentToolItems.push(item);
-    } else if (
-      item.kind === "system-notice" ||
-      item.kind === "warning"
-    ) {
-      // Transient status items go with tool groups
-      currentToolItems.push(item);
+    const phase = classifyActivityPhaseForItem(item);
+
+    if (phase) {
+      const timestamp = getTimelineItemTimestamp(item);
+      const hasIdleGap =
+        timestamp !== null &&
+        lastActivityTimestamp !== null &&
+        timestamp - lastActivityTimestamp > idleGapMs;
+      const hasPhaseChange =
+        currentActivityPhase !== null && currentActivityPhase !== phase;
+
+      if (hasIdleGap || hasPhaseChange) {
+        flushActivity();
+      }
+
+      currentActivityItems.push(item);
+      currentActivityPhase = phase;
+      if (timestamp !== null) {
+        lastActivityTimestamp = timestamp;
+      }
     } else if (item.kind === "assistant-message") {
-      flushTools();
+      flushActivity();
       segments.push({ type: "text", items: [item] });
     } else {
-      flushTools();
+      flushActivity();
       segments.push({ type: "other", items: [item] });
     }
   }
 
-  flushTools();
+  flushActivity();
+
+  if (options?.livePhase?.phase === "thinking") {
+    segments.push({
+      type: "activity",
+      items: [],
+      activityPhase: options.livePhase.phase,
+      isLive: true,
+      livePhase: options.livePhase,
+    });
+  }
+
   return segments;
+}
+
+export function formatActivityPhaseLabel(phase: ActivityPhase): string {
+  switch (phase) {
+    case "reading-files":
+      return "reading files";
+    case "listing-directory":
+      return "listing directory";
+    case "writing-files":
+      return "writing files";
+    case "verifying":
+      return "verifying";
+    case "thinking":
+      return "thinking";
+    case "other":
+    default:
+      return "working";
+  }
 }
 
 function humanizeRuntimeId(value: string) {
@@ -580,6 +754,107 @@ function humanizeRuntimeId(value: string) {
 
 function trimEdgeBlankLines(value: string) {
   return value.replace(/^\s*\n/, "").replace(/\n\s*$/, "");
+}
+
+function classifyToolFileAction(item: ToolActivityItem): ToolFileAction {
+  const toolName = item.activity.toolName.trim().toLowerCase();
+  const summary = item.activity.summary.trim().toLowerCase();
+  const text = `${toolName} ${summary}`.trim();
+
+  if (toolName === "read" || /\bread(ing)?\b/.test(text)) {
+    return "read";
+  }
+  if (
+    /\bls\b/.test(text) ||
+    /\blist(ing)?\b/.test(text) ||
+    /\bdirectory\b/.test(text) ||
+    /\btree\b/.test(text)
+  ) {
+    return "list";
+  }
+
+  const category = classifyToolCategory(
+    item.activity.toolName,
+    item.activity.summary,
+  );
+  if (category === "edited") return "edit";
+  if (category === "searched") return "search";
+  return "read";
+}
+
+function classifyActivityPhaseForItem(
+  item: TimelineItem,
+): ActivityPhase | null {
+  if (item.kind === "tool-activity") {
+    return (
+      classifyLivePhase(
+        [item.activity.toolName, item.activity.summary, item.activity.output]
+          .filter(Boolean)
+          .join(" "),
+      ) ?? "other"
+    );
+  }
+
+  if (
+    (item.kind === "system-notice" || item.kind === "warning") &&
+    classifyLivePhase(`${item.title} ${item.detail}`.trim())
+  ) {
+    return classifyLivePhase(`${item.title} ${item.detail}`.trim()) ?? "other";
+  }
+
+  return null;
+}
+
+function getTimelineItemTimestamp(item: TimelineItem): number | null {
+  const iso =
+    item.kind === "tool-activity" ? item.activity.startedAt : item.createdAt;
+  const timestamp = new Date(iso).getTime();
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
+function extractToolPaths(summary: string): string[] {
+  const paths = new Set<string>();
+
+  for (const pattern of TOOL_PATH_PATTERNS) {
+    for (const match of summary.matchAll(pattern)) {
+      const candidate = normalizeToolPathCandidate(
+        match[1] && match[2] ? match[2] : (match[1] ?? match[2] ?? ""),
+      );
+      if (candidate) {
+        paths.add(candidate);
+      }
+    }
+  }
+
+  return Array.from(paths);
+}
+
+function normalizeToolPathCandidate(candidate: string): string | null {
+  const normalized = candidate
+    .trim()
+    .replace(/^["'`(]+/, "")
+    .replace(/[)"'`,:;]+$/, "")
+    .replace(/\\(.)/g, "$1");
+
+  if (!normalized) {
+    return null;
+  }
+
+  const looksLikePath =
+    normalized.startsWith("/") ||
+    normalized.startsWith("./") ||
+    normalized.startsWith("../") ||
+    normalized.includes("/");
+
+  if (!looksLikePath) {
+    return null;
+  }
+
+  if (/^\w+:/.test(normalized) || normalized === "/") {
+    return null;
+  }
+
+  return normalized;
 }
 
 function normalizeSelectionAgainstProviders(

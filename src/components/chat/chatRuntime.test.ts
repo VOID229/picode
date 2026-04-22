@@ -10,7 +10,9 @@ import {
   resolveComposerCapabilities,
   resolveAssistantLabel,
   resolveSessionSelection,
+  segmentTurnItems,
   shortenAssistantLabel,
+  summarizeToolActivityDetails,
 } from "./chatRuntime";
 
 const defaultProviders: ProviderOption[] = [
@@ -85,8 +87,18 @@ describe("parseAssistantContent", () => {
       ),
     ).toEqual([
       { type: "markdown", content: "Intro" },
-      { type: "proposed-plan", content: "# Plan\n- item" },
+      { type: "proposed-plan", content: "# Plan\n- item", isClosed: true },
       { type: "markdown", content: "Outro" },
+    ]);
+  });
+
+  it("marks unclosed thinking blocks as open while streaming", () => {
+    expect(parseAssistantContent("<think>\nInspecting state")).toEqual([
+      {
+        type: "thinking",
+        content: "Inspecting state",
+        isClosed: false,
+      },
     ]);
   });
 });
@@ -266,4 +278,184 @@ describe("deriveLivePhase", () => {
     });
     expect(deriveLivePhase(session)?.detail).toBeUndefined();
   });
+
+  it("does not emit generic thinking when assistant text is already streaming", () => {
+    const session = createSession({
+      status: "streaming",
+      timeline: [
+        {
+          id: "assistant-1",
+          kind: "assistant-message",
+          content: "<think>\nInspecting the workspace",
+          createdAt: new Date().toISOString(),
+          streaming: true,
+        },
+      ],
+    });
+
+    expect(deriveLivePhase(session)).toBeNull();
+  });
 });
+
+describe("summarizeToolActivityDetails", () => {
+  it("dedupes file paths and prioritizes file summaries", () => {
+    const now = new Date().toISOString();
+    const details = summarizeToolActivityDetails([
+      {
+        id: "tool-1",
+        kind: "tool-activity",
+        createdAt: now,
+        activity: {
+          id: "tool-1",
+          toolName: "read",
+          summary:
+            'read {"path":"src/components/chat/ConversationView.tsx","limit":40}',
+          status: "completed",
+          startedAt: now,
+        },
+      },
+      {
+        id: "tool-2",
+        kind: "tool-activity",
+        createdAt: now,
+        activity: {
+          id: "tool-2",
+          toolName: "bash",
+          summary:
+            'grep -n "selection" src/components/chat/ConversationView.tsx',
+          status: "completed",
+          startedAt: now,
+        },
+      },
+    ]);
+
+    expect(details.files).toEqual([
+      {
+        path: "src/components/chat/ConversationView.tsx",
+        actions: ["read", "search"],
+      },
+    ]);
+    expect(details.rawCalls).toHaveLength(2);
+  });
+});
+
+describe("segmentTurnItems", () => {
+  it("splits activity when the phase changes", () => {
+    const segments = segmentTurnItems([
+      createToolActivity({
+        id: "tool-1",
+        summary:
+          'apply_patch "*** Update File: src/components/chat/chatRuntime.ts"',
+        createdAt: "2026-04-22T09:00:00.000Z",
+        toolName: "apply_patch",
+      }),
+      createToolActivity({
+        id: "tool-2",
+        toolName: "read",
+        summary:
+          'read {"path":"src/components/chat/chatRuntime.ts","limit":120}',
+        createdAt: "2026-04-22T09:00:00.500Z",
+      }),
+    ]);
+
+    expect(segments).toHaveLength(2);
+    expect(segments[0]).toMatchObject({
+      type: "activity",
+      activityPhase: "writing-files",
+    });
+    expect(segments[1]).toMatchObject({
+      type: "activity",
+      activityPhase: "reading-files",
+    });
+    expect((segments[0].items[0] as { id: string }).id).toBe("tool-1");
+    expect((segments[1].items[0] as { id: string }).id).toBe("tool-2");
+  });
+
+  it("splits activity after an idle gap over 1500ms", () => {
+    const segments = segmentTurnItems([
+      createToolActivity({
+        id: "tool-1",
+        toolName: "read",
+        summary:
+          'read {"path":"src/components/chat/ConversationView.tsx","limit":120}',
+        createdAt: "2026-04-22T09:00:00.000Z",
+      }),
+      createToolActivity({
+        id: "tool-2",
+        toolName: "read",
+        summary:
+          'read {"path":"src/components/chat/ToolActivityGroup.tsx","limit":120}',
+        createdAt: "2026-04-22T09:00:02.000Z",
+      }),
+    ]);
+
+    expect(segments).toHaveLength(2);
+    expect(segments.every((segment) => segment.type === "activity")).toBe(true);
+  });
+
+  it("keeps earlier activity groups and appends live thinking at the end", () => {
+    const segments = segmentTurnItems(
+      [
+        createToolActivity({
+          id: "tool-1",
+          summary:
+            'apply_patch "*** Update File: src/components/chat/chatRuntime.ts"',
+          createdAt: "2026-04-22T09:00:00.000Z",
+          status: "completed",
+          toolName: "apply_patch",
+        }),
+        createToolActivity({
+          id: "tool-2",
+          toolName: "read",
+          summary:
+            'read {"path":"src/components/chat/chatRuntime.ts","limit":120}',
+          createdAt: "2026-04-22T09:00:00.700Z",
+          status: "completed",
+        }),
+      ],
+      {
+        livePhase: {
+          phase: "thinking",
+          label: "thinking",
+        },
+      },
+    );
+
+    expect(segments).toHaveLength(3);
+    expect(segments[0]).toMatchObject({
+      type: "activity",
+      activityPhase: "writing-files",
+    });
+    expect(segments[1]).toMatchObject({
+      type: "activity",
+      activityPhase: "reading-files",
+    });
+    expect(segments[2]).toMatchObject({
+      type: "activity",
+      activityPhase: "thinking",
+      isLive: true,
+      livePhase: { phase: "thinking", label: "thinking" },
+    });
+  });
+});
+
+function createToolActivity(options: {
+  id: string;
+  createdAt: string;
+  toolName?: string;
+  summary: string;
+  status?: "running" | "completed" | "failed";
+}) {
+  return {
+    id: options.id,
+    kind: "tool-activity" as const,
+    createdAt: options.createdAt,
+    activity: {
+      id: options.id,
+      toolName: options.toolName ?? "bash",
+      summary: options.summary,
+      status: options.status ?? "completed",
+      startedAt: options.createdAt,
+    },
+  };
+}

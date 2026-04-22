@@ -70,6 +70,7 @@ function createState(): PersistedAppState {
       titleModelId: "gpt-5.4-mini",
       titleModelEffort: "high",
       autoTitleEnabled: true,
+      showRawToolCalls: false,
       layout: {
         diffMode: "split",
         gitPanelOpen: false,

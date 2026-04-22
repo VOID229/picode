@@ -81,9 +81,19 @@ export interface TimelineItemBase {
   createdAt: string;
 }
 
+export interface MessageImageAttachment {
+  mimeType: string;
+  data: string;
+}
+
+export interface ComposerImageDraft extends MessageImageAttachment {
+  id: string;
+}
+
 export interface UserMessageItem extends TimelineItemBase {
   kind: "user-message";
   content: string;
+  images?: MessageImageAttachment[];
 }
 
 export interface AssistantMessageItem extends TimelineItemBase {
@@ -227,6 +237,7 @@ export interface AppPreferences {
   titleModelId: string;
   titleModelEffort: string;
   autoTitleEnabled: boolean;
+  showRawToolCalls: boolean;
   approvalMode: ApprovalMode;
   effort: string;
   fastMode: boolean;

@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import type {
   BootstrapPayload,
   GitSnapshot,
+  MessageImageAttachment,
   PersistedAppState,
   PromptMode,
   PiRuntimeEvent,
@@ -68,6 +69,7 @@ export async function sendPrompt(payload: {
   userMessageId: string;
   prompt: string;
   mode: PromptMode;
+  images?: MessageImageAttachment[];
 }) {
   return normalize(await invoke<PersistedAppState>("send_prompt", { payload }));
 }

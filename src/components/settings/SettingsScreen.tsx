@@ -568,6 +568,36 @@ export function SettingsScreen() {
                     control={<Toggle checked={false} />}
                   />
                   <SettingRow
+                    label="Raw tool calls"
+                    description="Allow expanded tool activity to reveal the underlying raw tool calls beneath the file summary."
+                    control={
+                      <button
+                        style={{
+                          ...btnStyle,
+                          padding: 0,
+                          border: "none",
+                          background: "transparent",
+                        }}
+                        onClick={() => {
+                          if (!state) {
+                            return;
+                          }
+
+                          void updatePreferences({
+                            ...state.preferences,
+                            showRawToolCalls:
+                              !state.preferences.showRawToolCalls,
+                          });
+                        }}
+                        type="button"
+                      >
+                        <Toggle
+                          checked={state?.preferences.showRawToolCalls ?? false}
+                        />
+                      </button>
+                    }
+                  />
+                  <SettingRow
                     label="New threads"
                     description="Pick the default workspace mode for newly created draft threads."
                     control={

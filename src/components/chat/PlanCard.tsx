@@ -16,6 +16,7 @@ interface PlanCardProps {
 export function PlanCard({ content, workspaceId, isActive }: PlanCardProps) {
   const createSession = useAppStore((store) => store.createSession);
   const setComposerDraft = useAppStore((store) => store.setComposerDraft);
+  const [expanded, setExpanded] = useState(false);
   const [menuPosition, setMenuPosition] = useState<{
     x: number;
     y: number;
@@ -71,9 +72,9 @@ export function PlanCard({ content, workspaceId, isActive }: PlanCardProps) {
       icon={<SquarePen size={14} />}
       isActive={isActive}
     >
-      <section className="plan-card" style={{ marginTop: 0, border: 'none', background: 'transparent' }}>
-        <header className="plan-card__header" style={{ padding: '4px 0' }}>
-          <div className="plan-card__eyebrow" style={{ visibility: 'hidden', height: 0, margin: 0 }}>Plan</div>
+      <section className={`plan-card${expanded ? " plan-card--expanded" : ""}`}>
+        <header className="plan-card__header">
+          <div className="plan-card__eyebrow">Plan</div>
           <button
             className="plan-card__menu-button"
             onClick={(event) => {
@@ -88,9 +89,20 @@ export function PlanCard({ content, workspaceId, isActive }: PlanCardProps) {
             <MoreHorizontal size={16} />
           </button>
         </header>
-        <div className="plan-card__body" style={{ padding: '0 0 12px 0' }}>
+        <div
+          className={`plan-card__body${expanded ? " plan-card__body--expanded" : ""}`}
+        >
           <MarkdownRenderer className="markdown-content" content={content} />
         </div>
+        <footer className="plan-card__footer">
+          <button
+            className="plan-card__resize-button"
+            onClick={() => setExpanded((current) => !current)}
+            type="button"
+          >
+            {expanded ? "Minimize" : "Expand"}
+          </button>
+        </footer>
         {menuPosition && (
           <ContextMenu
             x={menuPosition.x}
