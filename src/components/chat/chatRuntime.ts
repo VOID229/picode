@@ -657,7 +657,7 @@ export function segmentTurnItems(
   let currentActivityItems: TimelineItem[] = [];
   let currentActivityPhase: ActivityPhase | null = null;
   let lastActivityTimestamp: number | null = null;
-  const idleGapMs = options?.idleGapMs ?? 1500;
+  const idleGapMs = options?.idleGapMs ?? 5000;
 
   const flushActivity = () => {
     if (currentActivityItems.length > 0 && currentActivityPhase) {

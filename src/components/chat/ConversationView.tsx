@@ -3,6 +3,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useLayoutEffect,
   useRef,
   useState,
   type ClipboardEvent,
@@ -35,6 +36,15 @@ import {
 interface ConversationViewProps {
   workspace: WorkspaceRecord | null;
   session: ChatSession | null;
+}
+
+const BOTTOM_SCROLL_TOLERANCE_PX = 4;
+
+function isNearBottom(node: HTMLDivElement) {
+  return (
+    node.scrollHeight - node.scrollTop - node.clientHeight <=
+    BOTTOM_SCROLL_TOLERANCE_PX
+  );
 }
 
 export function ConversationView({
@@ -194,25 +204,27 @@ export function ConversationView({
     }
   }, [sessionDraft, session?.id]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
+    shouldStickToBottomRef.current = true;
+  }, [session?.id]);
+
+  useLayoutEffect(() => {
     if (timelineRef.current && shouldStickToBottomRef.current) {
       timelineRef.current.scrollTop = timelineRef.current.scrollHeight;
     }
-  }, [session?.timeline.length, session?.status]);
+  }, [session?.id, session?.updatedAt]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const node = timelineRef.current;
     if (!node) {
       return;
     }
 
     const updateStickiness = () => {
-      shouldStickToBottomRef.current =
-        node.scrollHeight - node.scrollTop - node.clientHeight < 120;
+      shouldStickToBottomRef.current = isNearBottom(node);
     };
 
-    updateStickiness();
-    node.addEventListener("scroll", updateStickiness);
+    node.addEventListener("scroll", updateStickiness, { passive: true });
     return () => node.removeEventListener("scroll", updateStickiness);
   }, [session?.id]);
 

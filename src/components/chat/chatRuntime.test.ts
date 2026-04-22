@@ -371,7 +371,7 @@ describe("segmentTurnItems", () => {
     expect((segments[1].items[0] as { id: string }).id).toBe("tool-2");
   });
 
-  it("splits activity after an idle gap over 1500ms", () => {
+  it("keeps activity together within a 5000ms idle gap", () => {
     const segments = segmentTurnItems([
       createToolActivity({
         id: "tool-1",
@@ -386,6 +386,31 @@ describe("segmentTurnItems", () => {
         summary:
           'read {"path":"src/components/chat/ToolActivityGroup.tsx","limit":120}',
         createdAt: "2026-04-22T09:00:02.000Z",
+      }),
+    ]);
+
+    expect(segments).toHaveLength(1);
+    expect(segments[0]).toMatchObject({
+      type: "activity",
+      activityPhase: "reading-files",
+    });
+  });
+
+  it("splits activity after an idle gap over 5000ms", () => {
+    const segments = segmentTurnItems([
+      createToolActivity({
+        id: "tool-1",
+        toolName: "read",
+        summary:
+          'read {"path":"src/components/chat/ConversationView.tsx","limit":120}',
+        createdAt: "2026-04-22T09:00:00.000Z",
+      }),
+      createToolActivity({
+        id: "tool-2",
+        toolName: "read",
+        summary:
+          'read {"path":"src/components/chat/ToolActivityGroup.tsx","limit":120}',
+        createdAt: "2026-04-22T09:00:06.000Z",
       }),
     ]);
 
