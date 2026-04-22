@@ -2589,14 +2589,6 @@ async fn stop_prompt_internal(
     Ok(shared.state.lock().await.clone())
 }
 
-pub async fn stop_prompt_silently(
-    app: AppHandle,
-    shared: AppState,
-    payload: AbortPromptPayload,
-) -> Result<crate::models::PersistedAppState> {
-    stop_prompt_internal(&app, &shared, &payload, false, true).await
-}
-
 pub async fn abort_prompt(
     app: AppHandle,
     shared: AppState,
