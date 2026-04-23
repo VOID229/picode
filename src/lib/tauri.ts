@@ -8,6 +8,7 @@ import type {
   PromptMode,
   PiRuntimeEvent,
   RunTerminalCommandResult,
+  SessionStats,
   TerminalEvent,
   RuntimeBootstrapPayload,
   RuntimeHealthPayload,
@@ -174,6 +175,25 @@ export async function deleteSession(workspaceId: string, sessionId: string) {
   );
 }
 
+export async function moveWorkspace(payload: {
+  workspaceId: string;
+  beforeWorkspaceId?: string | null;
+}) {
+  return normalize(
+    await invoke<PersistedAppState>("move_workspace", { payload }),
+  );
+}
+
+export async function moveSession(payload: {
+  workspaceId: string;
+  sessionId: string;
+  beforeSessionId?: string | null;
+}) {
+  return normalize(
+    await invoke<PersistedAppState>("move_session", { payload }),
+  );
+}
+
 export async function readDir(path: string) {
   return await invoke<string[]>("read_dir", { path });
 }
@@ -238,6 +258,25 @@ export async function undoUserTurn(payload: {
 }) {
   return normalize(
     await invoke<PersistedAppState>("undo_user_turn", { payload }),
+  );
+}
+
+export async function redoUserTurn(payload: {
+  workspaceId: string;
+  sessionId: string;
+  userMessageId: string;
+}) {
+  return normalize(
+    await invoke<PersistedAppState>("redo_user_turn", { payload }),
+  );
+}
+
+export async function getSessionStats(payload: {
+  workspaceId: string;
+  sessionId: string;
+}) {
+  return normalize(
+    await invoke<SessionStats>("get_session_stats", { payload }),
   );
 }
 

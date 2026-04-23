@@ -13,6 +13,7 @@ import {
   Hash,
   Archive,
   SquarePen,
+  GripVertical,
 } from "lucide-react";
 import {
   useMemo,
@@ -44,12 +45,13 @@ export function Sidebar({ state }: SidebarProps) {
   const [isPickerOpen, setIsPickerOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
   const createWorkspace = useAppStore((store) => store.createWorkspace);
+  const moveWorkspace = useAppStore((store) => store.moveWorkspace);
 
   const [projectSortOrder, setProjectSortOrder] = useState<
     "last-message" | "created" | "manual"
   >("last-message");
   const [threadSortOrder, setThreadSortOrder] = useState<
-    "last-message" | "created"
+    "last-message" | "created" | "manual"
   >("last-message");
   const [projectGrouping, setProjectGrouping] = useState<
     "repo" | "path" | "none"
@@ -58,6 +60,9 @@ export function Sidebar({ state }: SidebarProps) {
     null,
   );
   const [isModifierHeld, setIsModifierHeld] = useState(false);
+  const [draggedWorkspaceId, setDraggedWorkspaceId] = useState<string | null>(
+    null,
+  );
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -88,14 +93,14 @@ export function Sidebar({ state }: SidebarProps) {
       );
     });
 
-    // Sorting logic for projects
-    result = [...result].sort((a, b) => {
-      if (projectSortOrder === "created") {
-        // We don't have workspace.createdAt, so we might need to use recentRank or similar
-        // For now let's assume recentRank is a proxy for creation or use session dates
-        return a.recentRank - b.recentRank;
-      }
-      if (projectSortOrder === "last-message") {
+    if (projectSortOrder !== "manual") {
+      // Sorting logic for projects
+      result = [...result].sort((a, b) => {
+        if (projectSortOrder === "created") {
+          // We don't have workspace.createdAt, so we might need to use recentRank or similar
+          // For now let's assume recentRank is a proxy for creation or use session dates
+          return a.recentRank - b.recentRank;
+        }
         const lastA = Math.max(
           ...a.sessions.map((s) => new Date(s.updatedAt).getTime()),
           0,
@@ -105,9 +110,8 @@ export function Sidebar({ state }: SidebarProps) {
           0,
         );
         return lastB - lastA;
-      }
-      return 0; // Manual
-    });
+      });
+    }
 
     return result;
   }, [query, state.workspaces, projectSortOrder]);
@@ -146,6 +150,11 @@ export function Sidebar({ state }: SidebarProps) {
         isChecked: threadSortOrder === "created",
         onClick: () => setThreadSortOrder("created"),
       },
+      {
+        label: "Manual",
+        isChecked: threadSortOrder === "manual",
+        onClick: () => setThreadSortOrder("manual"),
+      },
       { label: "Group projects", isHeader: true, separator: true },
       {
         label: "Group by repository",
@@ -164,6 +173,37 @@ export function Sidebar({ state }: SidebarProps) {
       },
     ],
     [projectSortOrder, threadSortOrder, projectGrouping],
+  );
+
+  const handleWorkspaceDragStart = useCallback(
+    (workspaceId: string) => {
+      if (projectSortOrder === "manual") {
+        setDraggedWorkspaceId(workspaceId);
+      }
+    },
+    [projectSortOrder],
+  );
+
+  const handleWorkspaceDragEnd = useCallback(() => {
+    setDraggedWorkspaceId(null);
+  }, []);
+
+  const handleWorkspaceDrop = useCallback(
+    async (beforeWorkspaceId: string | null) => {
+      if (projectSortOrder !== "manual" || !draggedWorkspaceId) {
+        return;
+      }
+
+      const workspaceId = draggedWorkspaceId;
+      setDraggedWorkspaceId(null);
+
+      if (workspaceId === beforeWorkspaceId) {
+        return;
+      }
+
+      await moveWorkspace(workspaceId, beforeWorkspaceId);
+    },
+    [draggedWorkspaceId, moveWorkspace, projectSortOrder],
   );
 
   return (
@@ -322,6 +362,19 @@ export function Sidebar({ state }: SidebarProps) {
             overflowY: "auto",
             paddingBottom: "8px",
           }}
+          onDragOver={(event) => {
+            if (projectSortOrder !== "manual" || !draggedWorkspaceId) {
+              return;
+            }
+            event.preventDefault();
+          }}
+          onDrop={(event) => {
+            if (projectSortOrder !== "manual" || !draggedWorkspaceId) {
+              return;
+            }
+            event.preventDefault();
+            void handleWorkspaceDrop(null);
+          }}
         >
           {filteredWorkspaces.map((workspace) => (
             <ProjectNode
@@ -329,7 +382,12 @@ export function Sidebar({ state }: SidebarProps) {
               workspace={workspace}
               state={state}
               threadSortOrder={threadSortOrder}
+              projectSortOrder={projectSortOrder}
               isModifierHeld={isModifierHeld}
+              isDraggingWorkspace={draggedWorkspaceId === workspace.id}
+              onWorkspaceDragStart={handleWorkspaceDragStart}
+              onWorkspaceDragEnd={handleWorkspaceDragEnd}
+              onWorkspaceDrop={handleWorkspaceDrop}
             />
           ))}
         </div>
@@ -389,12 +447,22 @@ function ProjectNode({
   workspace,
   state,
   threadSortOrder,
+  projectSortOrder,
   isModifierHeld,
+  isDraggingWorkspace,
+  onWorkspaceDragStart,
+  onWorkspaceDragEnd,
+  onWorkspaceDrop,
 }: {
   workspace: WorkspaceRecord;
   state: PersistedAppState;
-  threadSortOrder: "last-message" | "created";
+  threadSortOrder: "last-message" | "created" | "manual";
+  projectSortOrder: "last-message" | "created" | "manual";
   isModifierHeld: boolean;
+  isDraggingWorkspace: boolean;
+  onWorkspaceDragStart: (workspaceId: string) => void;
+  onWorkspaceDragEnd: () => void;
+  onWorkspaceDrop: (beforeWorkspaceId: string | null) => void;
 }) {
   const [isExpanded, setIsExpanded] = useState(
     workspace.id === state.activeWorkspaceId,
@@ -415,6 +483,7 @@ function ProjectNode({
   const renameSession = useAppStore((store) => store.renameSession);
   const archiveSession = useAppStore((store) => store.archiveSession);
   const deleteSession = useAppStore((store) => store.deleteSession);
+  const moveSession = useAppStore((store) => store.moveSession);
 
   const activeSessionId = state.activeSessionId;
 
@@ -424,21 +493,100 @@ function ProjectNode({
   const [lastSelectedSessionId, setLastSelectedSessionId] = useState<
     string | null
   >(null);
+  const [draggedSessionId, setDraggedSessionId] = useState<string | null>(
+    null,
+  );
+  const [sessionDropIndicator, setSessionDropIndicator] = useState<{
+    beforeSessionId: string | null;
+  } | null>(null);
 
   const visibleSessions = useMemo(() => {
-    return workspace.sessions
-      .filter((s) => !s.archivedAt)
-      .sort((a, b) => {
-        if (threadSortOrder === "created") {
-          return (
-            new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-          );
-        }
-        return (
-          new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
-        );
-      });
+    const sessions = workspace.sessions.filter((s) => !s.archivedAt);
+    if (threadSortOrder === "manual") {
+      return sessions;
+    }
+    return sessions.sort((a, b) => {
+      if (threadSortOrder === "created") {
+        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      }
+      return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+    });
   }, [workspace.sessions, threadSortOrder]);
+
+  const handleSessionDragStart = useCallback(
+    (sessionId: string) => {
+      if (threadSortOrder === "manual") {
+        setDraggedSessionId(sessionId);
+      }
+    },
+    [threadSortOrder],
+  );
+
+  const handleSessionDragOver = useCallback(
+    (event: React.DragEvent, sessionId: string) => {
+      if (threadSortOrder !== "manual" || !draggedSessionId) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+
+      const target = event.currentTarget as HTMLDivElement;
+      const rect = target.getBoundingClientRect();
+      const pointerIsInUpperHalf = event.clientY < rect.top + rect.height / 2;
+      const sessionIndex = visibleSessions.findIndex((s) => s.id === sessionId);
+      const beforeSessionId = pointerIsInUpperHalf
+        ? sessionId
+        : visibleSessions[sessionIndex + 1]?.id ?? null;
+
+      setSessionDropIndicator((current) => {
+        if (current?.beforeSessionId === beforeSessionId) {
+          return current;
+        }
+        return { beforeSessionId };
+      });
+    },
+    [draggedSessionId, threadSortOrder, visibleSessions],
+  );
+
+  const handleSessionListDragOver = useCallback(
+    (event: React.DragEvent) => {
+      if (threadSortOrder !== "manual" || !draggedSessionId) {
+        return;
+      }
+
+      event.preventDefault();
+
+      if (visibleSessions.length === 0) {
+        setSessionDropIndicator({ beforeSessionId: null });
+      }
+    },
+    [draggedSessionId, threadSortOrder, visibleSessions.length],
+  );
+
+  const handleSessionDragEnd = useCallback(() => {
+    setDraggedSessionId(null);
+    setSessionDropIndicator(null);
+  }, []);
+
+  const handleSessionDrop = useCallback(
+    async (beforeSessionId: string | null) => {
+      if (threadSortOrder !== "manual" || !draggedSessionId) {
+        return;
+      }
+
+      const sessionId = draggedSessionId;
+      setDraggedSessionId(null);
+      setSessionDropIndicator(null);
+
+      if (sessionId === beforeSessionId) {
+        return;
+      }
+
+      await moveSession(workspace.id, sessionId, beforeSessionId);
+    },
+    [draggedSessionId, moveSession, threadSortOrder, workspace.id],
+  );
 
   // Global shortcut handler for 1-9 to switch threads
   useEffect(() => {
@@ -521,16 +669,42 @@ function ProjectNode({
           padding: "6px 8px",
           borderRadius: "6px",
           color: workspace.id === state.activeWorkspaceId ? "#fff" : "#aaa",
+          cursor: projectSortOrder === "manual" ? "grab" : "pointer",
+          opacity: isDraggingWorkspace ? 0.55 : 1,
         }}
         onClick={() => setIsExpanded(!isExpanded)}
         onContextMenu={handleProjectContextMenu}
         className="project-row group"
+        draggable={projectSortOrder === "manual"}
+        onDragStart={(event) => {
+          event.dataTransfer.effectAllowed = "move";
+          event.dataTransfer.setData("text/plain", workspace.id);
+          onWorkspaceDragStart(workspace.id);
+        }}
+        onDragEnd={onWorkspaceDragEnd}
+        onDragOver={(event) => {
+          if (projectSortOrder !== "manual" || !isDraggingWorkspace) {
+            return;
+          }
+          event.preventDefault();
+        }}
+        onDrop={(event) => {
+          if (projectSortOrder !== "manual" || !isDraggingWorkspace) {
+            return;
+          }
+          event.preventDefault();
+          event.stopPropagation();
+          onWorkspaceDrop(workspace.id);
+        }}
         onMouseEnter={(e) => (e.currentTarget.style.background = "#222")}
         onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
       >
         <div
           style={{ display: "flex", alignItems: "center", gap: "4px", flex: 1 }}
         >
+          {projectSortOrder === "manual" && (
+            <GripVertical size={12} color="#666" />
+          )}
           {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
           {isExpanded ? (
             <FolderOpen size={14} color="#666" />
@@ -571,6 +745,20 @@ function ProjectNode({
             paddingTop: "4px",
             paddingBottom: "8px",
           }}
+          onDragOver={handleSessionListDragOver}
+          onDrop={(event) => {
+            if (threadSortOrder !== "manual" || !draggedSessionId) {
+              return;
+            }
+            event.preventDefault();
+            event.stopPropagation();
+            void handleSessionDrop(sessionDropIndicator?.beforeSessionId ?? null);
+          }}
+          onDragLeave={(event) => {
+            if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+              setSessionDropIndicator(null);
+            }
+          }}
         >
           {visibleSessions.length === 0 ? (
             <div
@@ -590,6 +778,22 @@ function ProjectNode({
                   isSelected={isSelected}
                   selectedCount={selectedSessionIds.size}
                   isModifierHeld={isModifierHeld}
+                  threadSortOrder={threadSortOrder}
+                  isDraggingSession={draggedSessionId === session.id}
+                  showDropIndicator={
+                    threadSortOrder === "manual" &&
+                    draggedSessionId !== null &&
+                    sessionDropIndicator?.beforeSessionId === session.id
+                  }
+                  dropBeforeSessionId={
+                    threadSortOrder === "manual"
+                      ? (sessionDropIndicator?.beforeSessionId ?? null)
+                      : null
+                  }
+                  onSessionDragStart={handleSessionDragStart}
+                  onSessionDragOver={handleSessionDragOver}
+                  onSessionDragEnd={handleSessionDragEnd}
+                  onSessionDrop={handleSessionDrop}
                   shortcutKey={
                     workspace.id === state.activeWorkspaceId && index < 9
                       ? String(index + 1)
@@ -650,6 +854,18 @@ function ProjectNode({
               );
             })
           )}
+          {threadSortOrder === "manual" &&
+            draggedSessionId !== null &&
+            sessionDropIndicator?.beforeSessionId === null && (
+              <div
+                style={{
+                  height: "2px",
+                  margin: "2px 8px 0 8px",
+                  background: "#2563eb",
+                  borderRadius: "999px",
+                }}
+              />
+            )}
         </div>
       )}
 
@@ -708,6 +924,14 @@ function SessionItem({
   isSelected,
   selectedCount,
   isModifierHeld,
+  threadSortOrder,
+  isDraggingSession,
+  showDropIndicator,
+  dropBeforeSessionId,
+  onSessionDragStart,
+  onSessionDragOver,
+  onSessionDragEnd,
+  onSessionDrop,
   shortcutKey,
   onSelect,
   onClearSelection,
@@ -722,6 +946,14 @@ function SessionItem({
   isSelected: boolean;
   selectedCount: number;
   isModifierHeld?: boolean;
+  threadSortOrder: "last-message" | "created" | "manual";
+  isDraggingSession: boolean;
+  showDropIndicator: boolean;
+  dropBeforeSessionId: string | null;
+  onSessionDragStart: (sessionId: string) => void;
+  onSessionDragOver: (event: React.DragEvent, sessionId: string) => void;
+  onSessionDragEnd: () => void;
+  onSessionDrop: (beforeSessionId: string | null) => void;
   shortcutKey?: string;
   onSelect: (e: React.MouseEvent) => void;
   onClearSelection: () => void;
@@ -841,89 +1073,144 @@ function SessionItem({
 
   return (
     <>
-      <div
-        onClick={onSelect}
-        onContextMenu={handleContextMenu}
-        className="session-item"
-        style={{
-          userSelect: "none",
-          padding: "6px 8px",
-          borderRadius: "6px",
-          color: isMultiSelected ? "#fff" : isActive ? "#fff" : "#888",
-          background: isMultiSelected
-            ? "#274377"
-            : isActive
-              ? "rgba(255,255,255,0.05)"
-              : "transparent",
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          minWidth: 0,
-          transition: "background 0.2s, color 0.2s",
-        }}
-        onMouseEnter={(e) => {
-          if (isMultiSelected) {
-            e.currentTarget.style.background = "#2a4880";
-          } else {
-            e.currentTarget.style.background = isActive
-              ? "rgba(255,255,255,0.08)"
-              : "#222";
-            if (!isActive) e.currentTarget.style.color = "#ccc";
-          }
-        }}
-        onMouseLeave={(e) => {
-          if (isMultiSelected) {
-            e.currentTarget.style.background = "#274377";
-          } else {
-            e.currentTarget.style.background = isActive
-              ? "rgba(255,255,255,0.05)"
-              : "transparent";
-            if (!isActive) e.currentTarget.style.color = "#888";
-          }
-        }}
-      >
-        <span style={{ flex: 1, minWidth: 0, marginRight: "8px" }}>
-          <TruncatedSessionTitle title={session.title} />
-        </span>
-        <div
-          className="session-actions"
-          style={{ display: "flex", alignItems: "center", gap: "6px" }}
-        >
-          <span
-            style={{ fontSize: "0.65rem", color: "#555" }}
-            className="session-status"
-          >
-            {isModifierHeld && shortcutKey ? (
-              <span
-                style={{
-                  background: "rgba(255,255,255,0.1)",
-                  color: "#fff",
-                  padding: "1px 4px",
-                  borderRadius: "4px",
-                  fontFamily: "monospace",
-                  fontSize: "0.6rem",
-                }}
-              >
-                ⌘{shortcutKey}
-              </span>
-            ) : session.status === "streaming" ? (
-              "Active"
-            ) : (
-              formatTimeAgo(session.updatedAt)
-            )}
-          </span>
-          <Archive
-            size={14}
-            className="archive-btn action-icon"
+      <div style={{ position: "relative" }}>
+        {showDropIndicator && (
+          <div
             style={{
-              color: "#666",
-              display: "none",
-            }}
-            onClick={(e) => {
-              e.stopPropagation();
-              onArchive();
+              position: "absolute",
+              top: 0,
+              left: "8px",
+              right: "8px",
+              height: "2px",
+              background: "#2563eb",
+              borderRadius: "999px",
+              pointerEvents: "none",
+              zIndex: 1,
             }}
           />
+        )}
+        <div
+          onClick={onSelect}
+          onContextMenu={handleContextMenu}
+          className="session-item"
+          draggable={threadSortOrder === "manual"}
+          onDragStart={(event) => {
+            if (threadSortOrder !== "manual") {
+              return;
+            }
+            event.dataTransfer.effectAllowed = "move";
+            event.dataTransfer.setData("text/plain", session.id);
+            onSessionDragStart(session.id);
+          }}
+          onDragOver={(event) => onSessionDragOver(event, session.id)}
+          onDrop={(event) => {
+            if (threadSortOrder !== "manual") {
+              return;
+            }
+            event.preventDefault();
+            event.stopPropagation();
+            onSessionDrop(dropBeforeSessionId);
+          }}
+          onDragEnd={onSessionDragEnd}
+          style={{
+            userSelect: "none",
+            padding: "6px 8px",
+            borderRadius: "6px",
+            color: isMultiSelected ? "#fff" : isActive ? "#fff" : "#888",
+            background: isMultiSelected
+              ? "#274377"
+              : isActive
+                ? "rgba(255,255,255,0.05)"
+                : "transparent",
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            minWidth: 0,
+            cursor: threadSortOrder === "manual" ? "grab" : "pointer",
+            opacity: isDraggingSession ? 0.55 : 1,
+            transition: "background 0.2s, color 0.2s",
+          }}
+          onMouseEnter={(e) => {
+            if (isMultiSelected) {
+              e.currentTarget.style.background = "#2a4880";
+            } else {
+              e.currentTarget.style.background = isActive
+                ? "rgba(255,255,255,0.08)"
+                : "#222";
+              if (!isActive) e.currentTarget.style.color = "#ccc";
+            }
+          }}
+          onMouseLeave={(e) => {
+            if (isMultiSelected) {
+              e.currentTarget.style.background = "#274377";
+            } else {
+              e.currentTarget.style.background = isActive
+                ? "rgba(255,255,255,0.05)"
+                : "transparent";
+              if (!isActive) e.currentTarget.style.color = "#888";
+            }
+          }}
+        >
+          <span
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "6px",
+              flex: 1,
+              minWidth: 0,
+              marginRight: "8px",
+            }}
+          >
+            {threadSortOrder === "manual" && (
+              <span
+                title="Drag to rearrange thread"
+                style={{ display: "inline-flex", cursor: "grab" }}
+              >
+                <GripVertical size={12} color="#666" />
+              </span>
+            )}
+            <TruncatedSessionTitle title={session.title} />
+          </span>
+          <div
+            className="session-actions"
+            style={{ display: "flex", alignItems: "center", gap: "6px" }}
+          >
+            <span
+              style={{ fontSize: "0.65rem", color: "#555" }}
+              className="session-status"
+            >
+              {isModifierHeld && shortcutKey ? (
+                <span
+                  style={{
+                    background: "rgba(255,255,255,0.1)",
+                    color: "#fff",
+                    padding: "1px 4px",
+                    borderRadius: "4px",
+                    fontFamily: "monospace",
+                    fontSize: "0.6rem",
+                  }}
+                >
+                  ⌘{shortcutKey}
+                </span>
+              ) : session.status === "streaming" ? (
+                "Active"
+              ) : (
+                formatTimeAgo(session.updatedAt)
+              )}
+            </span>
+            <Archive
+              size={14}
+              className="archive-btn action-icon"
+              style={{
+                color: "#666",
+                display: "none",
+              }}
+              onClick={(e) => {
+                e.stopPropagation();
+                onArchive();
+              }}
+            />
+          </div>
         </div>
       </div>
       {contextMenu && (

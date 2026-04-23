@@ -68,6 +68,8 @@ function createState(): PersistedAppState {
       fastMode: false,
       titleModelProviderId: "openai-codex",
       titleModelId: "gpt-5.4-mini",
+      titleModelFallbackProviderId: "openai-codex",
+      titleModelFallbackId: "gpt-5.4",
       titleModelEffort: "high",
       autoTitleEnabled: true,
       showRawToolCalls: false,

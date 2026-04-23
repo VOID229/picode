@@ -1,4 +1,4 @@
-import { ChevronDown, RotateCcw } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 import { useState } from "react";
 import { cn } from "../../lib/cn";
 import type { FileChange } from "./chatRuntime";
@@ -10,6 +10,7 @@ interface FilesChangedBlockProps {
   /** Git-sourced diff files (preferred when available) */
   gitFiles?: DiffFile[];
   onUndo?: () => void;
+  onRedo?: () => void;
 }
 
 interface DisplayFile {
@@ -18,10 +19,15 @@ interface DisplayFile {
   deletions: number;
 }
 
+function formatLineDelta(count: number) {
+  return `${count}`;
+}
+
 export function FilesChangedBlock({
   toolFileChanges,
   gitFiles,
   onUndo,
+  onRedo,
 }: FilesChangedBlockProps) {
   const [expanded, setExpanded] = useState(true);
 
@@ -65,7 +71,16 @@ export function FilesChangedBlock({
               onClick={onUndo}
               title="Undo changes"
             >
-              Undo <RotateCcw size={13} />
+              Undo
+            </button>
+          )}
+          {onRedo && (
+            <button
+              className="files-changed-block__undo"
+              onClick={onRedo}
+              title="Redo changes"
+            >
+              Redo
             </button>
           )}
         </div>
@@ -84,12 +99,12 @@ export function FilesChangedBlock({
               <span className="files-changed-block__stats">
                 {file.additions > 0 && (
                   <span className="files-changed-block__additions">
-                    +{file.additions}
+                    +{formatLineDelta(file.additions)}
                   </span>
                 )}
                 {file.deletions > 0 && (
                   <span className="files-changed-block__deletions">
-                    -{file.deletions}
+                    -{formatLineDelta(file.deletions)}
                   </span>
                 )}
               </span>

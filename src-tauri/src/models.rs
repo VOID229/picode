@@ -253,6 +253,43 @@ pub struct SessionRuntimeMetadata {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContextUsage {
+    #[serde(default)]
+    pub tokens: Option<u64>,
+    pub context_window: u64,
+    #[serde(default)]
+    pub percent: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionStats {
+    #[serde(default)]
+    pub session_file: Option<String>,
+    pub session_id: String,
+    pub user_messages: u64,
+    pub assistant_messages: u64,
+    pub tool_calls: u64,
+    pub tool_results: u64,
+    pub total_messages: u64,
+    pub tokens: TokenUsage,
+    pub cost: f64,
+    #[serde(default)]
+    pub context_usage: Option<ContextUsage>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TokenUsage {
+    pub input: u64,
+    pub output: u64,
+    pub cache_read: u64,
+    pub cache_write: u64,
+    pub total: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum SessionStatus {
     Idle,
@@ -324,6 +361,10 @@ pub struct AppPreferences {
     pub title_model_provider_id: String,
     #[serde(default = "default_model_id")]
     pub title_model_id: String,
+    #[serde(default = "default_provider_id")]
+    pub title_model_fallback_provider_id: String,
+    #[serde(default = "default_model_id")]
+    pub title_model_fallback_id: String,
     #[serde(default = "default_effort")]
     pub title_model_effort: String,
     #[serde(default = "default_auto_title_enabled")]
@@ -460,6 +501,30 @@ pub struct UndoUserTurnPayload {
     pub workspace_id: String,
     pub session_id: String,
     pub user_message_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionIdentityPayload {
+    pub workspace_id: String,
+    pub session_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReorderWorkspacePayload {
+    pub workspace_id: String,
+    #[serde(default)]
+    pub before_workspace_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReorderSessionPayload {
+    pub workspace_id: String,
+    pub session_id: String,
+    #[serde(default)]
+    pub before_session_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -835,6 +900,8 @@ pub fn default_preferences() -> AppPreferences {
         model_id: default_model_id(),
         title_model_provider_id: default_provider_id(),
         title_model_id: default_title_model_id(),
+        title_model_fallback_provider_id: default_provider_id(),
+        title_model_fallback_id: default_model_id(),
         title_model_effort: default_effort(),
         auto_title_enabled: default_auto_title_enabled(),
         show_raw_tool_calls: default_show_raw_tool_calls(),
@@ -983,6 +1050,10 @@ pub fn normalize_state(mut state: PersistedAppState) -> PersistedAppState {
     normalize_stored_model_selection(
         &mut state.preferences.title_model_provider_id,
         &mut state.preferences.title_model_id,
+    );
+    normalize_stored_model_selection(
+        &mut state.preferences.title_model_fallback_provider_id,
+        &mut state.preferences.title_model_fallback_id,
     );
     normalize_effort(&mut state.preferences.title_model_effort);
 
@@ -1220,6 +1291,8 @@ mod tests {
         let preferences = default_preferences();
         assert_eq!(preferences.pi_binary_path, None);
         assert_eq!(preferences.title_model_id, "gpt-5.4-mini");
+        assert_eq!(preferences.title_model_fallback_provider_id, "openai-codex");
+        assert_eq!(preferences.title_model_fallback_id, "gpt-5.4");
         assert_eq!(preferences.title_model_effort, "high");
         assert!(!preferences.show_raw_tool_calls);
     }

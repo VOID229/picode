@@ -5,7 +5,10 @@ import type {
   WorkspaceRecord,
 } from "../../domains/types";
 import {
+  formatToolGroupLabel,
   deriveLivePhase,
+  extractFileChanges,
+  groupToolActivities,
   parseAssistantContent,
   resolveComposerCapabilities,
   resolveAssistantLabel,
@@ -267,16 +270,32 @@ describe("deriveLivePhase", () => {
     expect(deriveLivePhase(session)?.label).toBe("reading files");
   });
 
-  it("does not include planning detail for the default thinking phase", () => {
+  it("does not invent a synthetic thinking phase when nothing is active", () => {
     const session = createSession({
       status: "streaming",
+    });
+
+    expect(deriveLivePhase(session)).toBeNull();
+  });
+
+  it("shows thinking while the assistant is streaming but has no visible text yet", () => {
+    const session = createSession({
+      status: "streaming",
+      timeline: [
+        {
+          id: "assistant-1",
+          kind: "assistant-message",
+          content: "",
+          createdAt: new Date().toISOString(),
+          streaming: true,
+        },
+      ],
     });
 
     expect(deriveLivePhase(session)).toMatchObject({
       phase: "thinking",
       label: "thinking",
     });
-    expect(deriveLivePhase(session)?.detail).toBeUndefined();
   });
 
   it("does not emit generic thinking when assistant text is already streaming", () => {
@@ -336,6 +355,155 @@ describe("summarizeToolActivityDetails", () => {
       },
     ]);
     expect(details.rawCalls).toHaveLength(2);
+  });
+
+  it("formats live and completed exploration labels from unique file counts", () => {
+    const now = new Date().toISOString();
+    const toolItems = [
+      createToolActivity({
+        id: "tool-1",
+        toolName: "read",
+        summary:
+          'read {"path":"src/components/chat/ConversationView.tsx","limit":40}',
+        status: "running",
+        createdAt: now,
+      }),
+      createToolActivity({
+        id: "tool-2",
+        toolName: "read",
+        summary:
+          'read {"path":"src/components/chat/ToolActivityGroup.tsx","limit":40}',
+        status: "running",
+        createdAt: now,
+      }),
+      createToolActivity({
+        id: "tool-3",
+        toolName: "grep",
+        summary: 'grep -n "ToolActivityGroup" src/components/chat',
+        status: "completed",
+        createdAt: now,
+      }),
+    ];
+    const details = summarizeToolActivityDetails(toolItems);
+    const summary = groupToolActivities(toolItems, details);
+
+    expect(formatToolGroupLabel(summary, true)).toBe(
+      "Exploring 2 files, 1 search",
+    );
+    expect(formatToolGroupLabel(summary, false)).toBe(
+      "Explored 2 files, 1 search",
+    );
+  });
+
+  it("dedupes edited files across multiple tool calls", () => {
+    const now = new Date().toISOString();
+    const toolItems = [
+      createToolActivity({
+        id: "tool-1",
+        toolName: "edit",
+        summary:
+          'edit {"path":"src/app.ts","edits":[{"oldText":"foo","newText":"bar"}]}',
+        status: "completed",
+        createdAt: now,
+      }),
+      createToolActivity({
+        id: "tool-2",
+        toolName: "edit",
+        summary:
+          'edit {"path":"src/routes.ts","edits":[{"oldText":"baz","newText":"qux"}]}',
+        status: "completed",
+        createdAt: now,
+      }),
+    ];
+    const details = summarizeToolActivityDetails(toolItems);
+    const summary = groupToolActivities(toolItems, details);
+
+    expect(details.files).toHaveLength(2);
+    expect(formatToolGroupLabel(summary, false)).toBe("Edited 2 files");
+  });
+});
+
+describe("extractFileChanges", () => {
+  it("computes exact added and removed lines from edit tool arguments", () => {
+    const now = new Date().toISOString();
+    const changes = extractFileChanges([
+      createToolActivity({
+        id: "tool-1",
+        toolName: "edit",
+        summary:
+          'edit {"path":"src/app.ts","edits":[{"oldText":"foo\\nbar","newText":"foo\\nbaz\\nqux"},{"oldText":"line1","newText":""}]}',
+        createdAt: now,
+      }),
+      createToolActivity({
+        id: "tool-2",
+        toolName: "edit",
+        summary:
+          'edit {"path":"src/app.ts","edits":[{"oldText":"alpha\\nbeta","newText":"alpha\\ngamma"}]}',
+        createdAt: now,
+      }),
+    ]);
+
+    expect(changes).toEqual([
+      {
+        path: "src/app.ts",
+        additions: 3,
+        deletions: 3,
+      },
+    ]);
+  });
+
+  it("counts written file content directly instead of guessing from tool output", () => {
+    const now = new Date().toISOString();
+    const changes = extractFileChanges([
+      {
+        id: "tool-1",
+        kind: "tool-activity",
+        createdAt: now,
+        activity: {
+          id: "tool-1",
+          toolName: "write",
+          summary: 'write {"path":"src/new-file.ts","content":"a\\nb\\nc"}',
+          output: "Successfully wrote file",
+          status: "completed",
+          startedAt: now,
+        },
+      },
+    ]);
+
+    expect(changes).toEqual([
+      {
+        path: "src/new-file.ts",
+        additions: 3,
+        deletions: 0,
+      },
+    ]);
+  });
+
+  it("does not fall back to arbitrary output length when exact counts are unavailable", () => {
+    const now = new Date().toISOString();
+    const changes = extractFileChanges([
+      {
+        id: "tool-1",
+        kind: "tool-activity",
+        createdAt: now,
+        activity: {
+          id: "tool-1",
+          toolName: "apply_patch",
+          summary: 'apply_patch "*** Update File: src/app.ts"',
+          output: "Patch applied successfully.",
+          status: "completed",
+          startedAt: now,
+        },
+      },
+    ]);
+
+    expect(changes).toEqual([
+      {
+        path: "src/app.ts",
+        additions: 0,
+        deletions: 0,
+      },
+    ]);
   });
 });
 

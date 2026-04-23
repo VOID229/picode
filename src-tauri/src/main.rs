@@ -8,9 +8,10 @@ use crate::models::{
     AbortPromptPayload, BootstrapPayload, CloseTerminalSessionPayload, CreateSessionPayload,
     CreateWorkspacePayload, DeleteSessionPayload, EnsureTerminalSessionPayload, PersistedAppState,
     RefreshGitPayload, RefreshWorkspaceRuntimeCatalogPayload, RemoveWorkspacePayload,
-    RenameSessionPayload, RenameWorkspacePayload, ResizeTerminalPayload, ResolveApprovalPayload,
-    RunTerminalCommandPayload, RunTerminalCommandResult, RuntimeBootstrapPayload,
-    RuntimeHealthPayload, SelectWorkspaceSessionPayload, SendPromptPayload, UndoUserTurnPayload,
+    ReorderSessionPayload, ReorderWorkspacePayload, RenameSessionPayload, RenameWorkspacePayload,
+    ResizeTerminalPayload, ResolveApprovalPayload, RunTerminalCommandPayload,
+    RunTerminalCommandResult, RuntimeBootstrapPayload, RuntimeHealthPayload,
+    SelectWorkspaceSessionPayload, SessionIdentityPayload, SendPromptPayload, UndoUserTurnPayload,
     UpdateWorkspaceSettingsPayload, WorkspaceRuntimeCatalogPayload, WriteTerminalInputPayload,
     WriteTextFilePayload, normalize_state,
 };
@@ -245,6 +246,15 @@ async fn undo_user_turn(
             .map_err(|error| error.to_string())?
     };
 
+    if let Ok(Some(redo_checkpoint)) = git::capture_undo_checkpoint(
+        &payload.workspace_id,
+        &payload.session_id,
+        &payload.user_message_id,
+        &workspace_path,
+    ) {
+        let _ = storage::save_redo_checkpoint(&app, &redo_checkpoint);
+    }
+
     git::restore_undo_checkpoint(&workspace_path, &checkpoint)
         .map_err(|error| error.to_string())?;
 
@@ -298,6 +308,64 @@ async fn undo_user_turn(
     }
 
     Ok(shared.state.lock().await.clone())
+}
+
+#[tauri::command]
+async fn redo_user_turn(
+    app: AppHandle,
+    shared: State<'_, AppState>,
+    payload: UndoUserTurnPayload,
+) -> Result<PersistedAppState, String> {
+    let checkpoint = storage::load_redo_checkpoint(
+        &app,
+        &payload.workspace_id,
+        &payload.session_id,
+        &payload.user_message_id,
+    )
+    .map_err(|error| error.to_string())?
+    .context("Redo is unavailable for this message because no checkpoint was stored.")
+    .map_err(|error| error.to_string())?;
+
+    let workspace_path = {
+        let state = shared.state.lock().await;
+        state
+            .workspaces
+            .iter()
+            .find(|workspace| workspace.id == payload.workspace_id)
+            .map(|workspace| workspace.path.clone())
+            .context("workspace not found")
+            .map_err(|error| error.to_string())?
+    };
+
+    if let Ok(Some(undo_checkpoint)) = git::capture_undo_checkpoint(
+        &payload.workspace_id,
+        &payload.session_id,
+        &payload.user_message_id,
+        &workspace_path,
+    ) {
+        let _ = storage::save_undo_checkpoint(&app, &undo_checkpoint);
+    }
+
+    git::restore_undo_checkpoint(&workspace_path, &checkpoint)
+        .map_err(|error| error.to_string())?;
+    let _ = storage::delete_redo_checkpoint(
+        &app,
+        &payload.workspace_id,
+        &payload.session_id,
+        &payload.user_message_id,
+    );
+
+    Ok(shared.state.lock().await.clone())
+}
+
+#[tauri::command]
+async fn get_session_stats(
+    shared: State<'_, AppState>,
+    payload: SessionIdentityPayload,
+) -> Result<models::SessionStats, String> {
+    pi::get_session_stats(shared.inner().clone(), payload)
+        .await
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -494,6 +562,94 @@ async fn delete_session(
             .and_then(|w| w.sessions.iter().find(|s| s.archived_at.is_none()))
             .map(|s| s.id.clone());
     }
+    storage::save(&app, &state).map_err(|error| error.to_string())?;
+    Ok(state.clone())
+}
+
+#[tauri::command]
+async fn move_workspace(
+    app: AppHandle,
+    shared: State<'_, AppState>,
+    payload: ReorderWorkspacePayload,
+) -> Result<PersistedAppState, String> {
+    let mut state = shared.state.lock().await;
+    let Some(source_index) = state
+        .workspaces
+        .iter()
+        .position(|workspace| workspace.id == payload.workspace_id)
+    else {
+        return Err("workspace not found".to_string());
+    };
+
+    let target_index = payload
+        .before_workspace_id
+        .as_ref()
+        .and_then(|workspace_id| {
+            state
+                .workspaces
+                .iter()
+                .position(|workspace| workspace.id == *workspace_id)
+        });
+
+    if target_index == Some(source_index) {
+        return Ok(state.clone());
+    }
+
+    let workspace = state.workspaces.remove(source_index);
+    let insert_index = match target_index {
+        Some(index) if index > source_index => index - 1,
+        Some(index) => index,
+        None => state.workspaces.len(),
+    };
+    state.workspaces.insert(insert_index, workspace);
+    storage::save(&app, &state).map_err(|error| error.to_string())?;
+    Ok(state.clone())
+}
+
+#[tauri::command]
+async fn move_session(
+    app: AppHandle,
+    shared: State<'_, AppState>,
+    payload: ReorderSessionPayload,
+) -> Result<PersistedAppState, String> {
+    let mut state = shared.state.lock().await;
+    let Some(workspace) = state
+        .workspaces
+        .iter_mut()
+        .find(|workspace| workspace.id == payload.workspace_id)
+    else {
+        return Err("workspace not found".to_string());
+    };
+
+    let Some(source_index) = workspace
+        .sessions
+        .iter()
+        .position(|session| session.id == payload.session_id)
+    else {
+        return Err("session not found".to_string());
+    };
+
+    let target_index = payload
+        .before_session_id
+        .as_ref()
+        .and_then(|session_id| {
+            workspace
+                .sessions
+                .iter()
+                .position(|session| session.id == *session_id)
+        });
+
+    if target_index == Some(source_index) {
+        return Ok(state.clone());
+    }
+
+    let session = workspace.sessions.remove(source_index);
+    let insert_index = match target_index {
+        Some(index) if index > source_index => index - 1,
+        Some(index) => index,
+        None => workspace.sessions.len(),
+    };
+    workspace.sessions.insert(insert_index, session);
     storage::save(&app, &state).map_err(|error| error.to_string())?;
     Ok(state.clone())
 }
@@ -716,8 +872,12 @@ fn main() {
             update_workspace_settings,
             refresh_git_snapshot,
             send_prompt,
+            get_session_stats,
             resolve_approval,
             undo_user_turn,
+            redo_user_turn,
+            move_workspace,
+            move_session,
             bootstrap_runtime,
             refresh_workspace_runtime_catalog,
             abort_prompt,

@@ -360,19 +360,20 @@ export function deriveLivePhase(session: ChatSession | null): LivePhase | null {
   );
 
   if (activeTool && activeTool.kind === "tool-activity") {
-    const phase =
-      classifyLivePhase(
-        [
-          activeTool.activity.toolName,
-          activeTool.activity.summary,
-          activeTool.activity.output,
-        ].join(" "),
-      ) ?? "thinking";
-
-    return buildLivePhase(
-      phase,
-      activeTool.activity.summary || activeTool.activity.toolName,
+    const phase = classifyLivePhase(
+      [
+        activeTool.activity.toolName,
+        activeTool.activity.summary,
+        activeTool.activity.output,
+      ].join(" "),
     );
+
+    if (phase) {
+      return buildLivePhase(
+        phase,
+        activeTool.activity.summary || activeTool.activity.toolName,
+      );
+    }
   }
 
   const recentNotice = recentItems.find(
@@ -392,19 +393,18 @@ export function deriveLivePhase(session: ChatSession | null): LivePhase | null {
     }
   }
 
-  // If the most recent item is an assistant message that's actively streaming
-  // tokens, don't show "thinking" — the text itself is appearing.
-  const lastItem = recentItems[0];
-  if (
-    lastItem &&
-    lastItem.kind === "assistant-message" &&
-    lastItem.streaming &&
-    lastItem.content.trim().length > 0
-  ) {
-    return null;
+  const lastAssistantMessage = recentItems.find(
+    (item) =>
+      item.kind === "assistant-message" &&
+      item.streaming &&
+      item.content.trim().length === 0,
+  );
+
+  if (lastAssistantMessage) {
+    return buildLivePhase("thinking");
   }
 
-  return buildLivePhase("thinking");
+  return null;
 }
 
 export function isTransientTimelineItem(item: TimelineItem) {
@@ -499,50 +499,159 @@ export function classifyToolCategory(
 }
 
 export interface ToolGroupSummary {
-  explored: number;
+  uniqueFiles: number;
+  readFiles: number;
   edited: number;
   ran: number;
   searched: number;
+  listed: number;
 }
 
 export function groupToolActivities(
   items: ToolActivityItem[],
+  details?: ToolActivityDetails,
 ): ToolGroupSummary {
   const summary: ToolGroupSummary = {
-    explored: 0,
+    uniqueFiles: 0,
+    readFiles: 0,
     edited: 0,
     ran: 0,
     searched: 0,
+    listed: 0,
   };
+
+  const fileDetails = details?.files ?? [];
+  const uniquePaths = new Set<string>();
+  if (fileDetails.length > 0) {
+    for (const file of fileDetails) {
+      if (file.actions.some((action) => action !== "search")) {
+        uniquePaths.add(file.path);
+      }
+      if (file.actions.includes("read")) {
+        summary.readFiles++;
+      }
+      if (file.actions.includes("edit")) {
+        summary.edited++;
+      }
+      if (file.actions.includes("list")) {
+        summary.listed++;
+      }
+    }
+  } else {
+    for (const item of items) {
+      const action = classifyToolFileAction(item);
+      if (action !== "search") {
+        const paths = extractToolPaths(item.activity.summary);
+        for (const path of paths) {
+          uniquePaths.add(path);
+        }
+      }
+
+      if (action === "read") {
+        summary.readFiles++;
+      } else if (action === "edit") {
+        summary.edited++;
+      } else if (action === "list") {
+        summary.listed++;
+      }
+    }
+  }
+
+  summary.uniqueFiles = uniquePaths.size;
+  if (summary.uniqueFiles === 0 && fileDetails.length > 0) {
+    summary.uniqueFiles = fileDetails.length;
+  }
+
   for (const item of items) {
     const category = classifyToolCategory(
       item.activity.toolName,
       item.activity.summary,
     );
-    summary[category]++;
+    if (category === "searched") {
+      summary.searched++;
+    }
+    if (category === "ran") {
+      summary.ran++;
+    }
   }
   return summary;
 }
 
-export function formatToolGroupLabel(summary: ToolGroupSummary): string {
-  const parts: string[] = [];
-  if (summary.explored > 0)
-    parts.push(
-      `Explored ${summary.explored} file${summary.explored !== 1 ? "s" : ""}`,
-    );
-  if (summary.edited > 0)
-    parts.push(
-      `edited ${summary.edited} file${summary.edited !== 1 ? "s" : ""}`,
-    );
-  if (summary.ran > 0)
-    parts.push(`ran ${summary.ran} command${summary.ran !== 1 ? "s" : ""}`);
-  if (summary.searched > 0)
-    parts.push(
-      `searched ${summary.searched} time${summary.searched !== 1 ? "s" : ""}`,
-    );
-  if (parts.length === 0) return "Working...";
-  // Capitalize only the very first part
-  return parts.join(", ");
+export function formatToolGroupLabel(
+  summary: ToolGroupSummary,
+  isLive = false,
+): string {
+  const countPhrase = (count: number, singular: string, plural: string) =>
+    `${count} ${count === 1 ? singular : plural}`;
+  const explorationCount = summary.uniqueFiles || summary.readFiles;
+  const hasExploration =
+    summary.readFiles > 0 || summary.searched > 0 || summary.listed > 0;
+
+  if (hasExploration) {
+    const parts = [
+      `${isLive ? "Exploring" : "Explored"} ${countPhrase(
+        explorationCount,
+        "file",
+        "files",
+      )}`,
+    ];
+
+    if (summary.searched > 0) {
+      parts.push(countPhrase(summary.searched, "search", "searches"));
+    }
+
+    if (summary.listed > 0) {
+      parts.push(countPhrase(summary.listed, "directory", "directories"));
+    }
+
+    if (summary.edited > 0) {
+      parts.push(countPhrase(summary.edited, "edit", "edits"));
+    }
+
+    if (summary.ran > 0) {
+      parts.push(countPhrase(summary.ran, "command", "commands"));
+    }
+
+    return parts.join(", ");
+  }
+
+  if (summary.searched > 0) {
+    return `${isLive ? "Searching" : "Searched"} ${countPhrase(
+      summary.searched,
+      "search",
+      "searches",
+    )}`;
+  }
+
+  if (summary.listed > 0) {
+    return `${isLive ? "Listing" : "Listed"} ${countPhrase(
+      summary.listed,
+      "directory",
+      "directories",
+    )}`;
+  }
+
+  if (summary.edited > 0) {
+    return `${isLive ? "Editing" : "Edited"} ${countPhrase(
+      summary.uniqueFiles || summary.edited,
+      "file",
+      "files",
+    )}`;
+  }
+
+  if (summary.ran > 0) {
+    return `${isLive ? "Running" : "Ran"} ${countPhrase(
+      summary.ran,
+      "command",
+      "commands",
+    )}`;
+  }
+
+  return "Working...";
+}
+
+export function isLiveToolActivity(toolItems: ToolActivityItem[]): boolean {
+  return toolItems.some((item) => item.activity.status === "running");
 }
 
 export function summarizeToolActivityDetails(
@@ -586,6 +695,188 @@ export interface FileChange {
   deletions: number;
 }
 
+function splitLines(value: string): string[] {
+  if (value.length === 0) {
+    return [];
+  }
+
+  const lines = value.split(/\r\n|\r|\n/);
+  if (lines[lines.length - 1] === "") {
+    lines.pop();
+  }
+
+  return lines;
+}
+
+function countLines(value: string): number {
+  return splitLines(value).length;
+}
+
+function countLineDiff(
+  before: string,
+  after: string,
+): {
+  additions: number;
+  deletions: number;
+} {
+  const beforeLines = splitLines(before);
+  const afterLines = splitLines(after);
+
+  let prefixLength = 0;
+  while (
+    prefixLength < beforeLines.length &&
+    prefixLength < afterLines.length &&
+    beforeLines[prefixLength] === afterLines[prefixLength]
+  ) {
+    prefixLength += 1;
+  }
+
+  let beforeEnd = beforeLines.length - 1;
+  let afterEnd = afterLines.length - 1;
+  while (
+    beforeEnd >= prefixLength &&
+    afterEnd >= prefixLength &&
+    beforeLines[beforeEnd] === afterLines[afterEnd]
+  ) {
+    beforeEnd -= 1;
+    afterEnd -= 1;
+  }
+
+  const trimmedBefore = beforeLines.slice(prefixLength, beforeEnd + 1);
+  const trimmedAfter = afterLines.slice(prefixLength, afterEnd + 1);
+
+  if (trimmedBefore.length === 0) {
+    return { additions: trimmedAfter.length, deletions: 0 };
+  }
+
+  if (trimmedAfter.length === 0) {
+    return { additions: 0, deletions: trimmedBefore.length };
+  }
+
+  const lcs = new Uint32Array(trimmedAfter.length + 1);
+  for (
+    let beforeIndex = 1;
+    beforeIndex <= trimmedBefore.length;
+    beforeIndex++
+  ) {
+    let diagonal = 0;
+    for (let afterIndex = 1; afterIndex <= trimmedAfter.length; afterIndex++) {
+      const previous = lcs[afterIndex];
+      if (trimmedBefore[beforeIndex - 1] === trimmedAfter[afterIndex - 1]) {
+        lcs[afterIndex] = diagonal + 1;
+      } else {
+        lcs[afterIndex] = Math.max(lcs[afterIndex], lcs[afterIndex - 1]);
+      }
+      diagonal = previous;
+    }
+  }
+
+  const sharedLength = lcs[trimmedAfter.length] ?? 0;
+  return {
+    additions: trimmedAfter.length - sharedLength,
+    deletions: trimmedBefore.length - sharedLength,
+  };
+}
+
+function parseToolArgs(summary: string): Record<string, unknown> | null {
+  const jsonStart = summary.indexOf("{");
+  if (jsonStart === -1) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(summary.slice(jsonStart));
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function parseOutputFileChange(
+  output?: string,
+): Pick<FileChange, "additions" | "deletions"> {
+  if (!output) {
+    return { additions: 0, deletions: 0 };
+  }
+
+  const addMatch = output.match(
+    /(\d+)\s*(?:insertions?|additions?|lines? added|\+)/i,
+  );
+  const delMatch = output.match(
+    /(\d+)\s*(?:deletions?|removals?|lines? (?:removed|deleted)|\-)/i,
+  );
+
+  return {
+    additions: addMatch ? parseInt(addMatch[1], 10) : 0,
+    deletions: delMatch ? parseInt(delMatch[1], 10) : 0,
+  };
+}
+
+function deriveToolFileChange(item: ToolActivityItem): FileChange | null {
+  const toolName = item.activity.toolName.trim().toLowerCase();
+  const args = parseToolArgs(item.activity.summary);
+  const path =
+    typeof args?.path === "string"
+      ? args.path
+      : (extractToolPaths(item.activity.summary)[0] ?? null);
+
+  if (!path) {
+    return null;
+  }
+
+  if (toolName === "edit") {
+    const edits = Array.isArray(args?.edits) ? args.edits : [];
+    let additions = 0;
+    let deletions = 0;
+    let countedEdit = false;
+
+    for (const edit of edits) {
+      if (!edit || typeof edit !== "object") {
+        continue;
+      }
+
+      const oldText =
+        "oldText" in edit && typeof edit.oldText === "string"
+          ? edit.oldText
+          : null;
+      const newText =
+        "newText" in edit && typeof edit.newText === "string"
+          ? edit.newText
+          : null;
+
+      if (oldText == null || newText == null) {
+        continue;
+      }
+
+      countedEdit = true;
+      const counts = countLineDiff(oldText, newText);
+      additions += counts.additions;
+      deletions += counts.deletions;
+    }
+
+    if (countedEdit) {
+      return { path, additions, deletions };
+    }
+  }
+
+  if (typeof args?.oldText === "string" && typeof args?.newText === "string") {
+    const counts = countLineDiff(args.oldText, args.newText);
+    return { path, additions: counts.additions, deletions: counts.deletions };
+  }
+
+  const outputCounts = parseOutputFileChange(item.activity.output);
+  if (typeof args?.content === "string") {
+    if (outputCounts.additions > 0 || outputCounts.deletions > 0) {
+      return { path, ...outputCounts };
+    }
+    return { path, additions: countLines(args.content), deletions: 0 };
+  }
+
+  return { path, ...outputCounts };
+}
+
 export function extractFileChanges(
   toolItems: ToolActivityItem[],
 ): FileChange[] {
@@ -598,37 +889,18 @@ export function extractFileChanges(
     );
     if (category !== "edited") continue;
 
-    // Try to extract file path from summary (common patterns)
-    const summaryPathMatch = item.activity.summary.match(
-      /(?:^|\s)([\w./\-]+\.[a-zA-Z]{1,10})(?:\s|$)/,
-    );
-    const path = summaryPathMatch?.[1];
-    if (!path) continue;
+    const nextChange = deriveToolFileChange(item);
+    if (!nextChange) continue;
 
-    const existing = changes.get(path) ?? { path, additions: 0, deletions: 0 };
+    const existing = changes.get(nextChange.path) ?? {
+      path: nextChange.path,
+      additions: 0,
+      deletions: 0,
+    };
 
-    // Try to parse +N -M from output
-    if (item.activity.output) {
-      const addMatch = item.activity.output.match(
-        /(\d+)\s*(?:insertions?|additions?|lines? added|\+)/i,
-      );
-      const delMatch = item.activity.output.match(
-        /(\d+)\s*(?:deletions?|removals?|lines? (?:removed|deleted)|\-)/i,
-      );
-      if (addMatch) existing.additions += parseInt(addMatch[1], 10);
-      if (delMatch) existing.deletions += parseInt(delMatch[1], 10);
-    }
-
-    // If we couldn't parse stats, estimate from output length
-    if (
-      existing.additions === 0 &&
-      existing.deletions === 0 &&
-      item.activity.output
-    ) {
-      existing.additions = item.activity.output.length;
-    }
-
-    changes.set(path, existing);
+    existing.additions += nextChange.additions;
+    existing.deletions += nextChange.deletions;
+    changes.set(nextChange.path, existing);
   }
 
   return Array.from(changes.values());

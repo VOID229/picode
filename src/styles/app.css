@@ -373,7 +373,9 @@ body {
   background: transparent;
   color: #f3f3f1;
   cursor: pointer;
-  transition: background 0.15s ease, opacity 0.15s ease;
+  transition:
+    background 0.15s ease,
+    opacity 0.15s ease;
 }
 
 .message-image-remove {
@@ -720,6 +722,7 @@ body {
   animation: spin 1.05s linear infinite;
 }
 
+.chat-live-phase--active .chat-live-phase__text::after,
 .chat-live-phase--thinking .chat-live-phase__text::after,
 .chat-live-phase--reading-files .chat-live-phase__text::after,
 .chat-live-phase--listing-directory .chat-live-phase__text::after,
@@ -977,6 +980,7 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .animate-slide-up,
   .chat-inline-status__spin,
+  .text-shimmer,
   .chat-live-phase__icon,
   .chat-live-phase__icon svg,
   .chat-live-phase__text::after {

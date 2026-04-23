@@ -10,6 +10,7 @@ import {
 } from "react";
 import type {
   ChatSession,
+  SessionStats,
   TimelineItem,
   ToolActivityItem,
   WorkspaceRecord,
@@ -26,8 +27,10 @@ import {
   resolveComposerCapabilities,
   resolveSessionSelection,
   segmentTurnItems,
+  type FileChange,
   type TurnSegment,
 } from "./chatRuntime";
+import { getSessionStats } from "../../lib/tauri";
 import {
   fileToComposerImageDraft,
   rgbaClipboardImageToComposerImageDraft,
@@ -36,6 +39,11 @@ import {
 interface ConversationViewProps {
   workspace: WorkspaceRecord | null;
   session: ChatSession | null;
+}
+
+interface UndoneChange {
+  userMessageId: string;
+  toolFileChanges: FileChange[];
 }
 
 const BOTTOM_SCROLL_TOLERANCE_PX = 4;
@@ -47,6 +55,19 @@ function isNearBottom(node: HTMLDivElement) {
   );
 }
 
+function formatExactTokenCount(value: number) {
+  return new Intl.NumberFormat("en-US").format(value);
+}
+
+function parseContextWindowTitle(stats: SessionStats | null) {
+  const usage = stats?.contextUsage;
+  if (!usage || usage.tokens == null) {
+    return null;
+  }
+
+  return `${formatExactTokenCount(usage.tokens)} / ${formatExactTokenCount(usage.contextWindow)}`;
+}
+
 export function ConversationView({
   workspace,
   session,
@@ -55,6 +76,10 @@ export function ConversationView({
   const [providerDropdownOpen, setProviderDropdownOpen] = useState(false);
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
   const [effortDropdownOpen, setEffortDropdownOpen] = useState(false);
+  const [lastUndoneChange, setLastUndoneChange] = useState<UndoneChange | null>(
+    null,
+  );
+  const [sessionStats, setSessionStats] = useState<SessionStats | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const timelineRef = useRef<HTMLDivElement>(null);
   const shouldStickToBottomRef = useRef(true);
@@ -84,6 +109,7 @@ export function ConversationView({
   const abortPrompt = useAppStore((state) => state.abortPrompt);
   const resolveApproval = useAppStore((state) => state.resolveApproval);
   const undoUserTurn = useAppStore((state) => state.undoUserTurn);
+  const redoUserTurn = useAppStore((state) => state.redoUserTurn);
   const updateWorkspaceSettings = useAppStore(
     (store) => store.updateWorkspaceSettings,
   );
@@ -106,6 +132,44 @@ export function ConversationView({
   const sessionImages = session ? (composerImageDrafts[session.id] ?? []) : [];
   const canSubmit = sessionDraft.trim().length > 0 || sessionImages.length > 0;
 
+  useEffect(() => {
+    setLastUndoneChange(null);
+    setSessionStats(null);
+  }, [workspace?.id, session?.id]);
+
+  useEffect(() => {
+    if (!workspace || !session) {
+      setSessionStats(null);
+      return;
+    }
+
+    let isActive = true;
+
+    const loadSessionStats = async () => {
+      try {
+        const nextStats = await getSessionStats({
+          workspaceId: workspace.id,
+          sessionId: session.id,
+        });
+        if (isActive) {
+          setSessionStats(nextStats);
+        }
+      } catch {
+        if (isActive) {
+          setSessionStats(null);
+        }
+      }
+    };
+
+    void loadSessionStats();
+    const interval = window.setInterval(loadSessionStats, 2500);
+
+    return () => {
+      isActive = false;
+      window.clearInterval(interval);
+    };
+  }, [workspace?.id, session?.id]);
+
   const handleSubmit = async () => {
     const value = sessionDraft.trim();
     const images = sessionImages.map(({ id, ...image }) => image);
@@ -122,6 +186,7 @@ export function ConversationView({
 
     try {
       await sendPrompt(workspace.id, session.id, value, currentMode, images);
+      setLastUndoneChange(null);
     } catch (error) {
       setComposerDraft(session.id, value);
       addComposerImages(
@@ -238,7 +303,13 @@ export function ConversationView({
   }, [livePhase, session]);
 
   const handleUndo = useCallback(
-    async (userMessageId: string) => {
+    async ({
+      userMessageId,
+      toolFileChanges,
+    }: {
+      userMessageId: string;
+      toolFileChanges: FileChange[];
+    }) => {
       if (!workspace || !session) return;
       const git = useAppStore.getState().git[workspace.id];
       if (!git?.isRepo) {
@@ -253,6 +324,7 @@ export function ConversationView({
       if (!confirmed) return;
       try {
         await undoUserTurn(workspace.id, session.id, userMessageId);
+        setLastUndoneChange({ userMessageId, toolFileChanges });
       } catch (error) {
         window.alert(
           error instanceof Error
@@ -263,6 +335,34 @@ export function ConversationView({
     },
     [workspace, session, undoUserTurn],
   );
+
+  const handleRedo = useCallback(async () => {
+    if (!workspace || !session || !lastUndoneChange) {
+      return;
+    }
+
+    const git = useAppStore.getState().git[workspace.id];
+    if (!git?.isRepo) {
+      window.alert(
+        "Redo is only available for git workspaces with a saved checkpoint for this turn.",
+      );
+      return;
+    }
+
+    const confirmed = window.confirm(
+      "Redo this change and restore the reverted working tree checkpoint?",
+    );
+    if (!confirmed) return;
+
+    try {
+      await redoUserTurn(workspace.id, session.id, lastUndoneChange.userMessageId);
+      setLastUndoneChange(null);
+    } catch (error) {
+      window.alert(
+        error instanceof Error ? error.message : "Redo is unavailable for this change.",
+      );
+    }
+  }, [lastUndoneChange, redoUserTurn, session, workspace]);
 
   useEffect(() => {
     if (!workspace || !session) {
@@ -360,6 +460,25 @@ export function ConversationView({
   const sendDisabled = Boolean(sendDisabledReason);
 
   const currentEffortLabel = effortLabels[normalizedSelection.effort] || "High";
+  const contextUsageTitle = parseContextWindowTitle(sessionStats);
+  const contextUsagePercent =
+    sessionStats?.contextUsage?.tokens != null
+      ? Math.max(
+          0,
+          Math.min(
+            100,
+            (sessionStats.contextUsage.tokens /
+              sessionStats.contextUsage.contextWindow) *
+              100,
+          ),
+        )
+      : null;
+  const isContextOverLimit = Boolean(
+    sessionStats?.contextUsage?.tokens != null &&
+      sessionStats?.contextUsage &&
+      sessionStats.contextUsage.tokens > sessionStats.contextUsage.contextWindow,
+  );
+  const contextUsageColor = isContextOverLimit ? "#cf6679" : "#9aa0a6";
 
   return (
     <div
@@ -452,6 +571,14 @@ export function ConversationView({
             />
           </div>
         )}
+        {lastUndoneChange && (
+          <div style={{ marginBottom: "10px" }}>
+            <FilesChangedBlock
+              toolFileChanges={lastUndoneChange.toolFileChanges}
+              onRedo={handleRedo}
+            />
+          </div>
+        )}
         <div
           style={{
             background: "#18181A",
@@ -507,6 +634,7 @@ export function ConversationView({
               display: "flex",
               alignItems: "center",
               justifyContent: "space-between",
+              gap: "12px",
               marginTop: "4px",
             }}
           >
@@ -792,50 +920,91 @@ export function ConversationView({
               />
             </div>
 
-            <button
+            <div
               style={{
-                width: "28px",
-                height: "28px",
-                borderRadius: "50%",
-                background:
-                  session.status === "streaming"
-                    ? "#ef4444"
-                    : !sendDisabled && canSubmit
-                      ? "#2563eb"
-                      : "#333",
-                color:
-                  session.status === "streaming"
-                    ? "#fff"
-                    : !sendDisabled && canSubmit
-                      ? "#fff"
-                      : "#666",
                 display: "flex",
                 alignItems: "center",
-                justifyContent: "center",
-                border: "none",
-                cursor:
-                  session.status === "streaming" || (!sendDisabled && canSubmit)
-                    ? "pointer"
-                    : "default",
-                transition: "background 0.2s, color 0.2s",
+                gap: "10px",
+                marginLeft: "auto",
+                paddingLeft: "12px",
               }}
-              disabled={
-                session.status !== "streaming" && (sendDisabled || !canSubmit)
-              }
-              onClick={() =>
-                session.status === "streaming"
-                  ? void abortPrompt(workspace.id, session.id)
-                  : !sendDisabled
-                    ? void handleSubmit()
-                    : undefined
-              }
             >
-              {session.status === "streaming" ? (
-                <Square size={12} fill="currentColor" strokeWidth={0} />
-              ) : (
-                <ArrowUp size={16} />
+              {contextUsageTitle && contextUsagePercent !== null && (
+                <div
+                  title={contextUsageTitle}
+                  aria-label={`Context usage ${contextUsageTitle}`}
+                  style={{
+                    width: "20px",
+                    height: "20px",
+                    borderRadius: "50%",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    background: `conic-gradient(${contextUsageColor} 0 ${contextUsagePercent}%, rgba(255,255,255,0.08) ${contextUsagePercent}% 100%)`,
+                    boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.08)",
+                    flexShrink: 0,
+                    transform: "rotate(-90deg)",
+                  }}
+                >
+                  <span
+                    aria-hidden="true"
+                    style={{
+                      width: "10px",
+                      height: "10px",
+                      borderRadius: "50%",
+                      background: "#18181A",
+                      boxShadow: "0 0 0 1px rgba(255,255,255,0.04)",
+                    }}
+                  />
+                </div>
               )}
-            </button>
+
+              <button
+                style={{
+                  width: "28px",
+                  height: "28px",
+                  borderRadius: "50%",
+                  background:
+                    session.status === "streaming"
+                      ? "#ef4444"
+                      : !sendDisabled && canSubmit
+                        ? "#2563eb"
+                        : "#333",
+                  color:
+                    session.status === "streaming"
+                      ? "#fff"
+                      : !sendDisabled && canSubmit
+                        ? "#fff"
+                        : "#666",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  border: "none",
+                  cursor:
+                    session.status === "streaming" ||
+                    (!sendDisabled && canSubmit)
+                      ? "pointer"
+                      : "default",
+                  transition: "background 0.2s, color 0.2s",
+                }}
+                disabled={
+                  session.status !== "streaming" && (sendDisabled || !canSubmit)
+                }
+                onClick={() =>
+                  session.status === "streaming"
+                    ? void abortPrompt(workspace.id, session.id)
+                    : !sendDisabled
+                      ? void handleSubmit()
+                      : undefined
+                }
+              >
+                {session.status === "streaming" ? (
+                  <Square size={12} fill="currentColor" strokeWidth={0} />
+                ) : (
+                  <ArrowUp size={16} />
+                )}
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -1008,7 +1177,10 @@ function TurnRenderer({
     approvalId: string,
     decision: "approved" | "rejected",
   ) => Promise<void>;
-  onUndo: (userMessageId: string) => void;
+  onUndo: (payload: {
+    userMessageId: string;
+    toolFileChanges: FileChange[];
+  }) => void;
 }) {
   const activitySegments = turn.segments.filter((s) => s.type === "activity");
   const toolGroupSegments = activitySegments.filter((segment) =>
@@ -1160,7 +1332,12 @@ function TurnRenderer({
           <FilesChangedBlock
             toolFileChanges={fileChanges}
             onUndo={
-              turn.userMessageId ? () => onUndo(turn.userMessageId!) : undefined
+              turn.userMessageId
+                ? () => onUndo({
+                    userMessageId: turn.userMessageId!,
+                    toolFileChanges: fileChanges,
+                  })
+                : undefined
             }
           />
         )}
@@ -1179,7 +1356,12 @@ function TurnRenderer({
         <FilesChangedBlock
           toolFileChanges={fileChanges}
           onUndo={
-            turn.userMessageId ? () => onUndo(turn.userMessageId!) : undefined
+            turn.userMessageId
+              ? () => onUndo({
+                  userMessageId: turn.userMessageId!,
+                  toolFileChanges: fileChanges,
+                })
+              : undefined
           }
         />
       )}

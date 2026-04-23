@@ -34,18 +34,37 @@ pub fn save(app: &AppHandle, state: &PersistedAppState) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn checkpoint_path(
+    app: &AppHandle,
+    kind: &str,
+    workspace_id: &str,
+    session_id: &str,
+    user_message_id: &str,
+) -> anyhow::Result<PathBuf> {
+    let directory = app_data_dir(app)?
+        .join(kind)
+        .join(workspace_id)
+        .join(session_id);
+    fs::create_dir_all(&directory)?;
+    Ok(directory.join(format!("{user_message_id}.json")))
+}
+
 fn undo_checkpoint_path(
     app: &AppHandle,
     workspace_id: &str,
     session_id: &str,
     user_message_id: &str,
 ) -> anyhow::Result<PathBuf> {
-    let directory = app_data_dir(app)?
-        .join("undo-checkpoints")
-        .join(workspace_id)
-        .join(session_id);
-    fs::create_dir_all(&directory)?;
-    Ok(directory.join(format!("{user_message_id}.json")))
+    checkpoint_path(app, "undo-checkpoints", workspace_id, session_id, user_message_id)
+}
+
+fn redo_checkpoint_path(
+    app: &AppHandle,
+    workspace_id: &str,
+    session_id: &str,
+    user_message_id: &str,
+) -> anyhow::Result<PathBuf> {
+    checkpoint_path(app, "redo-checkpoints", workspace_id, session_id, user_message_id)
 }
 
 pub fn save_undo_checkpoint(app: &AppHandle, checkpoint: &UndoCheckpoint) -> anyhow::Result<()> {
@@ -81,6 +100,45 @@ pub fn delete_undo_checkpoint(
     user_message_id: &str,
 ) -> anyhow::Result<()> {
     let path = undo_checkpoint_path(app, workspace_id, session_id, user_message_id)?;
+    if path.exists() {
+        fs::remove_file(path)?;
+    }
+    Ok(())
+}
+
+pub fn save_redo_checkpoint(app: &AppHandle, checkpoint: &UndoCheckpoint) -> anyhow::Result<()> {
+    let path = redo_checkpoint_path(
+        app,
+        &checkpoint.workspace_id,
+        &checkpoint.session_id,
+        &checkpoint.user_message_id,
+    )?;
+    fs::write(path, to_string_pretty(checkpoint)?)?;
+    Ok(())
+}
+
+pub fn load_redo_checkpoint(
+    app: &AppHandle,
+    workspace_id: &str,
+    session_id: &str,
+    user_message_id: &str,
+) -> anyhow::Result<Option<UndoCheckpoint>> {
+    let path = redo_checkpoint_path(app, workspace_id, session_id, user_message_id)?;
+    if !path.exists() {
+        return Ok(None);
+    }
+
+    let raw = fs::read_to_string(path)?;
+    Ok(Some(serde_json::from_str::<UndoCheckpoint>(&raw)?))
+}
+
+pub fn delete_redo_checkpoint(
+    app: &AppHandle,
+    workspace_id: &str,
+    session_id: &str,
+    user_message_id: &str,
+) -> anyhow::Result<()> {
+    let path = redo_checkpoint_path(app, workspace_id, session_id, user_message_id)?;
     if path.exists() {
         fs::remove_file(path)?;
     }

@@ -2,9 +2,9 @@ use crate::models::{
     AbortPromptPayload, ApprovalDecision, ApprovalState, ModelOption, PiInstallState,
     PiInstallStatus, PiRuntimeEvent, PromptMode, ProviderAuthKind, ProviderOption, ProviderStatus,
     RefreshWorkspaceRuntimeCatalogPayload, ResolveApprovalPayload, RuntimeBootstrapPayload,
-    RuntimeHealthPayload, SendPromptPayload, SessionModelSelection, SessionRuntimeMetadata,
-    SessionStatus, TimelineItem, ToolActivity, ToolStatus, WorkspaceRuntimeCatalogPayload,
-    expand_user_path, now_iso,
+    RuntimeHealthPayload, SendPromptPayload, SessionIdentityPayload, SessionModelSelection,
+    SessionRuntimeMetadata, SessionStats, SessionStatus, TimelineItem, ToolActivity, ToolStatus,
+    WorkspaceRuntimeCatalogPayload, expand_user_path, now_iso,
 };
 use crate::{AppState, git, storage};
 use anyhow::{Context, Result, anyhow};
@@ -1114,6 +1114,33 @@ fn resolve_title_selection(
         })
 }
 
+async fn attempt_thread_title(
+    binary_path: &Path,
+    workspace_path: &Path,
+    provider_id: &str,
+    model_id: &str,
+    effort: &str,
+    prompt: &str,
+) -> Option<String> {
+    let title_thinking =
+        map_provider_effort_to_thinking(provider_id, model_id, effort, false).to_string();
+    let extra_args = vec![
+        "--no-session".to_string(),
+        "--provider".to_string(),
+        provider_id.to_string(),
+        "--model".to_string(),
+        model_id.to_string(),
+        "--thinking".to_string(),
+        title_thinking,
+    ];
+    let extra_arg_refs = extra_args.iter().map(String::as_str).collect::<Vec<_>>();
+    let response = run_prompt_once_text(binary_path, Some(workspace_path), &extra_arg_refs, prompt)
+        .await
+        .ok()?;
+
+    sanitize_generated_title(&response)
+}
+
 fn prompt_for_mode(prompt: &str, mode: &PromptMode) -> String {
     match mode {
         PromptMode::Build => prompt.to_string(),
@@ -2003,6 +2030,8 @@ async fn generate_thread_title(
         workspace_path,
         preferred_provider_id,
         preferred_model_id,
+        fallback_provider_id,
+        fallback_model_id,
         preferred_effort,
         user_message,
         assistant_message,
@@ -2036,6 +2065,11 @@ async fn generate_thread_title(
             expand_user_path(&workspace.path),
             state.preferences.title_model_provider_id.clone(),
             state.preferences.title_model_id.clone(),
+            state
+                .preferences
+                .title_model_fallback_provider_id
+                .clone(),
+            state.preferences.title_model_fallback_id.clone(),
             state.preferences.title_model_effort.clone(),
             user_message,
             assistant_message,
@@ -2055,29 +2089,38 @@ async fn generate_thread_title(
     else {
         return Ok(());
     };
+    let fallback_selection = resolve_title_selection(
+        &providers,
+        &fallback_provider_id,
+        &fallback_model_id,
+    );
+    let prompt = prompt_for_title(&user_message, &assistant_message);
 
-    let title_thinking =
-        map_provider_effort_to_thinking(&provider_id, &model_id, &preferred_effort, false)
-            .to_string();
-    let extra_args = vec![
-        "--no-session".to_string(),
-        "--provider".to_string(),
-        provider_id,
-        "--model".to_string(),
-        model_id,
-        "--thinking".to_string(),
-        title_thinking,
-    ];
-    let extra_arg_refs = extra_args.iter().map(String::as_str).collect::<Vec<_>>();
-    let response = run_prompt_once_text(
+    let mut title = attempt_thread_title(
         &binary_path,
-        Some(Path::new(&workspace_path)),
-        &extra_arg_refs,
-        &prompt_for_title(&user_message, &assistant_message),
+        Path::new(&workspace_path),
+        &provider_id,
+        &model_id,
+        &preferred_effort,
+        &prompt,
     )
-    .await?;
+    .await;
 
-    let Some(title) = sanitize_generated_title(&response) else {
+    if title.is_none() {
+        if let Some((fallback_provider_id, fallback_model_id)) = fallback_selection {
+            title = attempt_thread_title(
+                &binary_path,
+                Path::new(&workspace_path),
+                &fallback_provider_id,
+                &fallback_model_id,
+                &preferred_effort,
+                &prompt,
+            )
+            .await;
+        }
+    }
+
+    let Some(title) = title else {
         return Ok(());
     };
 
@@ -2595,6 +2638,22 @@ pub async fn abort_prompt(
     payload: AbortPromptPayload,
 ) -> Result<crate::models::PersistedAppState> {
     stop_prompt_internal(&app, &shared, &payload, true, false).await
+}
+
+pub async fn get_session_stats(
+    shared: AppState,
+    payload: SessionIdentityPayload,
+) -> Result<SessionStats> {
+    let key = session_key(&payload.workspace_id, &payload.session_id);
+    let Some(handle) = shared.runtime.get_session(&key).await else {
+        return Err(anyhow!("Session is not active."));
+    };
+
+    let stats_value: Value = handle
+        .request(&json!({ "type": "get_session_stats" }))
+        .await?;
+
+    Ok(serde_json::from_value(stats_value)?)
 }
 
 pub async fn resolve_approval(

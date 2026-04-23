@@ -1,5 +1,5 @@
 import { ChevronRight } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { TimelineItem, ToolActivityItem } from "../../domains/types";
 import { cn } from "../../lib/cn";
 import { useAppStore } from "../../state/useAppStore";
@@ -7,6 +7,7 @@ import {
   formatActivityPhaseLabel,
   formatToolGroupLabel,
   groupToolActivities,
+  isLiveToolActivity,
   summarizeToolActivityDetails,
   type ActivitySegment,
   type ToolFileAction,
@@ -16,12 +17,18 @@ interface ToolActivityGroupProps {
   segment: ActivitySegment;
 }
 
+const MIN_LIVE_LABEL_MS = 3000;
+
 export function ToolActivityGroup({ segment }: ToolActivityGroupProps) {
   const [expanded, setExpanded] = useState(false);
   const [rawExpanded, setRawExpanded] = useState(false);
+  const [displayLive, setDisplayLive] = useState(false);
   const showRawToolCalls = useAppStore(
     (store) => store.state?.preferences.showRawToolCalls ?? false,
   );
+  const liveStartedAtRef = useRef<number | null>(null);
+  const liveTimeoutRef = useRef<number | null>(null);
+  const wasRunningRef = useRef(false);
 
   const toolItems = segment.items.filter(
     (item): item is ToolActivityItem => item.kind === "tool-activity",
@@ -40,15 +47,63 @@ export function ToolActivityGroup({ segment }: ToolActivityGroupProps) {
     return null;
   }
 
-  const summary = groupToolActivities(toolItems);
   const details = summarizeToolActivityDetails(toolItems);
+  const summary = groupToolActivities(toolItems, details);
+  const anyRunning = isLiveToolActivity(toolItems);
+  useEffect(() => {
+    const wasRunning = wasRunningRef.current;
+    wasRunningRef.current = anyRunning;
+
+    if (anyRunning) {
+      if (!wasRunning) {
+        liveStartedAtRef.current = Date.now();
+      }
+
+      if (liveTimeoutRef.current !== null) {
+        window.clearTimeout(liveTimeoutRef.current);
+        liveTimeoutRef.current = null;
+      }
+
+      setDisplayLive(true);
+      return () => {
+        if (liveTimeoutRef.current !== null) {
+          window.clearTimeout(liveTimeoutRef.current);
+          liveTimeoutRef.current = null;
+        }
+      };
+    }
+
+    if (!wasRunning || liveStartedAtRef.current === null) {
+      setDisplayLive(false);
+      return;
+    }
+
+    const elapsed = Date.now() - liveStartedAtRef.current;
+    const remaining = Math.max(0, MIN_LIVE_LABEL_MS - elapsed);
+    if (remaining === 0) {
+      liveStartedAtRef.current = null;
+      setDisplayLive(false);
+      return;
+    }
+
+    liveTimeoutRef.current = window.setTimeout(() => {
+      liveStartedAtRef.current = null;
+      liveTimeoutRef.current = null;
+      setDisplayLive(false);
+    }, remaining);
+
+    return () => {
+      if (liveTimeoutRef.current !== null) {
+        window.clearTimeout(liveTimeoutRef.current);
+        liveTimeoutRef.current = null;
+      }
+    };
+  }, [anyRunning]);
+
   const label =
     toolItems.length > 0
-      ? formatToolGroupLabel(summary)
+      ? formatToolGroupLabel(summary, displayLive)
       : formatActivityPhaseLabel(segment.phase);
-  const anyRunning = toolItems.some(
-    (item) => item.activity.status === "running",
-  );
 
   return (
     <div className="tool-activity-group">
@@ -66,7 +121,7 @@ export function ToolActivityGroup({ segment }: ToolActivityGroupProps) {
         <span
           className={cn(
             "tool-activity-group__label",
-            anyRunning && "text-shimmer",
+            displayLive && "text-shimmer",
           )}
         >
           {label}

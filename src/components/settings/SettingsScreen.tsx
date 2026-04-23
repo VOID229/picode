@@ -239,6 +239,20 @@ export function SettingsScreen() {
     titleModels.find((model) => model.id === state?.preferences.titleModelId) ??
     titleModels.find((model) => model.id === "gpt-5.4-mini") ??
     titleModels[0];
+  const titleFallbackProvider =
+    titleProviders.find(
+      (provider) =>
+        provider.id === state?.preferences.titleModelFallbackProviderId,
+    ) ??
+    titleProviders.find((provider) => provider.id === "openai-codex") ??
+    titleProviders[0];
+  const titleFallbackModels = titleFallbackProvider?.models ?? [];
+  const titleFallbackModel =
+    titleFallbackModels.find(
+      (model) => model.id === state?.preferences.titleModelFallbackId,
+    ) ??
+    titleFallbackModels.find((model) => model.id === "gpt-5.4") ??
+    titleFallbackModels[0];
 
   useEffect(() => {
     if (!state || !titleProvider || !titleModel) {
@@ -258,6 +272,26 @@ export function SettingsScreen() {
       titleModelId: titleModel.id,
     });
   }, [state, titleModel, titleProvider, updatePreferences]);
+
+  useEffect(() => {
+    if (!state || !titleFallbackProvider || !titleFallbackModel) {
+      return;
+    }
+
+    if (
+      state.preferences.titleModelFallbackProviderId ===
+        titleFallbackProvider.id &&
+      state.preferences.titleModelFallbackId === titleFallbackModel.id
+    ) {
+      return;
+    }
+
+    void updatePreferences({
+      ...state.preferences,
+      titleModelFallbackProviderId: titleFallbackProvider.id,
+      titleModelFallbackId: titleFallbackModel.id,
+    });
+  }, [state, titleFallbackModel, titleFallbackProvider, updatePreferences]);
 
   return (
     <div
@@ -708,6 +742,69 @@ export function SettingsScreen() {
                         }}
                       >
                         {titleModels.map((model) => (
+                          <option key={model.id} value={model.id}>
+                            {model.label}
+                          </option>
+                        ))}
+                      </select>
+                    }
+                  />
+                  <SettingRow
+                    label="Fallback title model provider"
+                    description="Choose a backup provider for automatic thread titles if the primary one fails."
+                    control={
+                      <select
+                        style={controlStyle}
+                        value={titleFallbackProvider?.id ?? ""}
+                        onChange={(event) => {
+                          if (!state) {
+                            return;
+                          }
+
+                          const nextProvider = titleProviders.find(
+                            (provider) => provider.id === event.target.value,
+                          );
+                          const nextModelId =
+                            nextProvider?.models[0]?.id ??
+                            state.preferences.titleModelFallbackId;
+
+                          void updatePreferences({
+                            ...state.preferences,
+                            titleModelFallbackProviderId: event.target.value,
+                            titleModelFallbackId: nextModelId,
+                          });
+                        }}
+                      >
+                        {titleProviders.map((provider) => (
+                          <option key={provider.id} value={provider.id}>
+                            {provider.label}
+                          </option>
+                        ))}
+                      </select>
+                    }
+                  />
+                  <SettingRow
+                    label="Fallback title generation model"
+                    description="Used if the primary title model errors or returns no usable title."
+                    control={
+                      <select
+                        style={controlStyle}
+                        value={titleFallbackModel?.id ?? ""}
+                        onChange={(event) => {
+                          if (!state) {
+                            return;
+                          }
+
+                          void updatePreferences({
+                            ...state.preferences,
+                            titleModelFallbackProviderId:
+                              titleFallbackProvider?.id ??
+                              state.preferences.titleModelFallbackProviderId,
+                            titleModelFallbackId: event.target.value,
+                          });
+                        }}
+                      >
+                        {titleFallbackModels.map((model) => (
                           <option key={model.id} value={model.id}>
                             {model.label}
                           </option>

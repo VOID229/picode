@@ -47,6 +47,31 @@ export interface ModelOption {
   providerSource: string;
 }
 
+export interface ContextUsage {
+  tokens: number | null;
+  contextWindow: number;
+  percent: number | null;
+}
+
+export interface SessionStats {
+  sessionFile?: string;
+  sessionId: string;
+  userMessages: number;
+  assistantMessages: number;
+  toolCalls: number;
+  toolResults: number;
+  totalMessages: number;
+  tokens: {
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheWrite: number;
+    total: number;
+  };
+  cost: number;
+  contextUsage?: ContextUsage | null;
+}
+
 export interface ApprovalPolicy {
   allowedPaths: string[];
   allowedCommands: string[];
@@ -235,6 +260,8 @@ export interface AppPreferences {
   modelId: string;
   titleModelProviderId: string;
   titleModelId: string;
+  titleModelFallbackProviderId: string;
+  titleModelFallbackId: string;
   titleModelEffort: string;
   autoTitleEnabled: boolean;
   showRawToolCalls: boolean;

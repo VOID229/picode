@@ -37,7 +37,10 @@ import {
   closeTerminalSession as closeTerminalSessionCommand,
   restoreSession as restoreSessionCommand,
   deleteSession as deleteSessionCommand,
+  moveWorkspace as moveWorkspaceCommand,
+  moveSession as moveSessionCommand,
   undoUserTurn as undoUserTurnCommand,
+  redoUserTurn as redoUserTurnCommand,
   ensureTerminalSession as ensureTerminalSessionCommand,
   writeTerminalInput as writeTerminalInputCommand,
   resizeTerminal as resizeTerminalCommand,
@@ -116,7 +119,21 @@ interface AppStoreState {
   archiveSession: (workspace_id: string, session_id: string) => Promise<void>;
   restoreSession: (workspace_id: string, session_id: string) => Promise<void>;
   deleteSession: (workspace_id: string, session_id: string) => Promise<void>;
+  moveWorkspace: (
+    workspaceId: string,
+    beforeWorkspaceId?: string | null,
+  ) => Promise<void>;
+  moveSession: (
+    workspaceId: string,
+    sessionId: string,
+    beforeSessionId?: string | null,
+  ) => Promise<void>;
   undoUserTurn: (
+    workspaceId: string,
+    sessionId: string,
+    userMessageId: string,
+  ) => Promise<void>;
+  redoUserTurn: (
     workspaceId: string,
     sessionId: string,
     userMessageId: string,
@@ -524,6 +541,21 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
     const state = await deleteSessionCommand(workspaceId, sessionId);
     set({ state });
   },
+  async moveWorkspace(workspaceId, beforeWorkspaceId) {
+    const state = await moveWorkspaceCommand({
+      workspaceId,
+      beforeWorkspaceId,
+    });
+    set({ state });
+  },
+  async moveSession(workspaceId, sessionId, beforeSessionId) {
+    const state = await moveSessionCommand({
+      workspaceId,
+      sessionId,
+      beforeSessionId,
+    });
+    set({ state });
+  },
   async undoUserTurn(workspaceId, sessionId, userMessageId) {
     const composerMessage = getUndoComposerMessage(
       get().state,
@@ -547,6 +579,15 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
         })),
       );
     }
+    await get().refreshGit(workspaceId);
+  },
+  async redoUserTurn(workspaceId, sessionId, userMessageId) {
+    const state = await redoUserTurnCommand({
+      workspaceId,
+      sessionId,
+      userMessageId,
+    });
+    set({ state });
     await get().refreshGit(workspaceId);
   },
   async sendPrompt(workspaceId, sessionId, prompt, mode, images = []) {
