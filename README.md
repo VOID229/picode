@@ -8,6 +8,12 @@ Built with Tauri v2, React, and TypeScript, it provides a native shell for manag
 
 Download the latest macOS DMG from the [latest GitHub release](https://github.com/VOID229/picode/releases/latest), open it, and drag `picode.app` into Applications.
 
+Picode is currently unsigned. If macOS says the app is damaged, cannot be opened, or is from an unidentified developer, remove the quarantine attribute after installing it:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/picode.app
+```
+
 Linux support exists in the codebase but is not refined yet. There are currently no polished Linux installation artifacts such as `.rpm`, `.deb`, or AppImage packages; Linux users should treat the app as source-build only for now.
 
 ## Features
