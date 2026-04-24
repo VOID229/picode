@@ -201,7 +201,7 @@ export function QuestionComposer({
             disabled={currentIndex === 0}
             onClick={goPrevious}
           >
-            <ChevronLeft size={20} />
+            <ChevronLeft size={16} />
           </button>
           <span>
             {currentIndex + 1} of {total}
@@ -212,7 +212,7 @@ export function QuestionComposer({
             disabled={!answers[questionId] || currentIndex === total - 1}
             onClick={goNext}
           >
-            <ChevronRight size={20} />
+            <ChevronRight size={16} />
           </button>
         </div>
       </div>
@@ -289,7 +289,7 @@ export function QuestionComposer({
             disabled={!(customText[question.id] ?? "").trim()}
             onClick={commitCustomAnswer}
           >
-            Save <CornerDownLeft size={16} />
+            Save <CornerDownLeft size={14} />
           </button>
         ) : (
           <button
@@ -298,7 +298,7 @@ export function QuestionComposer({
             disabled={!allAnswered || submitting}
             onClick={() => void submit()}
           >
-            {submitting ? "Submitting" : "Submit"} <CornerDownLeft size={16} />
+            {submitting ? "Submitting" : "Submit"} <CornerDownLeft size={14} />
           </button>
         )}
         <button

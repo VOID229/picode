@@ -1270,10 +1270,11 @@ fn prompt_for_mode(prompt: &str, mode: &PromptMode) -> String {
             concat!(
                 "You are in plan mode. Do not implement code changes.\n",
                 "Before writing the plan, ground yourself in the task: ask clarifying questions with request_user_input when the requirements are ambiguous, or inspect relevant files when local code context is needed.\n",
-                "Only after you understand the core grounding, respond with exactly one <proposed_plan> block and no text outside it.\n",
+                "Only after you understand the core grounding, send exactly one assistant message containing one <proposed_plan> block and no text outside it.\n",
                 "Inside the block, provide concise markdown with a title, summary, key changes, test plan, and assumptions.\n",
-                "After the <proposed_plan> block is complete, call request_user_input with exactly two options: \"Implement plan\" and \"No, do something differently\".\n",
-                "The second option must clearly allow the user to free-type what should change.\n\n",
+                "Then immediately call request_user_input before ending the turn.\n",
+                "The request_user_input call must ask whether to proceed with the proposed plan and must provide exactly two options: \"Implement plan\" and \"No, do something differently\".\n",
+                "The second option must clearly allow the user to free-type what should change, and you must wait for that tool result before doing anything else.\n\n",
                 "User request:\n{}"
             ),
             prompt
