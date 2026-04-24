@@ -188,6 +188,14 @@ body {
   gap: 2px;
 }
 
+.sidebar-scroll-area {
+  scrollbar-width: none;
+}
+
+.sidebar-scroll-area::-webkit-scrollbar {
+  display: none;
+}
+
 /* Buttons & Interactive Elements */
 .nav-item {
   display: flex;

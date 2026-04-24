@@ -354,6 +354,7 @@ export function Sidebar({ state }: SidebarProps) {
         </div>
 
         <div
+          className="sidebar-scroll-area"
           style={{
             display: "flex",
             flexDirection: "column",
@@ -493,9 +494,7 @@ function ProjectNode({
   const [lastSelectedSessionId, setLastSelectedSessionId] = useState<
     string | null
   >(null);
-  const [draggedSessionId, setDraggedSessionId] = useState<string | null>(
-    null,
-  );
+  const [draggedSessionId, setDraggedSessionId] = useState<string | null>(null);
   const [sessionDropIndicator, setSessionDropIndicator] = useState<{
     beforeSessionId: string | null;
   } | null>(null);
@@ -507,7 +506,9 @@ function ProjectNode({
     }
     return sessions.sort((a, b) => {
       if (threadSortOrder === "created") {
-        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+        return (
+          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+        );
       }
       return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
     });
@@ -537,7 +538,7 @@ function ProjectNode({
       const sessionIndex = visibleSessions.findIndex((s) => s.id === sessionId);
       const beforeSessionId = pointerIsInUpperHalf
         ? sessionId
-        : visibleSessions[sessionIndex + 1]?.id ?? null;
+        : (visibleSessions[sessionIndex + 1]?.id ?? null);
 
       setSessionDropIndicator((current) => {
         if (current?.beforeSessionId === beforeSessionId) {
@@ -752,10 +753,14 @@ function ProjectNode({
             }
             event.preventDefault();
             event.stopPropagation();
-            void handleSessionDrop(sessionDropIndicator?.beforeSessionId ?? null);
+            void handleSessionDrop(
+              sessionDropIndicator?.beforeSessionId ?? null,
+            );
           }}
           onDragLeave={(event) => {
-            if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+            if (
+              !event.currentTarget.contains(event.relatedTarget as Node | null)
+            ) {
               setSessionDropIndicator(null);
             }
           }}
