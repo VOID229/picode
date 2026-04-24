@@ -5,6 +5,7 @@ import type {
   WorkspaceRecord,
 } from "../../domains/types";
 import {
+  formatActivityPhaseLabel,
   formatToolGroupLabel,
   deriveLivePhase,
   extractFileChanges,
@@ -357,7 +358,7 @@ describe("summarizeToolActivityDetails", () => {
     expect(details.rawCalls).toHaveLength(2);
   });
 
-  it("formats live and completed exploration labels from unique file counts", () => {
+  it("formats live and completed activity labels without counts", () => {
     const now = new Date().toISOString();
     const toolItems = [
       createToolActivity({
@@ -387,12 +388,8 @@ describe("summarizeToolActivityDetails", () => {
     const details = summarizeToolActivityDetails(toolItems);
     const summary = groupToolActivities(toolItems, details);
 
-    expect(formatToolGroupLabel(summary, true)).toBe(
-      "Exploring 2 files, 1 search",
-    );
-    expect(formatToolGroupLabel(summary, false)).toBe(
-      "Explored 2 files, 1 search",
-    );
+    expect(formatToolGroupLabel(summary, true)).toBe("searching");
+    expect(formatToolGroupLabel(summary, false)).toBe("searched");
   });
 
   it("dedupes edited files across multiple tool calls", () => {
@@ -419,7 +416,20 @@ describe("summarizeToolActivityDetails", () => {
     const summary = groupToolActivities(toolItems, details);
 
     expect(details.files).toHaveLength(2);
-    expect(formatToolGroupLabel(summary, false)).toBe("Edited 2 files");
+    expect(formatToolGroupLabel(summary, false)).toBe("edited files");
+  });
+
+  it("uses present tense only for active activity phases", () => {
+    expect(formatActivityPhaseLabel("reading-files", true)).toBe(
+      "reading files",
+    );
+    expect(formatActivityPhaseLabel("reading-files", false)).toBe("read files");
+    expect(formatActivityPhaseLabel("running-command", true)).toBe(
+      "running command",
+    );
+    expect(formatActivityPhaseLabel("running-command", false)).toBe(
+      "ran command",
+    );
   });
 });
 

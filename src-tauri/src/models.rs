@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::{env, path::PathBuf};
 use uuid::Uuid;
 
-pub const SCHEMA_VERSION: u32 = 5;
+pub const SCHEMA_VERSION: u32 = 6;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -369,6 +369,18 @@ pub struct AppPreferences {
     pub title_model_effort: String,
     #[serde(default = "default_auto_title_enabled")]
     pub auto_title_enabled: bool,
+    #[serde(default = "default_auto_git_messages_enabled")]
+    pub auto_git_messages_enabled: bool,
+    #[serde(default = "default_provider_id")]
+    pub git_message_model_provider_id: String,
+    #[serde(default = "default_title_model_id")]
+    pub git_message_model_id: String,
+    #[serde(default = "default_provider_id")]
+    pub git_message_model_fallback_provider_id: String,
+    #[serde(default = "default_model_id")]
+    pub git_message_model_fallback_id: String,
+    #[serde(default = "default_effort")]
+    pub git_message_model_effort: String,
     #[serde(default = "default_show_raw_tool_calls")]
     pub show_raw_tool_calls: bool,
     pub approval_mode: ApprovalMode,
@@ -640,6 +652,69 @@ pub struct RunTerminalCommandResult {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum GitAction {
+    Commit,
+    CommitPush,
+    Push,
+    CreatePr,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrepareGitActionPayload {
+    pub workspace_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreparedGitAction {
+    pub branch: String,
+    pub file_count: usize,
+    pub additions: usize,
+    pub deletions: usize,
+    pub staged_count: usize,
+    pub unstaged_count: usize,
+    pub has_staged: bool,
+    pub has_unstaged: bool,
+    pub can_push: bool,
+    pub can_create_pr: bool,
+    pub pr_unavailable_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunGitActionPayload {
+    pub workspace_id: String,
+    pub action: GitAction,
+    pub include_unstaged: bool,
+    #[serde(default)]
+    pub message: Option<String>,
+    #[serde(default)]
+    pub custom_instructions: Option<String>,
+    #[serde(default)]
+    pub draft: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunGitActionResult {
+    pub summary: String,
+    pub generated_message: Option<String>,
+    pub pr_url: Option<String>,
+    pub git: GitSnapshot,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResolveExtensionUiRequestPayload {
+    pub workspace_id: String,
+    pub session_id: String,
+    pub request_id: String,
+    pub response: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "kebab-case")]
 pub enum PiRuntimeEvent {
     RuntimeReady {
@@ -701,6 +776,11 @@ pub enum PiRuntimeEvent {
         workspace_id: String,
         session_id: String,
         title: String,
+    },
+    ExtensionUiRequest {
+        workspace_id: String,
+        session_id: String,
+        request: serde_json::Value,
     },
     AuthBrowserOpen {
         provider_id: String,
@@ -781,6 +861,10 @@ fn default_fast_mode() -> bool {
 }
 
 fn default_auto_title_enabled() -> bool {
+    true
+}
+
+fn default_auto_git_messages_enabled() -> bool {
     true
 }
 
@@ -904,6 +988,12 @@ pub fn default_preferences() -> AppPreferences {
         title_model_fallback_id: default_model_id(),
         title_model_effort: default_effort(),
         auto_title_enabled: default_auto_title_enabled(),
+        auto_git_messages_enabled: default_auto_git_messages_enabled(),
+        git_message_model_provider_id: default_provider_id(),
+        git_message_model_id: default_title_model_id(),
+        git_message_model_fallback_provider_id: default_provider_id(),
+        git_message_model_fallback_id: default_model_id(),
+        git_message_model_effort: default_effort(),
         show_raw_tool_calls: default_show_raw_tool_calls(),
         approval_mode: ApprovalMode::Supervised,
         effort: default_effort(),
@@ -1056,6 +1146,15 @@ pub fn normalize_state(mut state: PersistedAppState) -> PersistedAppState {
         &mut state.preferences.title_model_fallback_id,
     );
     normalize_effort(&mut state.preferences.title_model_effort);
+    normalize_stored_model_selection(
+        &mut state.preferences.git_message_model_provider_id,
+        &mut state.preferences.git_message_model_id,
+    );
+    normalize_stored_model_selection(
+        &mut state.preferences.git_message_model_fallback_provider_id,
+        &mut state.preferences.git_message_model_fallback_id,
+    );
+    normalize_effort(&mut state.preferences.git_message_model_effort);
 
     for workspace in &mut state.workspaces {
         normalize_workspace_path(&mut workspace.path);
@@ -1168,6 +1267,14 @@ mod tests {
         assert!(!parsed.preferences.fast_mode);
         assert_eq!(parsed.preferences.pi_binary_path, None);
         assert!(!parsed.preferences.show_raw_tool_calls);
+        assert!(parsed.preferences.auto_git_messages_enabled);
+        assert_eq!(
+            parsed.preferences.git_message_model_provider_id,
+            "openai-codex"
+        );
+        assert_eq!(parsed.preferences.git_message_model_id, "gpt-5.4-mini");
+        assert_eq!(parsed.preferences.git_message_model_fallback_id, "gpt-5.4");
+        assert_eq!(parsed.preferences.git_message_model_effort, "high");
         assert_eq!(parsed.workspaces[0].effort, "high");
         assert!(!parsed.workspaces[0].fast_mode);
     }
@@ -1221,7 +1328,7 @@ mod tests {
 
         let normalized = normalize_state(parsed);
 
-        assert_eq!(normalized.schema_version, 5);
+        assert_eq!(normalized.schema_version, 6);
         assert_eq!(normalized.preferences.provider_id, "pi-core");
         assert_eq!(normalized.preferences.model_id, "gpt-5.4");
         assert!(!normalized.preferences.show_raw_tool_calls);
@@ -1294,6 +1401,15 @@ mod tests {
         assert_eq!(preferences.title_model_fallback_provider_id, "openai-codex");
         assert_eq!(preferences.title_model_fallback_id, "gpt-5.4");
         assert_eq!(preferences.title_model_effort, "high");
+        assert!(preferences.auto_git_messages_enabled);
+        assert_eq!(preferences.git_message_model_provider_id, "openai-codex");
+        assert_eq!(preferences.git_message_model_id, "gpt-5.4-mini");
+        assert_eq!(
+            preferences.git_message_model_fallback_provider_id,
+            "openai-codex"
+        );
+        assert_eq!(preferences.git_message_model_fallback_id, "gpt-5.4");
+        assert_eq!(preferences.git_message_model_effort, "high");
         assert!(!preferences.show_raw_tool_calls);
     }
 

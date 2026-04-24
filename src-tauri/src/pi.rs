@@ -1,9 +1,10 @@
 use crate::models::{
     AbortPromptPayload, ApprovalDecision, ApprovalState, ModelOption, PiInstallState,
     PiInstallStatus, PiRuntimeEvent, PromptMode, ProviderAuthKind, ProviderOption, ProviderStatus,
-    RefreshWorkspaceRuntimeCatalogPayload, ResolveApprovalPayload, RuntimeBootstrapPayload,
-    RuntimeHealthPayload, SendPromptPayload, SessionIdentityPayload, SessionModelSelection,
-    SessionRuntimeMetadata, SessionStats, SessionStatus, TimelineItem, ToolActivity, ToolStatus,
+    RefreshWorkspaceRuntimeCatalogPayload, ResolveApprovalPayload,
+    ResolveExtensionUiRequestPayload, RuntimeBootstrapPayload, RuntimeHealthPayload,
+    SendPromptPayload, SessionIdentityPayload, SessionModelSelection, SessionRuntimeMetadata,
+    SessionStats, SessionStatus, TimelineItem, ToolActivity, ToolStatus,
     WorkspaceRuntimeCatalogPayload, expand_user_path, now_iso,
 };
 use crate::{AppState, git, storage};
@@ -37,6 +38,103 @@ const PI_INSTALL_COMMAND: &str = "npm install -g @mariozechner/pi-coding-agent";
 const RPC_PROBE_TIMEOUT: Duration = Duration::from_secs(8);
 const SESSION_REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 const NO_VISIBLE_ASSISTANT_OUTPUT_ERROR: &str = "Pi finished without any visible assistant output.";
+const PICODE_QUESTIONS_EXTENSION: &str = r#"
+export default function picodeQuestions(pi) {
+  const optionSchema = {
+    type: "object",
+    properties: {
+      label: { type: "string" },
+      description: { type: "string" }
+    },
+    required: ["label"],
+    additionalProperties: true
+  };
+  const questionSchema = {
+    type: "object",
+    properties: {
+      id: { type: "string" },
+      header: { type: "string" },
+      question: { type: "string" },
+      prompt: { type: "string" },
+      options: { type: "array", items: optionSchema }
+    },
+    required: ["options"],
+    additionalProperties: true
+  };
+  const parameters = {
+    type: "object",
+    properties: {
+      questions: { type: "array", items: questionSchema },
+      question: { type: "string" },
+      prompt: { type: "string" },
+      options: { type: "array", items: optionSchema }
+    },
+    additionalProperties: true
+  };
+
+  function normalize(params) {
+    const raw = Array.isArray(params?.questions)
+      ? params.questions
+      : [{ id: "question", question: params?.question ?? params?.prompt ?? "", options: params?.options ?? [] }];
+    return raw.map((item, index) => ({
+      id: String(item.id || `question_${index + 1}`),
+      header: String(item.header || `Question ${index + 1}`),
+      question: String(item.question || item.prompt || ""),
+      options: (Array.isArray(item.options) ? item.options : []).slice(0, 3).map((option, optionIndex) => ({
+        label: String(option.label || option.value || `Option ${optionIndex + 1}`),
+        description: option.description == null ? undefined : String(option.description)
+      }))
+    })).filter((item) => item.question && item.options.length > 0);
+  }
+
+  function register(name) {
+    pi.registerTool({
+      name,
+      label: "Question",
+      description: "Ask the user one or more numbered questions with up to three options and a free-text fallback.",
+      promptSnippet: "Ask the user a blocking numbered question when you need a decision before continuing",
+      promptGuidelines: [
+        "Use this tool instead of guessing when user input is required.",
+        "Provide 2 or 3 mutually exclusive options when possible."
+      ],
+      parameters,
+      async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+        const questions = normalize(params);
+        if (!ctx.hasUI) {
+          return { content: [{ type: "text", text: "Error: UI not available" }], details: { cancelled: true, questions, answers: [] } };
+        }
+        if (questions.length === 0) {
+          return { content: [{ type: "text", text: "Error: no valid questions provided" }], details: { cancelled: true, questions, answers: [] } };
+        }
+
+        const resultText = await ctx.ui.editor("__picode_questions__", JSON.stringify({ questions }));
+        if (!resultText) {
+          return { content: [{ type: "text", text: "User cancelled the questions" }], details: { cancelled: true, questions, answers: [] } };
+        }
+        let result;
+        try {
+          result = JSON.parse(resultText);
+        } catch {
+          result = { answers: [] };
+        }
+        const answers = Array.isArray(result.answers) ? result.answers : [];
+        const lines = answers.map((answer) => {
+          const prefix = answer.wasCustom ? "user wrote" : `user selected ${answer.index}`;
+          return `${answer.header || answer.id}: ${prefix}: ${answer.value}`;
+        });
+        return {
+          content: [{ type: "text", text: lines.join("\n") || "No answers provided" }],
+          details: { cancelled: false, questions, answers }
+        };
+      }
+    });
+  }
+
+  register("request_user_input");
+  register("question");
+  register("questionnaire");
+}
+"#;
 
 #[derive(Clone, Default)]
 pub struct PiRuntimeHandle {
@@ -114,6 +212,18 @@ impl ActiveSessionHandle {
             .context("Pi RPC response channel dropped")?
             .map_err(|error| anyhow!(error))?;
         Ok(serde_json::from_value(response)?)
+    }
+
+    async fn send_notification<P>(&self, payload: &P) -> Result<()>
+    where
+        P: Serialize + ?Sized,
+    {
+        let line = serde_json::to_string(payload)?;
+        let mut stdin = self.inner.stdin.lock().await;
+        stdin.write_all(line.as_bytes()).await?;
+        stdin.write_all(b"\n").await?;
+        stdin.flush().await?;
+        Ok(())
     }
 
     async fn terminate(&self) {
@@ -362,6 +472,18 @@ struct ResolvedPiInstall {
 
 fn session_key(workspace_id: &str, session_id: &str) -> String {
     format!("{workspace_id}:{session_id}")
+}
+
+fn extension_path(app: &AppHandle) -> Result<PathBuf> {
+    let directory = app
+        .path()
+        .app_data_dir()
+        .context("failed to resolve app data directory")?
+        .join("pi-extensions");
+    std::fs::create_dir_all(&directory)?;
+    let path = directory.join("picode-questions.js");
+    std::fs::write(&path, PICODE_QUESTIONS_EXTENSION)?;
+    Ok(path)
 }
 
 fn install_status(
@@ -1146,9 +1268,12 @@ fn prompt_for_mode(prompt: &str, mode: &PromptMode) -> String {
         PromptMode::Build => prompt.to_string(),
         PromptMode::Plan => format!(
             concat!(
-                "You are in plan mode. Respond with exactly one <proposed_plan> block and no text outside it.\n",
+                "You are in plan mode. Do not implement code changes.\n",
+                "Before writing the plan, ground yourself in the task: ask clarifying questions with request_user_input when the requirements are ambiguous, or inspect relevant files when local code context is needed.\n",
+                "Only after you understand the core grounding, respond with exactly one <proposed_plan> block and no text outside it.\n",
                 "Inside the block, provide concise markdown with a title, summary, key changes, test plan, and assumptions.\n",
-                "Do not implement anything, do not include commentary before or after the block.\n\n",
+                "After the <proposed_plan> block is complete, call request_user_input with exactly two options: \"Implement plan\" and \"No, do something differently\".\n",
+                "The second option must clearly allow the user to free-type what should change.\n\n",
                 "User request:\n{}"
             ),
             prompt
@@ -1170,6 +1295,44 @@ fn prompt_for_title(user_message: &str, assistant_message: &str) -> String {
             "First assistant response:\n{}\n"
         ),
         user_message, assistant_message
+    )
+}
+
+fn prompt_for_commit_message(diff_context: &str, custom_instructions: Option<&str>) -> String {
+    format!(
+        concat!(
+            "Generate a concise git commit subject for the following changes.\n",
+            "Requirements:\n",
+            "- One line only\n",
+            "- Imperative mood\n",
+            "- No markdown\n",
+            "- No quotes\n",
+            "- 72 characters or less\n\n",
+            "Custom instructions:\n{}\n\n",
+            "Changes:\n{}\n"
+        ),
+        custom_instructions
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("None"),
+        diff_context
+    )
+}
+
+fn prompt_for_pr_message(context: &str, custom_instructions: Option<&str>) -> String {
+    format!(
+        concat!(
+            "Generate a GitHub pull request title and body for the following branch.\n",
+            "Return strict JSON with keys title and body. Do not include markdown fences.\n",
+            "The title should be concise. The body should include a short summary and test notes when inferable.\n\n",
+            "Custom instructions:\n{}\n\n",
+            "Branch context:\n{}\n"
+        ),
+        custom_instructions
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("None"),
+        context
     )
 }
 
@@ -1196,6 +1359,33 @@ fn sanitize_generated_title(value: &str) -> Option<String> {
         .collect::<Vec<_>>()
         .join(" ");
     (!words.is_empty()).then_some(words)
+}
+
+fn sanitize_generated_commit_message(value: &str) -> Option<String> {
+    sanitize_generated_title(value).map(|title| {
+        let mut subject = title.lines().next().unwrap_or("").trim().to_string();
+        if subject.len() > 72 {
+            subject.truncate(72);
+            subject = subject.trim_end().to_string();
+        }
+        subject
+    })
+}
+
+fn parse_generated_pr_message(value: &str) -> Option<(String, String)> {
+    let parsed: Value = serde_json::from_str(value.trim()).ok()?;
+    let title = parsed
+        .get("title")
+        .and_then(Value::as_str)
+        .and_then(sanitize_generated_title)?;
+    let body = parsed
+        .get("body")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|body| !body.is_empty())
+        .unwrap_or("Generated by Picode.")
+        .to_string();
+    Some((title, body))
 }
 
 fn assistant_message_text(message: &PiMessage) -> String {
@@ -1650,6 +1840,18 @@ async fn process_stdout_line(
         return Ok(());
     }
 
+    if value.get("type").and_then(Value::as_str) == Some("extension_ui_request") {
+        app.emit(
+            "pi://event",
+            PiRuntimeEvent::ExtensionUiRequest {
+                workspace_id: workspace_id.to_string(),
+                session_id: session_id.to_string(),
+                request: value,
+            },
+        )?;
+        return Ok(());
+    }
+
     let event: RpcEvent = serde_json::from_value(value)?;
     match event {
         RpcEvent::MessageUpdate {
@@ -2065,10 +2267,7 @@ async fn generate_thread_title(
             expand_user_path(&workspace.path),
             state.preferences.title_model_provider_id.clone(),
             state.preferences.title_model_id.clone(),
-            state
-                .preferences
-                .title_model_fallback_provider_id
-                .clone(),
+            state.preferences.title_model_fallback_provider_id.clone(),
             state.preferences.title_model_fallback_id.clone(),
             state.preferences.title_model_effort.clone(),
             user_message,
@@ -2089,11 +2288,8 @@ async fn generate_thread_title(
     else {
         return Ok(());
     };
-    let fallback_selection = resolve_title_selection(
-        &providers,
-        &fallback_provider_id,
-        &fallback_model_id,
-    );
+    let fallback_selection =
+        resolve_title_selection(&providers, &fallback_provider_id, &fallback_model_id);
     let prompt = prompt_for_title(&user_message, &assistant_message);
 
     let mut title = attempt_thread_title(
@@ -2372,6 +2568,216 @@ pub async fn refresh_workspace_runtime_catalog(
     fetch_workspace_catalog_and_normalize(&app, &shared, &payload.workspace_id, &binary_path).await
 }
 
+pub async fn generate_git_commit_message(
+    shared: &AppState,
+    workspace_path: &str,
+    diff_context: &str,
+    custom_instructions: Option<&str>,
+) -> Result<Option<String>> {
+    let (
+        enabled,
+        preferred_provider_id,
+        preferred_model_id,
+        fallback_provider_id,
+        fallback_model_id,
+        effort,
+    ) = {
+        let state = shared.state.lock().await;
+        (
+            state.preferences.auto_git_messages_enabled,
+            state.preferences.git_message_model_provider_id.clone(),
+            state.preferences.git_message_model_id.clone(),
+            state
+                .preferences
+                .git_message_model_fallback_provider_id
+                .clone(),
+            state.preferences.git_message_model_fallback_id.clone(),
+            state.preferences.git_message_model_effort.clone(),
+        )
+    };
+    if !enabled || diff_context.trim().is_empty() {
+        return Ok(None);
+    }
+
+    let resolved = resolve_pi_install(shared).await?;
+    let binary_path = resolved
+        .binary_path
+        .context("Pi is not installed or failed validation")?;
+    let providers = map_models_to_provider_options(
+        fetch_available_models(&binary_path, Path::new(workspace_path)).await?,
+    );
+    let Some((provider_id, model_id)) =
+        resolve_title_selection(&providers, &preferred_provider_id, &preferred_model_id)
+    else {
+        return Ok(None);
+    };
+    let fallback_selection =
+        resolve_title_selection(&providers, &fallback_provider_id, &fallback_model_id);
+    let prompt = prompt_for_commit_message(diff_context, custom_instructions);
+
+    let mut value = run_prompt_once_text(
+        &binary_path,
+        Some(Path::new(workspace_path)),
+        &[
+            "--no-session",
+            "--provider",
+            &provider_id,
+            "--model",
+            &model_id,
+            "--thinking",
+            map_provider_effort_to_thinking(&provider_id, &model_id, &effort, false),
+        ],
+        &prompt,
+    )
+    .await
+    .ok();
+    if value.is_none() {
+        if let Some((fallback_provider_id, fallback_model_id)) = fallback_selection {
+            value = run_prompt_once_text(
+                &binary_path,
+                Some(Path::new(workspace_path)),
+                &[
+                    "--no-session",
+                    "--provider",
+                    &fallback_provider_id,
+                    "--model",
+                    &fallback_model_id,
+                    "--thinking",
+                    map_provider_effort_to_thinking(
+                        &fallback_provider_id,
+                        &fallback_model_id,
+                        &effort,
+                        false,
+                    ),
+                ],
+                &prompt,
+            )
+            .await
+            .ok();
+        }
+    }
+    Ok(value.and_then(|message| sanitize_generated_commit_message(&message)))
+}
+
+pub async fn generate_git_pr_message(
+    shared: &AppState,
+    workspace_path: &str,
+    branch_context: &str,
+    custom_instructions: Option<&str>,
+) -> Result<Option<(String, String)>> {
+    let (
+        enabled,
+        preferred_provider_id,
+        preferred_model_id,
+        fallback_provider_id,
+        fallback_model_id,
+        effort,
+    ) = {
+        let state = shared.state.lock().await;
+        (
+            state.preferences.auto_git_messages_enabled,
+            state.preferences.git_message_model_provider_id.clone(),
+            state.preferences.git_message_model_id.clone(),
+            state
+                .preferences
+                .git_message_model_fallback_provider_id
+                .clone(),
+            state.preferences.git_message_model_fallback_id.clone(),
+            state.preferences.git_message_model_effort.clone(),
+        )
+    };
+    if !enabled || branch_context.trim().is_empty() {
+        return Ok(None);
+    }
+
+    let resolved = resolve_pi_install(shared).await?;
+    let binary_path = resolved
+        .binary_path
+        .context("Pi is not installed or failed validation")?;
+    let providers = map_models_to_provider_options(
+        fetch_available_models(&binary_path, Path::new(workspace_path)).await?,
+    );
+    let Some((provider_id, model_id)) =
+        resolve_title_selection(&providers, &preferred_provider_id, &preferred_model_id)
+    else {
+        return Ok(None);
+    };
+    let fallback_selection =
+        resolve_title_selection(&providers, &fallback_provider_id, &fallback_model_id);
+    let prompt = prompt_for_pr_message(branch_context, custom_instructions);
+
+    let mut response = run_prompt_once_text(
+        &binary_path,
+        Some(Path::new(workspace_path)),
+        &[
+            "--no-session",
+            "--provider",
+            &provider_id,
+            "--model",
+            &model_id,
+            "--thinking",
+            map_provider_effort_to_thinking(&provider_id, &model_id, &effort, false),
+        ],
+        &prompt,
+    )
+    .await
+    .ok();
+
+    if response.is_none() {
+        if let Some((fallback_provider_id, fallback_model_id)) = fallback_selection {
+            response = run_prompt_once_text(
+                &binary_path,
+                Some(Path::new(workspace_path)),
+                &[
+                    "--no-session",
+                    "--provider",
+                    &fallback_provider_id,
+                    "--model",
+                    &fallback_model_id,
+                    "--thinking",
+                    map_provider_effort_to_thinking(
+                        &fallback_provider_id,
+                        &fallback_model_id,
+                        &effort,
+                        false,
+                    ),
+                ],
+                &prompt,
+            )
+            .await
+            .ok();
+        }
+    }
+
+    Ok(response.as_deref().and_then(parse_generated_pr_message))
+}
+
+pub async fn resolve_extension_ui_request(
+    shared: AppState,
+    payload: ResolveExtensionUiRequestPayload,
+) -> Result<()> {
+    let key = session_key(&payload.workspace_id, &payload.session_id);
+    let handle = shared
+        .runtime
+        .get_session(&key)
+        .await
+        .context("No active Pi session is waiting for a UI response.")?;
+    let mut response = serde_json::Map::new();
+    response.insert(
+        "type".to_string(),
+        Value::String("extension_ui_response".to_string()),
+    );
+    response.insert("id".to_string(), Value::String(payload.request_id));
+    if let Value::Object(entries) = payload.response {
+        for (key, value) in entries {
+            response.insert(key, value);
+        }
+    } else {
+        response.insert("value".to_string(), payload.response);
+    }
+    handle.send_notification(&Value::Object(response)).await
+}
+
 pub async fn launch_prompt_stream(
     app: AppHandle,
     shared: AppState,
@@ -2458,6 +2864,7 @@ async fn run_prompt_stream(app: AppHandle, shared: AppState, payload: SendPrompt
 
         let session_file = session_file_path(&app, &workspace_id, &session_id)?;
         let session_file_string = session_file.to_string_lossy().into_owned();
+        let questions_extension = extension_path(&app)?;
 
         let (workspace_path, provider_id, model_id, effort, fast_mode) = {
             let mut state = shared.state.lock().await;
@@ -2496,6 +2903,8 @@ async fn run_prompt_stream(app: AppHandle, shared: AppState, payload: SendPrompt
         command
             .arg("--mode")
             .arg("rpc")
+            .arg("--extension")
+            .arg(&questions_extension)
             .arg("--session")
             .arg(&session_file)
             .arg("--provider")
@@ -2978,6 +3387,30 @@ mod tests {
     }
 
     #[test]
+    fn generated_commit_subject_is_sanitized() {
+        assert_eq!(
+            sanitize_generated_commit_message(
+                "\"Add git modal and question composer with extra words that should be trimmed\"",
+            ),
+            Some("Add git modal and question composer".to_string())
+        );
+        assert_eq!(sanitize_generated_commit_message("   "), None);
+    }
+
+    #[test]
+    fn generated_pr_message_parses_sanitized_json() {
+        assert_eq!(
+            parse_generated_pr_message(
+                r#"{"title":"Implement git workflow popup.","body":"Adds modal and generated text."}"#,
+            ),
+            Some((
+                "Implement git workflow popup".to_string(),
+                "Adds modal and generated text.".to_string(),
+            ))
+        );
+    }
+
+    #[test]
     fn build_mode_prompt_passthrough_is_unchanged() {
         let prompt = "Fix the broken terminal pane.";
         assert_eq!(prompt_for_mode(prompt, &PromptMode::Build), prompt);
@@ -2988,7 +3421,10 @@ mod tests {
         let wrapped = prompt_for_mode("Investigate the bug.", &PromptMode::Plan);
 
         assert!(wrapped.contains("<proposed_plan>"));
-        assert!(wrapped.contains("Respond with exactly one"));
+        assert!(wrapped.contains("Before writing the plan, ground yourself"));
+        assert!(wrapped.contains("call request_user_input with exactly two options"));
+        assert!(wrapped.contains("\"Implement plan\""));
+        assert!(wrapped.contains("\"No, do something differently\""));
         assert!(wrapped.contains("User request:\nInvestigate the bug."));
     }
 }

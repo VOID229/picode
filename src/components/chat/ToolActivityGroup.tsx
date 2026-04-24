@@ -50,6 +50,11 @@ export function ToolActivityGroup({ segment }: ToolActivityGroupProps) {
   const details = summarizeToolActivityDetails(toolItems);
   const summary = groupToolActivities(toolItems, details);
   const anyRunning = isLiveToolActivity(toolItems);
+  const canShowDetails =
+    showRawToolCalls &&
+    (details.files.length > 0 ||
+      noticeItems.length > 0 ||
+      details.rawCalls.length > 0);
   useEffect(() => {
     const wasRunning = wasRunningRef.current;
     wasRunningRef.current = anyRunning;
@@ -101,23 +106,34 @@ export function ToolActivityGroup({ segment }: ToolActivityGroupProps) {
   }, [anyRunning]);
 
   const label =
-    toolItems.length > 0
-      ? formatToolGroupLabel(summary, displayLive)
-      : formatActivityPhaseLabel(segment.phase);
+    segment.phase !== "other"
+      ? formatActivityPhaseLabel(segment.phase, displayLive)
+      : toolItems.length > 0
+        ? formatToolGroupLabel(summary, displayLive)
+        : formatActivityPhaseLabel(segment.phase, displayLive);
 
   return (
     <div className="tool-activity-group">
       <button
-        className="tool-activity-group__header"
-        onClick={() => setExpanded(!expanded)}
+        className={cn(
+          "tool-activity-group__header",
+          !canShowDetails && "tool-activity-group__header--static",
+        )}
+        onClick={() => {
+          if (canShowDetails) {
+            setExpanded(!expanded);
+          }
+        }}
       >
-        <ChevronRight
-          size={14}
-          className={cn(
-            "tool-activity-group__arrow",
-            expanded && "tool-activity-group__arrow--expanded",
-          )}
-        />
+        {canShowDetails && (
+          <ChevronRight
+            size={14}
+            className={cn(
+              "tool-activity-group__arrow",
+              expanded && "tool-activity-group__arrow--expanded",
+            )}
+          />
+        )}
         <span
           className={cn(
             "tool-activity-group__label",
@@ -128,79 +144,81 @@ export function ToolActivityGroup({ segment }: ToolActivityGroupProps) {
         </span>
       </button>
 
-      <div
-        className={cn(
-          "tool-activity-group__content",
-          expanded && "tool-activity-group__content--expanded",
-        )}
-      >
-        <div className="tool-activity-group__list">
-          {details.files.length > 0 ? (
-            details.files.map((file) => (
-              <div key={file.path} className="tool-activity-group__file">
-                <span
-                  className="tool-activity-group__file-path"
-                  title={file.path}
-                >
-                  {file.path}
-                </span>
-                <span className="tool-activity-group__file-actions">
-                  {formatToolFileActions(file.actions)}
-                </span>
-              </div>
-            ))
-          ) : noticeItems.length > 0 ? (
-            noticeItems.map((item) => (
-              <div key={item.id} className="tool-activity-group__item">
-                <span className="tool-activity-group__tool-name">
-                  {item.title}
-                </span>
-                {item.detail && (
-                  <span className="tool-activity-group__tool-summary">
-                    {item.detail}
-                  </span>
-                )}
-              </div>
-            ))
-          ) : (
-            <div className="tool-activity-group__empty">
-              No file paths captured for this step.
-            </div>
+      {canShowDetails && (
+        <div
+          className={cn(
+            "tool-activity-group__content",
+            expanded && "tool-activity-group__content--expanded",
           )}
-        </div>
-        {showRawToolCalls && details.rawCalls.length > 0 && (
-          <div className="tool-activity-group__subsection">
-            <button
-              className="tool-activity-group__subtoggle"
-              type="button"
-              onClick={() => setRawExpanded((current) => !current)}
-            >
-              {rawExpanded ? "Hide raw tool calls" : "Show raw tool calls"}
-            </button>
-            {rawExpanded && (
-              <div className="tool-activity-group__list">
-                {details.rawCalls.map((item) => (
-                  <div
-                    key={item.id}
-                    className={cn(
-                      "tool-activity-group__item",
-                      item.activity.status === "running" &&
-                        "tool-activity-group__item--running",
-                    )}
+        >
+          <div className="tool-activity-group__list">
+            {details.files.length > 0 ? (
+              details.files.map((file) => (
+                <div key={file.path} className="tool-activity-group__file">
+                  <span
+                    className="tool-activity-group__file-path"
+                    title={file.path}
                   >
-                    <span className="tool-activity-group__tool-name">
-                      {item.activity.toolName}
-                    </span>
+                    {file.path}
+                  </span>
+                  <span className="tool-activity-group__file-actions">
+                    {formatToolFileActions(file.actions)}
+                  </span>
+                </div>
+              ))
+            ) : noticeItems.length > 0 ? (
+              noticeItems.map((item) => (
+                <div key={item.id} className="tool-activity-group__item">
+                  <span className="tool-activity-group__tool-name">
+                    {item.title}
+                  </span>
+                  {item.detail && (
                     <span className="tool-activity-group__tool-summary">
-                      {item.activity.summary}
+                      {item.detail}
                     </span>
-                  </div>
-                ))}
+                  )}
+                </div>
+              ))
+            ) : (
+              <div className="tool-activity-group__empty">
+                No file paths captured for this step.
               </div>
             )}
           </div>
-        )}
-      </div>
+          {details.rawCalls.length > 0 && (
+            <div className="tool-activity-group__subsection">
+              <button
+                className="tool-activity-group__subtoggle"
+                type="button"
+                onClick={() => setRawExpanded((current) => !current)}
+              >
+                {rawExpanded ? "Hide raw tool calls" : "Show raw tool calls"}
+              </button>
+              {rawExpanded && (
+                <div className="tool-activity-group__list">
+                  {details.rawCalls.map((item) => (
+                    <div
+                      key={item.id}
+                      className={cn(
+                        "tool-activity-group__item",
+                        item.activity.status === "running" &&
+                          "tool-activity-group__item--running",
+                      )}
+                    >
+                      <span className="tool-activity-group__tool-name">
+                        {item.activity.toolName}
+                      </span>
+                      <span className="tool-activity-group__tool-summary">
+                        {item.activity.summary}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

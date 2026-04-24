@@ -18,6 +18,7 @@ import type {
 import { useAppStore } from "../../state/useAppStore";
 import { FilesChangedBlock } from "./FilesChangedBlock";
 import { ImageAttachmentGallery } from "./ImageAttachmentGallery";
+import { QuestionComposer } from "./QuestionComposer";
 import { TimelineItemView } from "./TimelineItemView";
 import { ToolActivityGroup } from "./ToolActivityGroup";
 import { WorkedForBlock } from "./WorkedForBlock";
@@ -98,6 +99,7 @@ export function ConversationView({
   );
   const composerDrafts = useAppStore((store) => store.composerDrafts);
   const composerImageDrafts = useAppStore((store) => store.composerImageDrafts);
+  const pendingQuestions = useAppStore((store) => store.pendingQuestions);
   const currentMode = useAppStore((store) => store.currentMode);
   const setCurrentMode = useAppStore((store) => store.setCurrentMode);
   const setComposerDraft = useAppStore((store) => store.setComposerDraft);
@@ -110,6 +112,9 @@ export function ConversationView({
   const resolveApproval = useAppStore((state) => state.resolveApproval);
   const undoUserTurn = useAppStore((state) => state.undoUserTurn);
   const redoUserTurn = useAppStore((state) => state.redoUserTurn);
+  const resolveQuestionRequest = useAppStore(
+    (state) => state.resolveQuestionRequest,
+  );
   const updateWorkspaceSettings = useAppStore(
     (store) => store.updateWorkspaceSettings,
   );
@@ -131,6 +136,13 @@ export function ConversationView({
   const sessionDraft = session ? (composerDrafts[session.id] ?? "") : "";
   const sessionImages = session ? (composerImageDrafts[session.id] ?? []) : [];
   const canSubmit = sessionDraft.trim().length > 0 || sessionImages.length > 0;
+  const activeQuestionRequest =
+    workspace &&
+    session &&
+    pendingQuestions?.workspaceId === workspace.id &&
+    pendingQuestions.sessionId === session.id
+      ? pendingQuestions
+      : null;
 
   useEffect(() => {
     setLastUndoneChange(null);
@@ -355,11 +367,17 @@ export function ConversationView({
     if (!confirmed) return;
 
     try {
-      await redoUserTurn(workspace.id, session.id, lastUndoneChange.userMessageId);
+      await redoUserTurn(
+        workspace.id,
+        session.id,
+        lastUndoneChange.userMessageId,
+      );
       setLastUndoneChange(null);
     } catch (error) {
       window.alert(
-        error instanceof Error ? error.message : "Redo is unavailable for this change.",
+        error instanceof Error
+          ? error.message
+          : "Redo is unavailable for this change.",
       );
     }
   }, [lastUndoneChange, redoUserTurn, session, workspace]);
@@ -475,8 +493,8 @@ export function ConversationView({
       : null;
   const isContextOverLimit = Boolean(
     sessionStats?.contextUsage?.tokens != null &&
-      sessionStats?.contextUsage &&
-      sessionStats.contextUsage.tokens > sessionStats.contextUsage.contextWindow,
+    sessionStats?.contextUsage &&
+    sessionStats.contextUsage.tokens > sessionStats.contextUsage.contextWindow,
   );
   const contextUsageColor = isContextOverLimit ? "#cf6679" : "#9aa0a6";
 
@@ -579,228 +597,100 @@ export function ConversationView({
             />
           </div>
         )}
-        <div
-          style={{
-            background: "#18181A",
-            border: `1px solid ${isFocused ? "#2563eb" : "#333"}`,
-            borderRadius: "12px",
-            padding: "12px 16px",
-            display: "flex",
-            flexDirection: "column",
-            gap: "12px",
-            transition: "border-color 0.2s",
-            boxShadow: isFocused ? "0 0 0 1px #2563eb" : "none",
-          }}
-        >
-          <textarea
-            ref={textareaRef}
-            value={sessionDraft}
-            onFocus={() => setIsFocused(true)}
-            onBlur={() => setIsFocused(false)}
-            onChange={(event) => {
-              if (!session) {
-                return;
-              }
-              setComposerDraft(session.id, event.target.value);
-            }}
-            onPaste={(event) => {
-              void handleComposerPaste(event);
-            }}
-            placeholder="Ask for follow-up changes or attach images"
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && !event.shiftKey) {
-                event.preventDefault();
-                if (!sendDisabled && canSubmit) {
-                  void handleSubmit();
-                }
-              }
-            }}
-            disabled={sendDisabled}
-            rows={1}
-            aria-label="Message composer"
-            style={{
-              background: "transparent",
-              border: "none",
-              resize: "none",
-              color: "#eaeaea",
-              fontSize: "0.95rem",
-              outline: "none",
-              maxHeight: "200px",
-            }}
+        {activeQuestionRequest ? (
+          <QuestionComposer
+            request={activeQuestionRequest}
+            onResolve={(value) =>
+              resolveQuestionRequest(activeQuestionRequest, value)
+            }
           />
-
+        ) : (
           <div
             style={{
+              background: "#18181A",
+              border: `1px solid ${isFocused ? "#2563eb" : "#333"}`,
+              borderRadius: "12px",
+              padding: "12px 16px",
               display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
+              flexDirection: "column",
               gap: "12px",
-              marginTop: "4px",
+              transition: "border-color 0.2s",
+              boxShadow: isFocused ? "0 0 0 1px #2563eb" : "none",
             }}
           >
+            <textarea
+              ref={textareaRef}
+              value={sessionDraft}
+              onFocus={() => setIsFocused(true)}
+              onBlur={() => setIsFocused(false)}
+              onChange={(event) => {
+                if (!session) {
+                  return;
+                }
+                setComposerDraft(session.id, event.target.value);
+              }}
+              onPaste={(event) => {
+                void handleComposerPaste(event);
+              }}
+              placeholder="Ask for follow-up changes or attach images"
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault();
+                  if (!sendDisabled && canSubmit) {
+                    void handleSubmit();
+                  }
+                }
+              }}
+              disabled={sendDisabled}
+              rows={1}
+              aria-label="Message composer"
+              style={{
+                background: "transparent",
+                border: "none",
+                resize: "none",
+                color: "#eaeaea",
+                fontSize: "0.95rem",
+                outline: "none",
+                maxHeight: "200px",
+              }}
+            />
+
             <div
               style={{
                 display: "flex",
                 alignItems: "center",
-                gap: "16px",
-                color: "#666",
-                fontSize: "0.8rem",
+                justifyContent: "space-between",
+                gap: "12px",
+                marginTop: "4px",
               }}
             >
               <div
-                className="composer-select-wrapper pointer"
-                onClick={() => {
-                  if (hasWorkspaceCatalog) {
-                    toggleComposerMenu("provider");
-                  }
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "16px",
+                  color: "#666",
+                  fontSize: "0.8rem",
                 }}
               >
-                <span style={{ paddingRight: "4px" }}>
-                  {activeProvider?.label ||
-                    (catalogStatus === "loading"
-                      ? "Loading providers..."
-                      : runtimeInstall?.status === "ready"
-                        ? "Provider"
-                        : "Runtime unavailable")}
-                </span>
-                <ChevronIcon />
-                {providerDropdownOpen && hasWorkspaceCatalog && (
-                  <>
-                    <div
-                      style={{
-                        position: "fixed",
-                        inset: 0,
-                        zIndex: 10,
-                        cursor: "default",
-                      }}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        closeComposerMenus();
-                      }}
-                    />
-                    <div
-                      className="custom-dropdown"
-                      style={{ minWidth: "200px" }}
-                    >
-                      {workspaceProviders.map((provider) => (
-                        <div
-                          key={provider.id}
-                          className="custom-dropdown-item"
-                          style={{ justifyContent: "space-between" }}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            closeComposerMenus();
-                            void updateWorkspaceSettings({
-                              workspaceId: workspace.id,
-                              sessionId: session.id,
-                              approvalMode: workspace.approvalMode,
-                              providerId: provider.id,
-                              modelId:
-                                provider.models[0]?.id ??
-                                normalizedSelection.modelId,
-                              effort: normalizedSelection.effort,
-                              fastMode: normalizedSelection.fastMode,
-                              policy: workspace.policy,
-                            });
-                          }}
-                        >
-                          <span>{provider.label}</span>
-                          {normalizedSelection.providerId === provider.id && (
-                            <Check size={14} />
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  </>
-                )}
-              </div>
-
-              <div
-                style={{ width: "1px", height: "12px", background: "#333" }}
-              />
-
-              <div
-                className="composer-select-wrapper pointer"
-                onClick={() => {
-                  if (hasWorkspaceCatalog) {
-                    toggleComposerMenu("model");
-                  }
-                }}
-              >
-                <Bot size={14} />
-                <span style={{ paddingRight: "4px" }}>
-                  {activeModel?.label ||
-                    (catalogStatus === "loading"
-                      ? "Loading models..."
-                      : runtimeInstall?.status === "ready"
-                        ? "Select model"
-                        : "Runtime unavailable")}
-                </span>
-                <ChevronIcon />
-                {modelDropdownOpen && hasWorkspaceCatalog && (
-                  <>
-                    <div
-                      style={{
-                        position: "fixed",
-                        inset: 0,
-                        zIndex: 10,
-                        cursor: "default",
-                      }}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        closeComposerMenus();
-                      }}
-                    />
-                    <div
-                      className="custom-dropdown"
-                      style={{ minWidth: "220px" }}
-                    >
-                      {activeProvider?.models.map((model) => (
-                        <div
-                          key={model.id}
-                          className="custom-dropdown-item"
-                          style={{ justifyContent: "space-between" }}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            closeComposerMenus();
-                            void updateWorkspaceSettings({
-                              workspaceId: workspace.id,
-                              sessionId: session.id,
-                              approvalMode: workspace.approvalMode,
-                              providerId: normalizedSelection.providerId,
-                              modelId: model.id,
-                              effort: normalizedSelection.effort,
-                              fastMode: normalizedSelection.fastMode,
-                              policy: workspace.policy,
-                            });
-                          }}
-                        >
-                          <span>{model.label}</span>
-                          {normalizedSelection.modelId === model.id && (
-                            <Check size={14} />
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  </>
-                )}
-              </div>
-
-              <div
-                style={{ width: "1px", height: "12px", background: "#333" }}
-              />
-
-              <div
-                className="composer-select-wrapper pointer"
-                onClick={() => toggleComposerMenu("effort")}
-              >
-                <span style={{ paddingRight: "4px" }}>
-                  {currentEffortLabel.split(" ")[0]}
-                </span>
-                <ChevronIcon />
-                {effortDropdownOpen &&
-                  (composerCapabilities.effortOptions.length > 0 ||
-                    composerCapabilities.supportsFastMode) && (
+                <div
+                  className="composer-select-wrapper pointer"
+                  onClick={() => {
+                    if (hasWorkspaceCatalog) {
+                      toggleComposerMenu("provider");
+                    }
+                  }}
+                >
+                  <span style={{ paddingRight: "4px" }}>
+                    {activeProvider?.label ||
+                      (catalogStatus === "loading"
+                        ? "Loading providers..."
+                        : runtimeInstall?.status === "ready"
+                          ? "Provider"
+                          : "Runtime unavailable")}
+                  </span>
+                  <ChevronIcon />
+                  {providerDropdownOpen && hasWorkspaceCatalog && (
                     <>
                       <div
                         style={{
@@ -816,56 +706,149 @@ export function ConversationView({
                       />
                       <div
                         className="custom-dropdown"
-                        style={{ minWidth: "160px" }}
+                        style={{ minWidth: "200px" }}
                       >
-                        <div className="dropdown-section-label">Effort</div>
-                        {composerCapabilities.effortOptions.map(
-                          ({ id, label }) => (
-                            <div
-                              key={id}
-                              className="custom-dropdown-item"
-                              style={{ justifyContent: "space-between" }}
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                closeComposerMenus();
-                                void updateWorkspaceSettings({
-                                  workspaceId: workspace.id,
-                                  sessionId: session.id,
-                                  approvalMode: workspace.approvalMode,
-                                  providerId: normalizedSelection.providerId,
-                                  modelId: normalizedSelection.modelId,
-                                  effort: id,
-                                  fastMode: normalizedSelection.fastMode,
-                                  policy: workspace.policy,
-                                });
-                              }}
-                            >
-                              <span>{label}</span>
-                              {normalizedSelection.effort === id && (
-                                <Check size={14} />
-                              )}
-                            </div>
-                          ),
-                        )}
+                        {workspaceProviders.map((provider) => (
+                          <div
+                            key={provider.id}
+                            className="custom-dropdown-item"
+                            style={{ justifyContent: "space-between" }}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              closeComposerMenus();
+                              void updateWorkspaceSettings({
+                                workspaceId: workspace.id,
+                                sessionId: session.id,
+                                approvalMode: workspace.approvalMode,
+                                providerId: provider.id,
+                                modelId:
+                                  provider.models[0]?.id ??
+                                  normalizedSelection.modelId,
+                                effort: normalizedSelection.effort,
+                                fastMode: normalizedSelection.fastMode,
+                                policy: workspace.policy,
+                              });
+                            }}
+                          >
+                            <span>{provider.label}</span>
+                            {normalizedSelection.providerId === provider.id && (
+                              <Check size={14} />
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
 
-                        {composerCapabilities.supportsFastMode && (
-                          <>
-                            <div
-                              style={{
-                                height: "1px",
-                                background: "#333",
-                                margin: "4px 0",
-                              }}
-                            />
-                            <div className="dropdown-section-label">
-                              Fast Mode
-                            </div>
-                            {[
-                              { id: false, label: "off" },
-                              { id: true, label: "on" },
-                            ].map((option) => (
+                <div
+                  style={{ width: "1px", height: "12px", background: "#333" }}
+                />
+
+                <div
+                  className="composer-select-wrapper pointer"
+                  onClick={() => {
+                    if (hasWorkspaceCatalog) {
+                      toggleComposerMenu("model");
+                    }
+                  }}
+                >
+                  <Bot size={14} />
+                  <span style={{ paddingRight: "4px" }}>
+                    {activeModel?.label ||
+                      (catalogStatus === "loading"
+                        ? "Loading models..."
+                        : runtimeInstall?.status === "ready"
+                          ? "Select model"
+                          : "Runtime unavailable")}
+                  </span>
+                  <ChevronIcon />
+                  {modelDropdownOpen && hasWorkspaceCatalog && (
+                    <>
+                      <div
+                        style={{
+                          position: "fixed",
+                          inset: 0,
+                          zIndex: 10,
+                          cursor: "default",
+                        }}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          closeComposerMenus();
+                        }}
+                      />
+                      <div
+                        className="custom-dropdown"
+                        style={{ minWidth: "220px" }}
+                      >
+                        {activeProvider?.models.map((model) => (
+                          <div
+                            key={model.id}
+                            className="custom-dropdown-item"
+                            style={{ justifyContent: "space-between" }}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              closeComposerMenus();
+                              void updateWorkspaceSettings({
+                                workspaceId: workspace.id,
+                                sessionId: session.id,
+                                approvalMode: workspace.approvalMode,
+                                providerId: normalizedSelection.providerId,
+                                modelId: model.id,
+                                effort: normalizedSelection.effort,
+                                fastMode: normalizedSelection.fastMode,
+                                policy: workspace.policy,
+                              });
+                            }}
+                          >
+                            <span>{model.label}</span>
+                            {normalizedSelection.modelId === model.id && (
+                              <Check size={14} />
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                <div
+                  style={{ width: "1px", height: "12px", background: "#333" }}
+                />
+
+                <div
+                  className="composer-select-wrapper pointer"
+                  onClick={() => toggleComposerMenu("effort")}
+                >
+                  <span style={{ paddingRight: "4px" }}>
+                    {currentEffortLabel.split(" ")[0]}
+                  </span>
+                  <ChevronIcon />
+                  {effortDropdownOpen &&
+                    (composerCapabilities.effortOptions.length > 0 ||
+                      composerCapabilities.supportsFastMode) && (
+                      <>
+                        <div
+                          style={{
+                            position: "fixed",
+                            inset: 0,
+                            zIndex: 10,
+                            cursor: "default",
+                          }}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            closeComposerMenus();
+                          }}
+                        />
+                        <div
+                          className="custom-dropdown"
+                          style={{ minWidth: "160px" }}
+                        >
+                          <div className="dropdown-section-label">Effort</div>
+                          {composerCapabilities.effortOptions.map(
+                            ({ id, label }) => (
                               <div
-                                key={option.label}
+                                key={id}
                                 className="custom-dropdown-item"
                                 style={{ justifyContent: "space-between" }}
                                 onClick={(event) => {
@@ -877,136 +860,181 @@ export function ConversationView({
                                     approvalMode: workspace.approvalMode,
                                     providerId: normalizedSelection.providerId,
                                     modelId: normalizedSelection.modelId,
-                                    effort: normalizedSelection.effort,
-                                    fastMode: option.id,
+                                    effort: id,
+                                    fastMode: normalizedSelection.fastMode,
                                     policy: workspace.policy,
                                   });
                                 }}
                               >
-                                <span>{option.label}</span>
-                                {normalizedSelection.fastMode === option.id && (
+                                <span>{label}</span>
+                                {normalizedSelection.effort === id && (
                                   <Check size={14} />
                                 )}
                               </div>
-                            ))}
-                          </>
-                        )}
-                      </div>
-                    </>
-                  )}
-              </div>
+                            ),
+                          )}
 
-              <div
-                style={{ width: "1px", height: "12px", background: "#333" }}
-              />
+                          {composerCapabilities.supportsFastMode && (
+                            <>
+                              <div
+                                style={{
+                                  height: "1px",
+                                  background: "#333",
+                                  margin: "4px 0",
+                                }}
+                              />
+                              <div className="dropdown-section-label">
+                                Fast Mode
+                              </div>
+                              {[
+                                { id: false, label: "off" },
+                                { id: true, label: "on" },
+                              ].map((option) => (
+                                <div
+                                  key={option.label}
+                                  className="custom-dropdown-item"
+                                  style={{ justifyContent: "space-between" }}
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    closeComposerMenus();
+                                    void updateWorkspaceSettings({
+                                      workspaceId: workspace.id,
+                                      sessionId: session.id,
+                                      approvalMode: workspace.approvalMode,
+                                      providerId:
+                                        normalizedSelection.providerId,
+                                      modelId: normalizedSelection.modelId,
+                                      effort: normalizedSelection.effort,
+                                      fastMode: option.id,
+                                      policy: workspace.policy,
+                                    });
+                                  }}
+                                >
+                                  <span>{option.label}</span>
+                                  {normalizedSelection.fastMode ===
+                                    option.id && <Check size={14} />}
+                                </div>
+                              ))}
+                            </>
+                          )}
+                        </div>
+                      </>
+                    )}
+                </div>
 
-              <div
-                className="composer-select-wrapper pointer"
-                onClick={() =>
-                  setCurrentMode(currentMode === "plan" ? "build" : "plan")
-                }
-                title="Switch between Plan and Build mode"
-              >
-                {currentMode === "plan" ? (
-                  <FileText size={14} />
-                ) : (
-                  <Zap size={14} />
-                )}
-                <span>{currentMode === "plan" ? "Plan" : "Build"}</span>
-              </div>
-
-              <div
-                style={{ width: "1px", height: "12px", background: "#333" }}
-              />
-            </div>
-
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "10px",
-                marginLeft: "auto",
-                paddingLeft: "12px",
-              }}
-            >
-              {contextUsageTitle && contextUsagePercent !== null && (
                 <div
-                  title={contextUsageTitle}
-                  aria-label={`Context usage ${contextUsageTitle}`}
+                  style={{ width: "1px", height: "12px", background: "#333" }}
+                />
+
+                <div
+                  className="composer-select-wrapper pointer"
+                  onClick={() =>
+                    setCurrentMode(currentMode === "plan" ? "build" : "plan")
+                  }
+                  title="Switch between Plan and Build mode"
+                >
+                  {currentMode === "plan" ? (
+                    <FileText size={14} />
+                  ) : (
+                    <Zap size={14} />
+                  )}
+                  <span>{currentMode === "plan" ? "Plan" : "Build"}</span>
+                </div>
+
+                <div
+                  style={{ width: "1px", height: "12px", background: "#333" }}
+                />
+              </div>
+
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "10px",
+                  marginLeft: "auto",
+                  paddingLeft: "12px",
+                }}
+              >
+                {contextUsageTitle && contextUsagePercent !== null && (
+                  <div
+                    title={contextUsageTitle}
+                    aria-label={`Context usage ${contextUsageTitle}`}
+                    style={{
+                      width: "20px",
+                      height: "20px",
+                      borderRadius: "50%",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      background: `conic-gradient(${contextUsageColor} 0 ${contextUsagePercent}%, rgba(255,255,255,0.08) ${contextUsagePercent}% 100%)`,
+                      boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.08)",
+                      flexShrink: 0,
+                      transform: "rotate(-90deg)",
+                    }}
+                  >
+                    <span
+                      aria-hidden="true"
+                      style={{
+                        width: "10px",
+                        height: "10px",
+                        borderRadius: "50%",
+                        background: "#18181A",
+                        boxShadow: "0 0 0 1px rgba(255,255,255,0.04)",
+                      }}
+                    />
+                  </div>
+                )}
+
+                <button
                   style={{
-                    width: "20px",
-                    height: "20px",
+                    width: "28px",
+                    height: "28px",
                     borderRadius: "50%",
+                    background:
+                      session.status === "streaming"
+                        ? "#ef4444"
+                        : !sendDisabled && canSubmit
+                          ? "#2563eb"
+                          : "#333",
+                    color:
+                      session.status === "streaming"
+                        ? "#fff"
+                        : !sendDisabled && canSubmit
+                          ? "#fff"
+                          : "#666",
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
-                    background: `conic-gradient(${contextUsageColor} 0 ${contextUsagePercent}%, rgba(255,255,255,0.08) ${contextUsagePercent}% 100%)`,
-                    boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.08)",
-                    flexShrink: 0,
-                    transform: "rotate(-90deg)",
+                    border: "none",
+                    cursor:
+                      session.status === "streaming" ||
+                      (!sendDisabled && canSubmit)
+                        ? "pointer"
+                        : "default",
+                    transition: "background 0.2s, color 0.2s",
                   }}
+                  disabled={
+                    session.status !== "streaming" &&
+                    (sendDisabled || !canSubmit)
+                  }
+                  onClick={() =>
+                    session.status === "streaming"
+                      ? void abortPrompt(workspace.id, session.id)
+                      : !sendDisabled
+                        ? void handleSubmit()
+                        : undefined
+                  }
                 >
-                  <span
-                    aria-hidden="true"
-                    style={{
-                      width: "10px",
-                      height: "10px",
-                      borderRadius: "50%",
-                      background: "#18181A",
-                      boxShadow: "0 0 0 1px rgba(255,255,255,0.04)",
-                    }}
-                  />
-                </div>
-              )}
-
-              <button
-                style={{
-                  width: "28px",
-                  height: "28px",
-                  borderRadius: "50%",
-                  background:
-                    session.status === "streaming"
-                      ? "#ef4444"
-                      : !sendDisabled && canSubmit
-                        ? "#2563eb"
-                        : "#333",
-                  color:
-                    session.status === "streaming"
-                      ? "#fff"
-                      : !sendDisabled && canSubmit
-                        ? "#fff"
-                        : "#666",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  border: "none",
-                  cursor:
-                    session.status === "streaming" ||
-                    (!sendDisabled && canSubmit)
-                      ? "pointer"
-                      : "default",
-                  transition: "background 0.2s, color 0.2s",
-                }}
-                disabled={
-                  session.status !== "streaming" && (sendDisabled || !canSubmit)
-                }
-                onClick={() =>
-                  session.status === "streaming"
-                    ? void abortPrompt(workspace.id, session.id)
-                    : !sendDisabled
-                      ? void handleSubmit()
-                      : undefined
-                }
-              >
-                {session.status === "streaming" ? (
-                  <Square size={12} fill="currentColor" strokeWidth={0} />
-                ) : (
-                  <ArrowUp size={16} />
-                )}
-              </button>
+                  {session.status === "streaming" ? (
+                    <Square size={12} fill="currentColor" strokeWidth={0} />
+                  ) : (
+                    <ArrowUp size={16} />
+                  )}
+                </button>
+              </div>
             </div>
           </div>
-        </div>
+        )}
       </div>
 
       <style>{`
@@ -1333,10 +1361,11 @@ function TurnRenderer({
             toolFileChanges={fileChanges}
             onUndo={
               turn.userMessageId
-                ? () => onUndo({
-                    userMessageId: turn.userMessageId!,
-                    toolFileChanges: fileChanges,
-                  })
+                ? () =>
+                    onUndo({
+                      userMessageId: turn.userMessageId!,
+                      toolFileChanges: fileChanges,
+                    })
                 : undefined
             }
           />
@@ -1357,10 +1386,11 @@ function TurnRenderer({
           toolFileChanges={fileChanges}
           onUndo={
             turn.userMessageId
-              ? () => onUndo({
-                  userMessageId: turn.userMessageId!,
-                  toolFileChanges: fileChanges,
-                })
+              ? () =>
+                  onUndo({
+                    userMessageId: turn.userMessageId!,
+                    toolFileChanges: fileChanges,
+                  })
               : undefined
           }
         />

@@ -55,7 +55,13 @@ fn undo_checkpoint_path(
     session_id: &str,
     user_message_id: &str,
 ) -> anyhow::Result<PathBuf> {
-    checkpoint_path(app, "undo-checkpoints", workspace_id, session_id, user_message_id)
+    checkpoint_path(
+        app,
+        "undo-checkpoints",
+        workspace_id,
+        session_id,
+        user_message_id,
+    )
 }
 
 fn redo_checkpoint_path(
@@ -64,7 +70,13 @@ fn redo_checkpoint_path(
     session_id: &str,
     user_message_id: &str,
 ) -> anyhow::Result<PathBuf> {
-    checkpoint_path(app, "redo-checkpoints", workspace_id, session_id, user_message_id)
+    checkpoint_path(
+        app,
+        "redo-checkpoints",
+        workspace_id,
+        session_id,
+        user_message_id,
+    )
 }
 
 pub fn save_undo_checkpoint(app: &AppHandle, checkpoint: &UndoCheckpoint) -> anyhow::Result<()> {

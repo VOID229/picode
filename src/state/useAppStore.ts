@@ -3,8 +3,10 @@ import { create } from "zustand";
 import type {
   ChatSession,
   ComposerImageDraft,
+  GitAction,
   GitSnapshot,
   MessageImageAttachment,
+  PendingQuestionRequest,
   PersistedAppState,
   PiInstallStatus,
   PromptMode,
@@ -23,7 +25,10 @@ import {
   createSession as createSessionCommand,
   createWorkspace as createWorkspaceCommand,
   refreshGit as refreshGitCommand,
+  prepareGitAction as prepareGitActionCommand,
+  runGitAction as runGitActionCommand,
   refreshWorkspaceRuntimeCatalog as refreshWorkspaceRuntimeCatalogCommand,
+  resolveExtensionUiRequest as resolveExtensionUiRequestCommand,
   resolveApproval as resolveApprovalCommand,
   runtimeHealthcheck as runtimeHealthcheckCommand,
   selectWorkspaceSession as selectWorkspaceSessionCommand,
@@ -66,6 +71,7 @@ interface AppStoreState {
   terminalPaneOpen: boolean;
   state: PersistedAppState | null;
   git: Record<string, GitSnapshot>;
+  pendingQuestions: PendingQuestionRequest | null;
   terminals: Record<string, WorkspaceTerminalState>;
   customActions: Record<string, CustomAction[]>; // workspaceId -> CustomAction[]
   currentMode: "plan" | "build";
@@ -109,6 +115,19 @@ interface AppStoreState {
     payload: Parameters<typeof updateWorkspaceSettingsCommand>[0],
   ) => Promise<void>;
   refreshGit: (workspaceId: string) => Promise<void>;
+  prepareGitAction: typeof prepareGitActionCommand;
+  runGitAction: (payload: {
+    workspaceId: string;
+    action: GitAction;
+    includeUnstaged: boolean;
+    message?: string;
+    customInstructions?: string;
+    draft?: boolean;
+  }) => Promise<Awaited<ReturnType<typeof runGitActionCommand>>>;
+  resolveQuestionRequest: (
+    request: PendingQuestionRequest,
+    value: string | null,
+  ) => Promise<void>;
   renameWorkspace: (workspaceId: string, name: string) => Promise<void>;
   removeWorkspace: (workspaceId: string) => Promise<void>;
   renameSession: (
@@ -325,6 +344,7 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
   terminalPaneOpen: false,
   state: null,
   git: {},
+  pendingQuestions: null,
   terminals: {},
   customActions: {},
   currentMode: "build",
@@ -496,6 +516,32 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
     set((store) => ({
       git: { ...store.git, [workspaceId]: snapshot },
     }));
+  },
+  prepareGitAction: prepareGitActionCommand,
+  async runGitAction(payload) {
+    const result = await runGitActionCommand(payload);
+    set((store) => ({
+      git: { ...store.git, [payload.workspaceId]: result.git },
+    }));
+    return result;
+  },
+  async resolveQuestionRequest(request, value) {
+    await resolveExtensionUiRequestCommand({
+      workspaceId: request.workspaceId,
+      sessionId: request.sessionId,
+      requestId: request.requestId,
+      response:
+        value == null
+          ? { cancelled: true }
+          : {
+              value,
+            },
+    });
+    set((store) =>
+      store.pendingQuestions?.requestId === request.requestId
+        ? { pendingQuestions: null }
+        : store,
+    );
   },
   async renameWorkspace(workspaceId, name) {
     const state = await renameWorkspaceCommand(workspaceId, name);
@@ -1290,6 +1336,36 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
           session.title = event.title;
           session.updatedAt = new Date().toISOString();
           break;
+        }
+        case "extension-ui-request": {
+          if (
+            event.request.method !== "editor" ||
+            event.request.title !== "__picode_questions__" ||
+            typeof event.request.prefill !== "string"
+          ) {
+            return store;
+          }
+
+          try {
+            const parsed = JSON.parse(event.request.prefill) as {
+              questions?: PendingQuestionRequest["questions"];
+            };
+            if (!Array.isArray(parsed.questions)) {
+              return store;
+            }
+            return {
+              ...store,
+              state,
+              pendingQuestions: {
+                workspaceId: event.workspaceId,
+                sessionId: event.sessionId,
+                requestId: event.request.id,
+                questions: parsed.questions,
+              },
+            };
+          } catch {
+            return store;
+          }
         }
       }
 

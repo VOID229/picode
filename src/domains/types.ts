@@ -265,6 +265,12 @@ export interface AppPreferences {
   titleModelFallbackId: string;
   titleModelEffort: string;
   autoTitleEnabled: boolean;
+  autoGitMessagesEnabled: boolean;
+  gitMessageModelProviderId: string;
+  gitMessageModelId: string;
+  gitMessageModelFallbackProviderId: string;
+  gitMessageModelFallbackId: string;
+  gitMessageModelEffort: string;
   showRawToolCalls: boolean;
   approvalMode: ApprovalMode;
   effort: string;
@@ -298,6 +304,48 @@ export interface RuntimeHealthPayload {
 export interface RunTerminalCommandResult {
   terminalTabId: string;
   commandId: string;
+}
+
+export type GitAction = "commit" | "commit-push" | "push" | "create-pr";
+
+export interface PreparedGitAction {
+  branch: string;
+  fileCount: number;
+  additions: number;
+  deletions: number;
+  stagedCount: number;
+  unstagedCount: number;
+  hasStaged: boolean;
+  hasUnstaged: boolean;
+  canPush: boolean;
+  canCreatePr: boolean;
+  prUnavailableReason?: string;
+}
+
+export interface RunGitActionResult {
+  summary: string;
+  generatedMessage?: string;
+  prUrl?: string;
+  git: GitSnapshot;
+}
+
+export interface QuestionOption {
+  label: string;
+  description?: string;
+}
+
+export interface RuntimeQuestion {
+  id: string;
+  header: string;
+  question: string;
+  options: QuestionOption[];
+}
+
+export interface PendingQuestionRequest {
+  workspaceId: string;
+  sessionId: string;
+  requestId: string;
+  questions: RuntimeQuestion[];
 }
 
 export type PiInstallState = "ready" | "missing" | "broken";
@@ -391,6 +439,18 @@ export type PiRuntimeEvent =
       workspaceId: string;
       sessionId: string;
       title: string;
+    }
+  | {
+      type: "extension-ui-request";
+      workspaceId: string;
+      sessionId: string;
+      request: {
+        id: string;
+        method: string;
+        title?: string;
+        prefill?: string;
+        [key: string]: unknown;
+      };
     }
   | {
       type: "auth-browser-open";

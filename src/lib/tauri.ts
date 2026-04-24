@@ -12,6 +12,9 @@ import type {
   TerminalEvent,
   RuntimeBootstrapPayload,
   RuntimeHealthPayload,
+  PreparedGitAction,
+  GitAction,
+  RunGitActionResult,
   WorkspaceRuntimeCatalogPayload,
   WorkspaceRecord,
 } from "../domains/types";
@@ -38,6 +41,25 @@ export async function createSession(payload: { workspaceId: string }) {
 export async function refreshGit(payload: { workspaceId: string }) {
   return normalize(
     await invoke<GitSnapshot>("refresh_git_snapshot", { payload }),
+  );
+}
+
+export async function prepareGitAction(payload: { workspaceId: string }) {
+  return normalize(
+    await invoke<PreparedGitAction>("prepare_git_action", { payload }),
+  );
+}
+
+export async function runGitAction(payload: {
+  workspaceId: string;
+  action: GitAction;
+  includeUnstaged: boolean;
+  message?: string;
+  customInstructions?: string;
+  draft?: boolean;
+}) {
+  return normalize(
+    await invoke<RunGitActionResult>("run_git_action", { payload }),
   );
 }
 
@@ -112,6 +134,15 @@ export async function resolveApproval(payload: {
   return normalize(
     await invoke<PersistedAppState>("resolve_approval", { payload }),
   );
+}
+
+export async function resolveExtensionUiRequest(payload: {
+  workspaceId: string;
+  sessionId: string;
+  requestId: string;
+  response: unknown;
+}) {
+  return await invoke<void>("resolve_extension_ui_request", { payload });
 }
 
 export async function selectWorkspaceSession(payload: {

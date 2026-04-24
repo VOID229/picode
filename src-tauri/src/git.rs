@@ -1,4 +1,6 @@
-use crate::models::{DiffFile, GitSnapshot, expand_user_path};
+use crate::models::{
+    DiffFile, GitAction, GitSnapshot, PreparedGitAction, RunGitActionResult, expand_user_path,
+};
 use anyhow::{Context, Result, anyhow};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -111,6 +113,179 @@ pub fn snapshot(path: &str) -> GitSnapshot {
     }
 }
 
+pub fn prepare_git_action(path: &str) -> Result<PreparedGitAction> {
+    let path = expand_user_path(path);
+    let snapshot = snapshot(&path);
+    if !snapshot.is_repo {
+        return Err(anyhow!("This workspace is not a git repository."));
+    }
+
+    let (additions, deletions) = diff_counts(&path, false).unwrap_or((0, 0));
+    let has_remote = git_output(&path, &["remote"]).map_or(false, |value| {
+        value.lines().any(|line| !line.trim().is_empty())
+    });
+    let gh_available = Command::new("gh")
+        .arg("--version")
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false);
+    let has_github_remote = git_output(&path, &["remote", "-v"]).map_or(false, |value| {
+        value
+            .lines()
+            .any(|line| line.contains("github.com") || line.contains("git@github.com:"))
+    });
+
+    let pr_unavailable_reason = if !gh_available {
+        Some("GitHub CLI is not installed or unavailable on PATH.".to_string())
+    } else if !has_github_remote {
+        Some("No GitHub remote was found for this repository.".to_string())
+    } else {
+        None
+    };
+
+    Ok(PreparedGitAction {
+        branch: current_branch(&path)?,
+        file_count: snapshot.files.len(),
+        additions,
+        deletions,
+        staged_count: snapshot.staged_count,
+        unstaged_count: snapshot.unstaged_count,
+        has_staged: snapshot.staged_count > 0,
+        has_unstaged: snapshot.unstaged_count > 0,
+        can_push: has_remote,
+        can_create_pr: pr_unavailable_reason.is_none(),
+        pr_unavailable_reason,
+    })
+}
+
+pub fn diff_for_message(path: &str, include_unstaged: bool) -> Result<String> {
+    let path = expand_user_path(path);
+    if include_unstaged {
+        let diff = git_output(
+            &path,
+            &["diff", "HEAD", "--no-ext-diff", "--unified=3", "--stat"],
+        )
+        .or_else(|_| git_output(&path, &["diff", "--no-ext-diff", "--unified=3", "--stat"]))?;
+        if !diff.trim().is_empty() {
+            return Ok(limit_context(diff, 16_000));
+        }
+    }
+
+    let staged = git_output(
+        &path,
+        &["diff", "--cached", "--no-ext-diff", "--unified=3", "--stat"],
+    )?;
+    Ok(limit_context(staged, 16_000))
+}
+
+pub fn recent_commit_context(path: &str) -> Result<String> {
+    let path = expand_user_path(path);
+    let branch = current_branch(&path).unwrap_or_else(|_| "unknown".to_string());
+    let log = git_output(
+        &path,
+        &[
+            "log",
+            "--oneline",
+            "--decorate=no",
+            "--max-count=12",
+            "@{upstream}..HEAD",
+        ],
+    )
+    .or_else(|_| git_output(&path, &["log", "--oneline", "--max-count=12"]))?;
+    let stat = git_output(&path, &["diff", "--stat", "@{upstream}...HEAD"]).unwrap_or_default();
+    Ok(limit_context(
+        format!("Branch: {branch}\n\nCommits:\n{log}\n\nDiff stat:\n{stat}"),
+        16_000,
+    ))
+}
+
+pub fn run_git_action(
+    path: &str,
+    action: GitAction,
+    include_unstaged: bool,
+    commit_message: Option<&str>,
+    pr_title: Option<&str>,
+    pr_body: Option<&str>,
+    draft: bool,
+) -> Result<RunGitActionResult> {
+    let path = expand_user_path(path);
+    let before = prepare_git_action(&path)?;
+    let mut steps = Vec::new();
+    let mut generated_message = commit_message
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned);
+    let should_commit = matches!(
+        action,
+        GitAction::Commit | GitAction::CommitPush | GitAction::CreatePr
+    ) && (before.has_staged || (include_unstaged && before.has_unstaged));
+
+    if should_commit {
+        if include_unstaged {
+            run_git(&path, &["add", "-A"])?;
+        }
+        let message = generated_message
+            .as_deref()
+            .context("A commit message is required.")?;
+        run_git(&path, &["commit", "-m", message])?;
+        steps.push("committed changes".to_string());
+    }
+
+    if matches!(
+        action,
+        GitAction::CommitPush | GitAction::Push | GitAction::CreatePr
+    ) {
+        push_current_branch(&path)?;
+        steps.push("pushed branch".to_string());
+    }
+
+    let mut pr_url = None;
+    if matches!(action, GitAction::CreatePr) {
+        let title = pr_title
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .context("A PR title is required.")?;
+        let body = pr_body.map(str::trim).unwrap_or_default();
+        pr_url = Some(create_pr(&path, title, body, draft)?);
+        steps.push("created pull request".to_string());
+    }
+
+    if steps.is_empty() {
+        steps.push("nothing to do".to_string());
+    }
+
+    Ok(RunGitActionResult {
+        summary: steps.join(", "),
+        generated_message: generated_message.take(),
+        pr_url,
+        git: snapshot(&path),
+    })
+}
+
+pub fn commit_workspace_changes(path: &str, include_unstaged: bool, message: &str) -> Result<bool> {
+    let path = expand_user_path(path);
+    let before = prepare_git_action(&path)?;
+    let should_commit = before.has_staged || (include_unstaged && before.has_unstaged);
+    if !should_commit {
+        return Ok(false);
+    }
+    if include_unstaged {
+        run_git(&path, &["add", "-A"])?;
+    }
+    run_git(&path, &["commit", "-m", message])?;
+    Ok(true)
+}
+
+pub fn push_workspace_branch(path: &str) -> Result<()> {
+    let path = expand_user_path(path);
+    push_current_branch(&path)
+}
+
+pub fn create_pull_request(path: &str, title: &str, body: &str, draft: bool) -> Result<String> {
+    let path = expand_user_path(path);
+    create_pr(&path, title, body, draft)
+}
+
 fn non_repo_snapshot() -> GitSnapshot {
     GitSnapshot {
         branch: "not-a-repo".to_string(),
@@ -121,6 +296,103 @@ fn non_repo_snapshot() -> GitSnapshot {
         unstaged_count: 0,
         files: vec![],
     }
+}
+
+fn current_branch(path: &str) -> Result<String> {
+    Ok(git_output_lines(path, &["branch", "--show-current"])?
+        .into_iter()
+        .next()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "detached".to_string()))
+}
+
+fn diff_counts(path: &str, cached: bool) -> Result<(usize, usize)> {
+    let mut args = vec!["diff", "--numstat"];
+    if cached {
+        args.push("--cached");
+    } else {
+        args.push("HEAD");
+    }
+    let output = git_output(path, &args)?;
+    let mut additions = 0;
+    let mut deletions = 0;
+    for line in output.lines() {
+        let mut parts = line.split_whitespace();
+        additions += parts
+            .next()
+            .and_then(|value| value.parse::<usize>().ok())
+            .unwrap_or(0);
+        deletions += parts
+            .next()
+            .and_then(|value| value.parse::<usize>().ok())
+            .unwrap_or(0);
+    }
+    if !cached {
+        for file in list_untracked_files(path)? {
+            additions += count_file_lines(&file.content);
+        }
+    }
+    Ok((additions, deletions))
+}
+
+fn count_file_lines(content: &[u8]) -> usize {
+    if content.is_empty() {
+        return 0;
+    }
+    let newline_count = content.iter().filter(|byte| **byte == b'\n').count();
+    if content.ends_with(b"\n") {
+        newline_count
+    } else {
+        newline_count + 1
+    }
+}
+
+fn limit_context(value: String, max_chars: usize) -> String {
+    if value.len() <= max_chars {
+        return value;
+    }
+    format!("{}...\n[truncated]", &value[..max_chars])
+}
+
+fn create_pr(path: &str, title: &str, body: &str, draft: bool) -> Result<String> {
+    let mut command = Command::new("gh");
+    command
+        .current_dir(path)
+        .arg("pr")
+        .arg("create")
+        .arg("--title")
+        .arg(title)
+        .arg("--body")
+        .arg(body)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    if draft {
+        command.arg("--draft");
+    }
+
+    let output = command.output().context("failed to run gh pr create")?;
+    if !output.status.success() {
+        return Err(anyhow!(
+            "gh pr create failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+fn push_current_branch(path: &str) -> Result<()> {
+    if run_git(
+        path,
+        &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
+    )
+    .is_ok()
+    {
+        return run_git(path, &["push"]);
+    }
+
+    let branch = current_branch(path)?;
+    run_git(path, &["push", "-u", "origin", &branch]).or_else(|_| run_git(path, &["push"]))
 }
 
 fn classify_status(code: &str) -> &'static str {

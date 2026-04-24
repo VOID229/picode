@@ -7,17 +7,19 @@ mod terminal;
 use crate::models::{
     AbortPromptPayload, BootstrapPayload, CloseTerminalSessionPayload, CreateSessionPayload,
     CreateWorkspacePayload, DeleteSessionPayload, EnsureTerminalSessionPayload, PersistedAppState,
-    RefreshGitPayload, RefreshWorkspaceRuntimeCatalogPayload, RemoveWorkspacePayload,
-    ReorderSessionPayload, ReorderWorkspacePayload, RenameSessionPayload, RenameWorkspacePayload,
-    ResizeTerminalPayload, ResolveApprovalPayload, RunTerminalCommandPayload,
-    RunTerminalCommandResult, RuntimeBootstrapPayload, RuntimeHealthPayload,
-    SelectWorkspaceSessionPayload, SessionIdentityPayload, SendPromptPayload, UndoUserTurnPayload,
-    UpdateWorkspaceSettingsPayload, WorkspaceRuntimeCatalogPayload, WriteTerminalInputPayload,
-    WriteTextFilePayload, normalize_state,
+    PrepareGitActionPayload, PreparedGitAction, RefreshGitPayload,
+    RefreshWorkspaceRuntimeCatalogPayload, RemoveWorkspacePayload, RenameSessionPayload,
+    RenameWorkspacePayload, ReorderSessionPayload, ReorderWorkspacePayload, ResizeTerminalPayload,
+    ResolveApprovalPayload, ResolveExtensionUiRequestPayload, RunGitActionPayload,
+    RunGitActionResult, RunTerminalCommandPayload, RunTerminalCommandResult,
+    RuntimeBootstrapPayload, RuntimeHealthPayload, SelectWorkspaceSessionPayload,
+    SendPromptPayload, SessionIdentityPayload, UndoUserTurnPayload, UpdateWorkspaceSettingsPayload,
+    WorkspaceRuntimeCatalogPayload, WriteTerminalInputPayload, WriteTextFilePayload,
+    normalize_state,
 };
 use anyhow::Context;
 use models::{GitSnapshot, SessionModelSelection, default_state, new_session};
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, fs, sync::Arc};
 use tauri::{AppHandle, Manager, State};
 use tokio::sync::Mutex;
 
@@ -206,6 +208,122 @@ async fn refresh_git_snapshot(
 }
 
 #[tauri::command]
+async fn prepare_git_action(
+    shared: State<'_, AppState>,
+    payload: PrepareGitActionPayload,
+) -> Result<PreparedGitAction, String> {
+    let state = shared.state.lock().await;
+    let workspace = state
+        .workspaces
+        .iter()
+        .find(|workspace| workspace.id == payload.workspace_id)
+        .context("workspace not found")
+        .map_err(|error| error.to_string())?;
+    git::prepare_git_action(&workspace.path).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn run_git_action(
+    shared: State<'_, AppState>,
+    payload: RunGitActionPayload,
+) -> Result<RunGitActionResult, String> {
+    let workspace_path = {
+        let state = shared.state.lock().await;
+        state
+            .workspaces
+            .iter()
+            .find(|workspace| workspace.id == payload.workspace_id)
+            .map(|workspace| workspace.path.clone())
+            .context("workspace not found")
+            .map_err(|error| error.to_string())?
+    };
+
+    let custom_instructions = payload.custom_instructions.as_deref();
+    let mut commit_message = payload
+        .message
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned);
+
+    let prepared = git::prepare_git_action(&workspace_path).map_err(|error| error.to_string())?;
+    let should_commit = matches!(
+        payload.action,
+        models::GitAction::Commit | models::GitAction::CommitPush | models::GitAction::CreatePr
+    ) && (prepared.has_staged
+        || (payload.include_unstaged && prepared.has_unstaged));
+
+    if should_commit && commit_message.is_none() {
+        let diff_context = git::diff_for_message(&workspace_path, payload.include_unstaged)
+            .map_err(|error| error.to_string())?;
+        commit_message = pi::generate_git_commit_message(
+            shared.inner(),
+            &workspace_path,
+            &diff_context,
+            custom_instructions,
+        )
+        .await
+        .map_err(|error| error.to_string())?;
+    }
+
+    if matches!(payload.action, models::GitAction::CreatePr) {
+        let mut steps = Vec::new();
+        if should_commit {
+            let message = commit_message
+                .as_deref()
+                .context("A commit message is required.")
+                .map_err(|error| error.to_string())?;
+            if git::commit_workspace_changes(&workspace_path, payload.include_unstaged, message)
+                .map_err(|error| error.to_string())?
+            {
+                steps.push("committed changes".to_string());
+            }
+        }
+
+        let context =
+            git::recent_commit_context(&workspace_path).map_err(|error| error.to_string())?;
+        let pr_message = pi::generate_git_pr_message(
+            shared.inner(),
+            &workspace_path,
+            &context,
+            custom_instructions,
+        )
+        .await
+        .map_err(|error| error.to_string())?;
+
+        let (pr_title, pr_body) = pr_message
+            .as_ref()
+            .map(|(title, body)| (title.as_str(), body.as_str()))
+            .context("A PR title is required.")
+            .map_err(|error| error.to_string())?;
+
+        git::push_workspace_branch(&workspace_path).map_err(|error| error.to_string())?;
+        steps.push("pushed branch".to_string());
+        let pr_url = git::create_pull_request(&workspace_path, pr_title, pr_body, payload.draft)
+            .map_err(|error| error.to_string())?;
+        steps.push("created pull request".to_string());
+
+        return Ok(RunGitActionResult {
+            summary: steps.join(", "),
+            generated_message: commit_message,
+            pr_url: Some(pr_url),
+            git: git::snapshot(&workspace_path),
+        });
+    }
+
+    git::run_git_action(
+        &workspace_path,
+        payload.action,
+        payload.include_unstaged,
+        commit_message.as_deref(),
+        None,
+        None,
+        payload.draft,
+    )
+    .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 async fn send_prompt(
     app: AppHandle,
     shared: State<'_, AppState>,
@@ -220,6 +338,16 @@ async fn send_prompt(
 }
 
 #[tauri::command]
+async fn resolve_extension_ui_request(
+    shared: State<'_, AppState>,
+    payload: ResolveExtensionUiRequestPayload,
+) -> Result<(), String> {
+    pi::resolve_extension_ui_request(shared.inner().clone(), payload)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 async fn undo_user_turn(
     app: AppHandle,
     shared: State<'_, AppState>,
@@ -231,8 +359,6 @@ async fn undo_user_turn(
         &payload.session_id,
         &payload.user_message_id,
     )
-    .map_err(|error| error.to_string())?
-    .context("Undo is unavailable for this message because no checkpoint was stored.")
     .map_err(|error| error.to_string())?;
 
     let workspace_path = {
@@ -245,20 +371,27 @@ async fn undo_user_turn(
             .context("workspace not found")
             .map_err(|error| error.to_string())?
     };
+    let workspace_git = git::snapshot(&workspace_path);
 
-    if let Ok(Some(redo_checkpoint)) = git::capture_undo_checkpoint(
-        &payload.workspace_id,
-        &payload.session_id,
-        &payload.user_message_id,
-        &workspace_path,
-    ) {
-        let _ = storage::save_redo_checkpoint(&app, &redo_checkpoint);
+    if let Some(checkpoint) = checkpoint.as_ref() {
+        if let Ok(Some(redo_checkpoint)) = git::capture_undo_checkpoint(
+            &payload.workspace_id,
+            &payload.session_id,
+            &payload.user_message_id,
+            &workspace_path,
+        ) {
+            let _ = storage::save_redo_checkpoint(&app, &redo_checkpoint);
+        }
+
+        git::restore_undo_checkpoint(&workspace_path, checkpoint)
+            .map_err(|error| error.to_string())?;
+    } else if workspace_git.is_repo {
+        return Err(
+            "Undo is unavailable for this message because no checkpoint was stored.".to_string(),
+        );
     }
 
-    git::restore_undo_checkpoint(&workspace_path, &checkpoint)
-        .map_err(|error| error.to_string())?;
-
-    let removed_user_ids = {
+    let (removed_user_ids, session_file_to_remove) = {
         let mut state = shared.state.lock().await;
         let session = state
             .workspaces
@@ -284,6 +417,7 @@ async fn undo_user_turn(
 
         let removed = session.timeline.split_off(index);
         session.status = models::SessionStatus::Idle;
+        let session_file_to_remove = session.runtime.pi_session_file.take();
         session.updated_at = models::now_iso();
 
         let removed_user_ids = removed
@@ -295,7 +429,7 @@ async fn undo_user_turn(
             .collect::<Vec<_>>();
 
         storage::save(&app, &state).map_err(|error| error.to_string())?;
-        removed_user_ids
+        (removed_user_ids, session_file_to_remove)
     };
 
     for user_message_id in removed_user_ids {
@@ -305,6 +439,9 @@ async fn undo_user_turn(
             &payload.session_id,
             &user_message_id,
         );
+    }
+    if let Some(session_file) = session_file_to_remove {
+        let _ = fs::remove_file(session_file);
     }
 
     Ok(shared.state.lock().await.clone())
@@ -629,15 +766,12 @@ async fn move_session(
         return Err("session not found".to_string());
     };
 
-    let target_index = payload
-        .before_session_id
-        .as_ref()
-        .and_then(|session_id| {
-            workspace
-                .sessions
-                .iter()
-                .position(|session| session.id == *session_id)
-        });
+    let target_index = payload.before_session_id.as_ref().and_then(|session_id| {
+        workspace
+            .sessions
+            .iter()
+            .position(|session| session.id == *session_id)
+    });
 
     if target_index == Some(source_index) {
         return Ok(state.clone());
@@ -871,7 +1005,10 @@ fn main() {
             update_preferences,
             update_workspace_settings,
             refresh_git_snapshot,
+            prepare_git_action,
+            run_git_action,
             send_prompt,
+            resolve_extension_ui_request,
             get_session_stats,
             resolve_approval,
             undo_user_turn,

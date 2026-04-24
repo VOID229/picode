@@ -5,9 +5,10 @@ import { useAppStore } from "../../state/useAppStore";
 import { AddActionModal } from "../action/AddActionModal";
 import { ConversationView } from "../chat/ConversationView";
 import { CommandPalette } from "../command/CommandPalette";
+import { CommitChangesModal } from "../git/CommitChangesModal";
 import { Sidebar } from "../sidebar/Sidebar";
 import { TerminalPane } from "../terminal/TerminalPane";
-import { PromptModal } from "./PromptModal";
+import type { GitAction } from "../../domains/types";
 import {
   AppWindow,
   Bug,
@@ -15,9 +16,7 @@ import {
   CloudUpload,
   FlaskConical,
   Folder,
-  GitCommit,
   GitCompare,
-  GitPullRequest,
   Hammer,
   ListChecks,
   Play,
@@ -51,9 +50,7 @@ export function AppShell() {
   const [editingActionId, setEditingActionId] = useState<string | undefined>();
   const [showGitDropdown, setShowGitDropdown] = useState(false);
   const [showOpenDropdown, setShowOpenDropdown] = useState(false);
-  const [gitPromptMode, setGitPromptMode] = useState<
-    null | "commit" | "commit-push"
-  >(null);
+  const [gitActionMode, setGitActionMode] = useState<GitAction | null>(null);
 
   useEffect(() => {
     const handleShortcut = (event: KeyboardEvent) => {
@@ -144,28 +141,6 @@ export function AppShell() {
 
   const handleTerminalToggle = () => {
     setTerminalPaneOpen(!terminalPaneOpen);
-  };
-
-  const handleCommitPrompt = async (message: string) => {
-    if (!activeWorkspace) {
-      return;
-    }
-
-    const trimmed = message.trim();
-    if (!trimmed) {
-      return;
-    }
-
-    const command =
-      gitPromptMode === "commit-push"
-        ? `git add -A && git commit -m ${shellQuote(trimmed)} && git push`
-        : `git add -A && git commit -m ${shellQuote(trimmed)}`;
-
-    setGitPromptMode(null);
-    await runTerminalCommand(activeWorkspace.id, command, {
-      openPane: true,
-      refreshGit: true,
-    });
   };
 
   if (isBootstrapping || !state) {
@@ -447,7 +422,7 @@ export function AppShell() {
                       borderBottomRightRadius: 0,
                       borderRight: "none",
                     }}
-                    onClick={() => setGitPromptMode("commit-push")}
+                    onClick={() => setGitActionMode("commit-push")}
                   >
                     <CloudUpload size={14} /> Commit & push
                   </button>
@@ -478,23 +453,16 @@ export function AppShell() {
                         className="dropdown-item"
                         onClick={() => {
                           setShowGitDropdown(false);
-                          setGitPromptMode("commit");
+                          setGitActionMode("commit");
                         }}
                       >
-                        <GitCommit size={14} /> Commit
+                        <CloudUpload size={14} /> Commit
                       </button>
                       <button
                         className="dropdown-item"
                         onClick={() => {
                           setShowGitDropdown(false);
-                          void runTerminalCommand(
-                            activeWorkspace.id,
-                            "git push",
-                            {
-                              openPane: true,
-                              refreshGit: true,
-                            },
-                          );
+                          setGitActionMode("push");
                         }}
                       >
                         <CloudUpload size={14} /> Push
@@ -503,16 +471,10 @@ export function AppShell() {
                         className="dropdown-item"
                         onClick={() => {
                           setShowGitDropdown(false);
-                          void runTerminalCommand(
-                            activeWorkspace.id,
-                            "gh pr create --fill",
-                            {
-                              openPane: true,
-                            },
-                          );
+                          setGitActionMode("create-pr");
                         }}
                       >
-                        <GitPullRequest size={14} /> Create PR
+                        <CloudUpload size={14} /> Create PR
                       </button>
                     </div>
                   </>
@@ -561,17 +523,11 @@ export function AppShell() {
         />
       )}
 
-      {gitPromptMode && (
-        <PromptModal
-          title={
-            gitPromptMode === "commit-push"
-              ? "Commit message for commit and push"
-              : "Commit message"
-          }
-          onConfirm={(value) => {
-            void handleCommitPrompt(value);
-          }}
-          onCancel={() => setGitPromptMode(null)}
+      {gitActionMode && activeWorkspace && (
+        <CommitChangesModal
+          workspace={activeWorkspace}
+          initialAction={gitActionMode}
+          onClose={() => setGitActionMode(null)}
         />
       )}
 

@@ -72,6 +72,12 @@ function createState(): PersistedAppState {
       titleModelFallbackId: "gpt-5.4",
       titleModelEffort: "high",
       autoTitleEnabled: true,
+      autoGitMessagesEnabled: true,
+      gitMessageModelProviderId: "openai-codex",
+      gitMessageModelId: "gpt-5.4-mini",
+      gitMessageModelFallbackProviderId: "openai-codex",
+      gitMessageModelFallbackId: "gpt-5.4",
+      gitMessageModelEffort: "high",
       showRawToolCalls: false,
       layout: {
         diffMode: "split",

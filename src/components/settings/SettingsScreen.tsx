@@ -253,6 +253,34 @@ export function SettingsScreen() {
     ) ??
     titleFallbackModels.find((model) => model.id === "gpt-5.4") ??
     titleFallbackModels[0];
+  const gitMessageProvider =
+    titleProviders.find(
+      (provider) =>
+        provider.id === state?.preferences.gitMessageModelProviderId,
+    ) ??
+    titleProviders.find((provider) => provider.id === "openai-codex") ??
+    titleProviders[0];
+  const gitMessageModels = gitMessageProvider?.models ?? [];
+  const gitMessageModel =
+    gitMessageModels.find(
+      (model) => model.id === state?.preferences.gitMessageModelId,
+    ) ??
+    gitMessageModels.find((model) => model.id === "gpt-5.4-mini") ??
+    gitMessageModels[0];
+  const gitMessageFallbackProvider =
+    titleProviders.find(
+      (provider) =>
+        provider.id === state?.preferences.gitMessageModelFallbackProviderId,
+    ) ??
+    titleProviders.find((provider) => provider.id === "openai-codex") ??
+    titleProviders[0];
+  const gitMessageFallbackModels = gitMessageFallbackProvider?.models ?? [];
+  const gitMessageFallbackModel =
+    gitMessageFallbackModels.find(
+      (model) => model.id === state?.preferences.gitMessageModelFallbackId,
+    ) ??
+    gitMessageFallbackModels.find((model) => model.id === "gpt-5.4") ??
+    gitMessageFallbackModels[0];
 
   useEffect(() => {
     if (!state || !titleProvider || !titleModel) {
@@ -292,6 +320,46 @@ export function SettingsScreen() {
       titleModelFallbackId: titleFallbackModel.id,
     });
   }, [state, titleFallbackModel, titleFallbackProvider, updatePreferences]);
+
+  useEffect(() => {
+    if (!state || !gitMessageProvider || !gitMessageModel) {
+      return;
+    }
+    if (
+      state.preferences.gitMessageModelProviderId === gitMessageProvider.id &&
+      state.preferences.gitMessageModelId === gitMessageModel.id
+    ) {
+      return;
+    }
+    void updatePreferences({
+      ...state.preferences,
+      gitMessageModelProviderId: gitMessageProvider.id,
+      gitMessageModelId: gitMessageModel.id,
+    });
+  }, [gitMessageModel, gitMessageProvider, state, updatePreferences]);
+
+  useEffect(() => {
+    if (!state || !gitMessageFallbackProvider || !gitMessageFallbackModel) {
+      return;
+    }
+    if (
+      state.preferences.gitMessageModelFallbackProviderId ===
+        gitMessageFallbackProvider.id &&
+      state.preferences.gitMessageModelFallbackId === gitMessageFallbackModel.id
+    ) {
+      return;
+    }
+    void updatePreferences({
+      ...state.preferences,
+      gitMessageModelFallbackProviderId: gitMessageFallbackProvider.id,
+      gitMessageModelFallbackId: gitMessageFallbackModel.id,
+    });
+  }, [
+    gitMessageFallbackModel,
+    gitMessageFallbackProvider,
+    state,
+    updatePreferences,
+  ]);
 
   return (
     <div
@@ -827,6 +895,193 @@ export function SettingsScreen() {
                           void updatePreferences({
                             ...state.preferences,
                             titleModelEffort: event.target.value,
+                          });
+                        }}
+                      >
+                        <option value="low">Low</option>
+                        <option value="medium">Medium</option>
+                        <option value="high">High</option>
+                        <option value="extra-high">XHigh</option>
+                      </select>
+                    }
+                  />
+                  <SettingRow
+                    label="Auto git messages"
+                    description="Generate commit messages and pull request text when git modal fields are left blank."
+                    control={
+                      <button
+                        style={{
+                          ...btnStyle,
+                          padding: 0,
+                          border: "none",
+                          background: "transparent",
+                        }}
+                        onClick={() => {
+                          if (!state) {
+                            return;
+                          }
+
+                          void updatePreferences({
+                            ...state.preferences,
+                            autoGitMessagesEnabled:
+                              !state.preferences.autoGitMessagesEnabled,
+                          });
+                        }}
+                        type="button"
+                      >
+                        <Toggle
+                          checked={
+                            state?.preferences.autoGitMessagesEnabled ?? true
+                          }
+                        />
+                      </button>
+                    }
+                  />
+                  <SettingRow
+                    label="Git message model provider"
+                    description="Choose which provider generates commit and pull request messages."
+                    control={
+                      <select
+                        style={controlStyle}
+                        value={gitMessageProvider?.id ?? ""}
+                        onChange={(event) => {
+                          if (!state) {
+                            return;
+                          }
+
+                          const nextProvider = titleProviders.find(
+                            (provider) => provider.id === event.target.value,
+                          );
+                          const nextModelId =
+                            nextProvider?.models[0]?.id ??
+                            state.preferences.gitMessageModelId;
+
+                          void updatePreferences({
+                            ...state.preferences,
+                            gitMessageModelProviderId: event.target.value,
+                            gitMessageModelId: nextModelId,
+                          });
+                        }}
+                      >
+                        {titleProviders.map((provider) => (
+                          <option key={provider.id} value={provider.id}>
+                            {provider.label}
+                          </option>
+                        ))}
+                      </select>
+                    }
+                  />
+                  <SettingRow
+                    label="Git message model"
+                    description="Uses the selected provider and model for background git text generation only."
+                    control={
+                      <select
+                        style={controlStyle}
+                        value={gitMessageModel?.id ?? ""}
+                        onChange={(event) => {
+                          if (!state) {
+                            return;
+                          }
+
+                          void updatePreferences({
+                            ...state.preferences,
+                            gitMessageModelProviderId:
+                              gitMessageProvider?.id ??
+                              state.preferences.gitMessageModelProviderId,
+                            gitMessageModelId: event.target.value,
+                          });
+                        }}
+                      >
+                        {gitMessageModels.map((model) => (
+                          <option key={model.id} value={model.id}>
+                            {model.label}
+                          </option>
+                        ))}
+                      </select>
+                    }
+                  />
+                  <SettingRow
+                    label="Fallback git model provider"
+                    description="Choose a backup provider for automatic git text if the primary one fails."
+                    control={
+                      <select
+                        style={controlStyle}
+                        value={gitMessageFallbackProvider?.id ?? ""}
+                        onChange={(event) => {
+                          if (!state) {
+                            return;
+                          }
+
+                          const nextProvider = titleProviders.find(
+                            (provider) => provider.id === event.target.value,
+                          );
+                          const nextModelId =
+                            nextProvider?.models[0]?.id ??
+                            state.preferences.gitMessageModelFallbackId;
+
+                          void updatePreferences({
+                            ...state.preferences,
+                            gitMessageModelFallbackProviderId:
+                              event.target.value,
+                            gitMessageModelFallbackId: nextModelId,
+                          });
+                        }}
+                      >
+                        {titleProviders.map((provider) => (
+                          <option key={provider.id} value={provider.id}>
+                            {provider.label}
+                          </option>
+                        ))}
+                      </select>
+                    }
+                  />
+                  <SettingRow
+                    label="Fallback git model"
+                    description="Used if the primary git message model errors or returns no usable text."
+                    control={
+                      <select
+                        style={controlStyle}
+                        value={gitMessageFallbackModel?.id ?? ""}
+                        onChange={(event) => {
+                          if (!state) {
+                            return;
+                          }
+
+                          void updatePreferences({
+                            ...state.preferences,
+                            gitMessageModelFallbackProviderId:
+                              gitMessageFallbackProvider?.id ??
+                              state.preferences
+                                .gitMessageModelFallbackProviderId,
+                            gitMessageModelFallbackId: event.target.value,
+                          });
+                        }}
+                      >
+                        {gitMessageFallbackModels.map((model) => (
+                          <option key={model.id} value={model.id}>
+                            {model.label}
+                          </option>
+                        ))}
+                      </select>
+                    }
+                  />
+                  <SettingRow
+                    label="Git message effort"
+                    description="Controls reasoning depth used for automatic commit and PR text."
+                    control={
+                      <select
+                        style={controlStyle}
+                        value={
+                          state?.preferences.gitMessageModelEffort ?? "high"
+                        }
+                        onChange={(event) => {
+                          if (!state) {
+                            return;
+                          }
+
+                          void updatePreferences({
+                            ...state.preferences,
+                            gitMessageModelEffort: event.target.value,
                           });
                         }}
                       >

@@ -16,8 +16,9 @@ export interface AssistantContentBlock {
 export interface LivePhase {
   phase:
     | "reading-files"
-    | "listing-directory"
+    | "searching"
     | "writing-files"
+    | "running-command"
     | "verifying"
     | "thinking";
   label: string;
@@ -70,27 +71,20 @@ const TRANSIENT_STATUS_MATCHERS: Array<{
       /\bread(ing)?\b/,
       /\bopen(ing)?\b/,
       /\binspect(ing)?\b/,
-      /\bsearch(ing)?\b/,
-      /\bfind(ing)?\b/,
       /\bfetch(ing)?\b/,
-      /\bgrep\b/,
-      /\brg\b/,
+      /\blist(ing)?\b/,
+      /\bls\b/,
+      /\btree\b/,
+      /\bdirectory\b/,
+      /\bread_dir\b/,
       /\bmetadata\b/,
       /\bscreenshot\b/,
       /\bview(ing)?\b/,
     ],
   },
   {
-    phase: "listing-directory",
-    patterns: [
-      /\blist(ing)?\b/,
-      /\bdirectory\b/,
-      /\bworkspace\b/,
-      /\bfiles\b/,
-      /\bls\b/,
-      /\btree\b/,
-      /\bread_dir\b/,
-    ],
+    phase: "searching",
+    patterns: [/\bsearch(ing)?\b/, /\bfind(ing)?\b/, /\bgrep\b/, /\brg\b/],
   },
   {
     phase: "writing-files",
@@ -104,6 +98,17 @@ const TRANSIENT_STATUS_MATCHERS: Array<{
       /\bdelete(ing)?\b/,
       /\brename(ing)?\b/,
       /\bmove\b/,
+    ],
+  },
+  {
+    phase: "running-command",
+    patterns: [
+      /\brun(ning)?\b/,
+      /\bexec\b/,
+      /\bbash\b/,
+      /\bcommand\b/,
+      /\bterminal\b/,
+      /\bshell\b/,
     ],
   },
   {
@@ -437,8 +442,9 @@ function classifyLivePhase(value: string): LivePhase["phase"] | null {
 function buildLivePhase(phase: LivePhase["phase"], detail?: string): LivePhase {
   const labelMap: Record<LivePhase["phase"], string> = {
     "reading-files": "reading files",
-    "listing-directory": "listing directory",
-    "writing-files": "writing files",
+    searching: "searching",
+    "writing-files": "editing files",
+    "running-command": "running command",
     verifying: "verifying",
     thinking: "thinking",
   };
@@ -581,73 +587,13 @@ export function formatToolGroupLabel(
   summary: ToolGroupSummary,
   isLive = false,
 ): string {
-  const countPhrase = (count: number, singular: string, plural: string) =>
-    `${count} ${count === 1 ? singular : plural}`;
-  const explorationCount = summary.uniqueFiles || summary.readFiles;
-  const hasExploration =
-    summary.readFiles > 0 || summary.searched > 0 || summary.listed > 0;
-
-  if (hasExploration) {
-    const parts = [
-      `${isLive ? "Exploring" : "Explored"} ${countPhrase(
-        explorationCount,
-        "file",
-        "files",
-      )}`,
-    ];
-
-    if (summary.searched > 0) {
-      parts.push(countPhrase(summary.searched, "search", "searches"));
-    }
-
-    if (summary.listed > 0) {
-      parts.push(countPhrase(summary.listed, "directory", "directories"));
-    }
-
-    if (summary.edited > 0) {
-      parts.push(countPhrase(summary.edited, "edit", "edits"));
-    }
-
-    if (summary.ran > 0) {
-      parts.push(countPhrase(summary.ran, "command", "commands"));
-    }
-
-    return parts.join(", ");
+  if (summary.ran > 0) return isLive ? "running command" : "ran command";
+  if (summary.edited > 0) return isLive ? "editing files" : "edited files";
+  if (summary.searched > 0) return isLive ? "searching" : "searched";
+  if (summary.readFiles > 0 || summary.listed > 0 || summary.uniqueFiles > 0) {
+    return isLive ? "reading files" : "read files";
   }
-
-  if (summary.searched > 0) {
-    return `${isLive ? "Searching" : "Searched"} ${countPhrase(
-      summary.searched,
-      "search",
-      "searches",
-    )}`;
-  }
-
-  if (summary.listed > 0) {
-    return `${isLive ? "Listing" : "Listed"} ${countPhrase(
-      summary.listed,
-      "directory",
-      "directories",
-    )}`;
-  }
-
-  if (summary.edited > 0) {
-    return `${isLive ? "Editing" : "Edited"} ${countPhrase(
-      summary.uniqueFiles || summary.edited,
-      "file",
-      "files",
-    )}`;
-  }
-
-  if (summary.ran > 0) {
-    return `${isLive ? "Running" : "Ran"} ${countPhrase(
-      summary.ran,
-      "command",
-      "commands",
-    )}`;
-  }
-
-  return "Working...";
+  return isLive ? "working" : "worked";
 }
 
 export function isLiveToolActivity(toolItems: ToolActivityItem[]): boolean {
@@ -989,22 +935,30 @@ export function segmentTurnItems(
   return segments;
 }
 
-export function formatActivityPhaseLabel(phase: ActivityPhase): string {
-  switch (phase) {
-    case "reading-files":
-      return "reading files";
-    case "listing-directory":
-      return "listing directory";
-    case "writing-files":
-      return "writing files";
-    case "verifying":
-      return "verifying";
-    case "thinking":
-      return "thinking";
-    case "other":
-    default:
-      return "working";
-  }
+export function formatActivityPhaseLabel(
+  phase: ActivityPhase,
+  isLive = false,
+): string {
+  const liveLabels: Record<ActivityPhase, string> = {
+    "reading-files": "reading files",
+    searching: "searching",
+    "writing-files": "editing files",
+    "running-command": "running command",
+    verifying: "verifying",
+    thinking: "thinking",
+    other: "working",
+  };
+  const completedLabels: Record<ActivityPhase, string> = {
+    "reading-files": "read files",
+    searching: "searched",
+    "writing-files": "edited files",
+    "running-command": "ran command",
+    verifying: "verified",
+    thinking: "thought",
+    other: "worked",
+  };
+
+  return isLive ? liveLabels[phase] : completedLabels[phase];
 }
 
 function humanizeRuntimeId(value: string) {
@@ -1058,6 +1012,14 @@ function classifyActivityPhaseForItem(
   item: TimelineItem,
 ): ActivityPhase | null {
   if (item.kind === "tool-activity") {
+    const category = classifyToolCategory(
+      item.activity.toolName,
+      item.activity.summary,
+    );
+    if (category === "ran") return "running-command";
+    if (category === "edited") return "writing-files";
+    if (category === "searched") return "searching";
+
     return (
       classifyLivePhase(
         [item.activity.toolName, item.activity.summary, item.activity.output]
