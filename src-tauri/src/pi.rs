@@ -1272,7 +1272,7 @@ fn prompt_for_mode(prompt: &str, mode: &PromptMode) -> String {
                 "Before writing the plan, ground yourself in the task: ask clarifying questions with request_user_input when the requirements are ambiguous, or inspect relevant files when local code context is needed.\n",
                 "Only after you understand the core grounding, send exactly one assistant message containing one <proposed_plan> block and no text outside it.\n",
                 "Inside the block, provide concise markdown with a title, summary, key changes, test plan, and assumptions.\n",
-                "Then immediately call request_user_input before ending the turn.\n",
+                "Then immediately call request_user_input with exactly two options before ending the turn.\n",
                 "The request_user_input call must ask whether to proceed with the proposed plan and must provide exactly two options: \"Implement plan\" and \"No, do something differently\".\n",
                 "The second option must clearly allow the user to free-type what should change, and you must wait for that tool result before doing anything else.\n\n",
                 "User request:\n{}"
@@ -1486,6 +1486,40 @@ async fn emit_assistant_terminal_event(
         }
         AssistantTerminalEvent::Ignore => Ok(false),
     }
+}
+
+async fn apply_metadata_from_stream_message(
+    app: &AppHandle,
+    shared: &AppState,
+    workspace_id: &str,
+    session_id: &str,
+    message: &PiMessage,
+    session_file: &str,
+) -> Result<()> {
+    if message.provider.is_none() && message.model.is_none() {
+        return Ok(());
+    }
+
+    {
+        let mut state = shared.state.lock().await;
+        if let Some(session) = find_session_mut(&mut state, workspace_id, session_id) {
+            apply_metadata(
+                session,
+                Some(assistant_message_metadata(
+                    message,
+                    session_file,
+                    true,
+                    None,
+                )),
+            );
+            session.runtime.last_known_ready = true;
+            session.runtime.last_error = None;
+            session.updated_at = now_iso();
+            storage::save(app, &state)?;
+        }
+    }
+
+    Ok(())
 }
 
 fn summarize_tool_start(tool_name: &str, args: &Value) -> String {
@@ -1748,12 +1782,34 @@ async fn emit_done(
     {
         let mut state = shared.state.lock().await;
         if let Some(session) = find_session_mut(&mut state, workspace_id, session_id) {
-            session.timeline.push(TimelineItem::AssistantMessage {
-                id: Uuid::new_v4().to_string(),
-                created_at: now_iso(),
-                content: content.clone(),
-                streaming: false,
+            let existing_streaming = session.timeline.iter_mut().rev().find(|item| {
+                matches!(
+                    item,
+                    TimelineItem::AssistantMessage {
+                        streaming: true,
+                        ..
+                    }
+                )
             });
+
+            if let Some(TimelineItem::AssistantMessage {
+                content: existing_content,
+                streaming,
+                ..
+            }) = existing_streaming
+            {
+                if !content.trim().is_empty() {
+                    *existing_content = content.clone();
+                }
+                *streaming = false;
+            } else {
+                session.timeline.push(TimelineItem::AssistantMessage {
+                    id: Uuid::new_v4().to_string(),
+                    created_at: now_iso(),
+                    content: content.clone(),
+                    streaming: false,
+                });
+            }
             session.status = SessionStatus::Idle;
             apply_metadata(session, Some(metadata.clone()));
             session.runtime.last_known_ready = true;
@@ -1873,19 +1929,16 @@ async fn process_stdout_line(
             message: Some(message),
             assistant_message_event: AssistantMessageEvent::TextEnd { .. },
         } => {
-            if message.role == "assistant"
-                && emit_assistant_terminal_event(
+            if message.role == "assistant" {
+                apply_metadata_from_stream_message(
                     app,
                     shared,
-                    session_handle,
                     workspace_id,
                     session_id,
-                    session_file,
                     &message,
+                    session_file,
                 )
-                .await?
-            {
-                *completed = true;
+                .await?;
             }
         }
         RpcEvent::MessageUpdate {
@@ -2050,19 +2103,16 @@ async fn process_stdout_line(
             .await?;
         }
         RpcEvent::MessageEnd { message } => {
-            if message.role == "assistant"
-                && emit_assistant_terminal_event(
+            if message.role == "assistant" {
+                apply_metadata_from_stream_message(
                     app,
                     shared,
-                    session_handle,
                     workspace_id,
                     session_id,
-                    session_file,
                     &message,
+                    session_file,
                 )
-                .await?
-            {
-                *completed = true;
+                .await?;
             }
         }
         RpcEvent::AgentEnd { messages } => {

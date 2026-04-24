@@ -922,7 +922,17 @@ export function segmentTurnItems(
 
   flushActivity();
 
-  if (options?.livePhase?.phase === "thinking") {
+  if (options?.livePhase) {
+    const lastSegment = segments[segments.length - 1];
+    if (
+      lastSegment?.type === "activity" &&
+      lastSegment.activityPhase === options.livePhase.phase
+    ) {
+      lastSegment.isLive = true;
+      lastSegment.livePhase = options.livePhase;
+      return segments;
+    }
+
     segments.push({
       type: "activity",
       items: [],

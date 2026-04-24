@@ -640,6 +640,35 @@ describe("segmentTurnItems", () => {
       livePhase: { phase: "thinking", label: "thinking" },
     });
   });
+
+  it("keeps the current activity phase live until another phase appears", () => {
+    const segments = segmentTurnItems(
+      [
+        createToolActivity({
+          id: "tool-1",
+          toolName: "read",
+          summary:
+            'read {"path":"src/components/chat/ConversationView.tsx","limit":120}',
+          createdAt: "2026-04-22T09:00:00.000Z",
+          status: "completed",
+        }),
+      ],
+      {
+        livePhase: {
+          phase: "reading-files",
+          label: "reading files",
+        },
+      },
+    );
+
+    expect(segments).toHaveLength(1);
+    expect(segments[0]).toMatchObject({
+      type: "activity",
+      activityPhase: "reading-files",
+      isLive: true,
+      livePhase: { phase: "reading-files", label: "reading files" },
+    });
+  });
 });
 
 function createToolActivity(options: {

@@ -619,6 +619,7 @@ body {
 }
 
 .plan-card__body {
+  position: relative;
   padding: 16px 16px 18px;
 }
 
@@ -628,6 +629,26 @@ body {
   background: transparent;
   max-height: none;
   overflow: visible;
+}
+
+.plan-card:not(.plan-card--expanded) .plan-card__body > .markdown-content {
+  max-height: 300px;
+  overflow: hidden;
+}
+
+.plan-card:not(.plan-card--expanded) .plan-card__body::after {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 120px;
+  pointer-events: none;
+  content: "";
+  background: linear-gradient(
+    180deg,
+    rgba(20, 20, 20, 0),
+    rgba(20, 20, 20, 0.92)
+  );
 }
 
 .plan-card__body--expanded {

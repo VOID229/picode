@@ -49,7 +49,7 @@ export function ToolActivityGroup({ segment }: ToolActivityGroupProps) {
 
   const details = summarizeToolActivityDetails(toolItems);
   const summary = groupToolActivities(toolItems, details);
-  const anyRunning = isLiveToolActivity(toolItems);
+  const anyRunning = Boolean(segment.isLive) || isLiveToolActivity(toolItems);
   const canShowDetails =
     showRawToolCalls &&
     (details.files.length > 0 ||

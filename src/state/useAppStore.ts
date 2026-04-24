@@ -1131,11 +1131,11 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
           if (!session) {
             return store;
           }
-          const existing = [...session.timeline]
-            .reverse()
-            .find(
-              (item) => item.kind === "assistant-message" && item.streaming,
-            );
+          const lastItem = session.timeline[session.timeline.length - 1];
+          const existing =
+            lastItem?.kind === "assistant-message" && lastItem.streaming
+              ? lastItem
+              : null;
 
           if (existing && existing.kind === "assistant-message") {
             existing.content += event.delta;
@@ -1302,15 +1302,16 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
           if (!session) {
             return store;
           }
-          const existing = [...session.timeline]
-            .reverse()
-            .find(
-              (item) => item.kind === "assistant-message" && item.streaming,
-            );
+          const streamingAssistantMessages = session.timeline.filter(
+            (item) => item.kind === "assistant-message" && item.streaming,
+          );
 
-          if (existing && existing.kind === "assistant-message") {
-            existing.content = event.content || existing.content;
-            existing.streaming = false;
+          if (streamingAssistantMessages.length > 0) {
+            for (const item of streamingAssistantMessages) {
+              if (item.kind === "assistant-message") {
+                item.streaming = false;
+              }
+            }
           } else {
             session.timeline.push({
               id: crypto.randomUUID(),

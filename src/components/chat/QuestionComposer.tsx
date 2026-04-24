@@ -119,6 +119,7 @@ export function QuestionComposer({
   }
 
   function selectOption(optionIndex: number) {
+    setEditingCustom(false);
     const option = visibleOptions[optionIndex];
     if (!option || !question) return;
     setAnswers((current) => ({
@@ -237,12 +238,20 @@ export function QuestionComposer({
         ))}
 
         <div
+          role="button"
+          tabIndex={0}
           className={cn(
             "question-composer__option question-composer__option--custom",
             (editingCustom || selected?.wasCustom) &&
               "question-composer__option--selected",
           )}
           onClick={() => setEditingCustom(true)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              setEditingCustom(true);
+            }
+          }}
         >
           <span>{customOptionNumber}.</span>
           {editingCustom ? (

@@ -1264,8 +1264,9 @@ function TurnRenderer({
     ));
   });
 
-  // For completed turns with tool activity, wrap tool segments in WorkedForBlock
-  if (turn.isCompleted && hasToolActivity && turn.startTime && turn.endTime) {
+  // For turns with tool activity, keep the elapsed-time header anchored above
+  // the activity list while work is still streaming and after it completes.
+  if (hasToolActivity && turn.startTime) {
     // Split into: user message, worked-for-block wrapping tools, then final assistant text + files changed
     const userSegments: React.ReactNode[] = [];
     const toolContent: React.ReactNode[] = [];
@@ -1346,7 +1347,11 @@ function TurnRenderer({
       >
         {userSegments}
         {toolContent.length > 0 && (
-          <WorkedForBlock startTime={turn.startTime} endTime={turn.endTime}>
+          <WorkedForBlock
+            startTime={turn.startTime}
+            endTime={turn.isCompleted ? turn.endTime : undefined}
+            isLive={!turn.isCompleted}
+          >
             <div
               style={{ display: "flex", flexDirection: "column", gap: "8px" }}
             >

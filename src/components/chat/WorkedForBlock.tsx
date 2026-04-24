@@ -1,10 +1,11 @@
-import { ChevronRight, Clock } from "lucide-react";
-import { useState } from "react";
+import { ChevronRight } from "lucide-react";
+import { useEffect, useState } from "react";
 import { cn } from "../../lib/cn";
 
 interface WorkedForBlockProps {
   startTime: string;
-  endTime: string;
+  endTime?: string;
+  isLive?: boolean;
   children: React.ReactNode;
 }
 
@@ -26,10 +27,24 @@ function formatDuration(startIso: string, endIso: string): string {
 export function WorkedForBlock({
   startTime,
   endTime,
+  isLive = false,
   children,
 }: WorkedForBlockProps) {
   const [expanded, setExpanded] = useState(false);
-  const duration = formatDuration(startTime, endTime);
+  const [now, setNow] = useState(() => new Date().toISOString());
+  const duration = formatDuration(startTime, endTime ?? now);
+
+  useEffect(() => {
+    if (!isLive || endTime) {
+      return;
+    }
+
+    const interval = window.setInterval(() => {
+      setNow(new Date().toISOString());
+    }, 1000);
+
+    return () => window.clearInterval(interval);
+  }, [endTime, isLive]);
 
   return (
     <div className="worked-for-block">
@@ -38,7 +53,7 @@ export function WorkedForBlock({
         onClick={() => setExpanded(!expanded)}
       >
         <span className="worked-for-block__label">
-          Worked for {duration}
+          {isLive && !endTime ? "working" : "worked"} for {duration}
         </span>
         <ChevronRight
           size={12}
