@@ -1,15 +1,10 @@
 # Picode
 
-```text
-      _              _
- _ __ (_) ___ ___  __| | ___
-| '_ \| |/ __/ _ \/ _` |/ _ \
-| |_) | | (_| (_) | (_| |  __/
-| .__/|_|\___\___/ \__,_|\___|
-|_|
-```
-
-`macOS` `Tauri` `React` `TypeScript` `Pi` `AGPL-3.0`
+![Open Source](https://img.shields.io/badge/open_source-AGPL--3.0-2ea44f)
+![Tauri](https://img.shields.io/badge/Tauri-v2-24c8db)
+![Agent Manager](https://img.shields.io/badge/agent-manager-7c3aed)
+![macOS](https://img.shields.io/badge/macOS-DMG-lightgrey)
+![Linux](https://img.shields.io/badge/Linux-experimental-f59e0b)
 
 ![Picode desktop app demo](docs/assets/picode-demo.png)
 
