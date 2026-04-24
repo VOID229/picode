@@ -100,7 +100,10 @@ export function TimelineItemView({
               title="Copy"
               type="button"
               onClick={async () => {
-                const copied = await copyTextToClipboard(item.content, "message");
+                const copied = await copyTextToClipboard(
+                  item.content,
+                  "message",
+                );
                 if (copied) {
                   showCopyFeedback();
                 }
@@ -136,15 +139,10 @@ export function TimelineItemView({
               title="Undo"
               type="button"
               onClick={async () => {
-                if (!git?.isRepo) {
-                  window.alert(
-                    "Undo is only available for git workspaces with a saved checkpoint for this turn.",
-                  );
-                  return;
-                }
-
                 const confirmed = window.confirm(
-                  "Undo this message and everything after it? This restores the working tree and index to the saved checkpoint only if HEAD has not changed.",
+                  git?.isRepo
+                    ? "Undo this message and everything after it? This restores the working tree and index to the saved checkpoint only if HEAD has not changed."
+                    : "Undo this message and everything after it? This removes the assistant response and runtime context for this turn, then puts your message back in the composer.",
                 );
                 if (!confirmed) {
                   return;
@@ -228,7 +226,10 @@ export function TimelineItemView({
                 type="button"
                 aria-label="Copy response"
                 onClick={async () => {
-                  const copied = await copyTextToClipboard(item.content, "response");
+                  const copied = await copyTextToClipboard(
+                    item.content,
+                    "response",
+                  );
                   if (copied) {
                     showCopyFeedback();
                   }

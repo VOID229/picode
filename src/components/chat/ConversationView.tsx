@@ -324,14 +324,10 @@ export function ConversationView({
     }) => {
       if (!workspace || !session) return;
       const git = useAppStore.getState().git[workspace.id];
-      if (!git?.isRepo) {
-        window.alert(
-          "Undo is only available for git workspaces with a saved checkpoint for this turn.",
-        );
-        return;
-      }
       const confirmed = window.confirm(
-        "Undo this message and everything after it? This restores the working tree and index to the saved checkpoint only if HEAD has not changed.",
+        git?.isRepo
+          ? "Undo this message and everything after it? This restores the working tree and index to the saved checkpoint only if HEAD has not changed."
+          : "Undo this message and everything after it? This removes the assistant response and runtime context for this turn, then puts your message back in the composer.",
       );
       if (!confirmed) return;
       try {
