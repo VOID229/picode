@@ -414,6 +414,14 @@ pub struct BootstrapPayload {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct AppPaths {
+    pub app_data_dir: String,
+    pub keybindings_path: String,
+    pub logs_dir: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RuntimeBootstrapPayload {
     pub install: PiInstallStatus,
 }

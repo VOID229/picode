@@ -5,13 +5,13 @@ mod storage;
 mod terminal;
 
 use crate::models::{
-    AbortPromptPayload, BootstrapPayload, CloseTerminalSessionPayload, CreateSessionPayload,
-    CreateWorkspacePayload, DeleteSessionPayload, EnsureTerminalSessionPayload, PersistedAppState,
-    PrepareGitActionPayload, PreparedGitAction, RefreshGitPayload,
-    RefreshWorkspaceRuntimeCatalogPayload, RemoveWorkspacePayload, RenameSessionPayload,
-    RenameWorkspacePayload, ReorderSessionPayload, ReorderWorkspacePayload, ResizeTerminalPayload,
-    ResolveApprovalPayload, ResolveExtensionUiRequestPayload, RunGitActionPayload,
-    RunGitActionResult, RunTerminalCommandPayload, RunTerminalCommandResult,
+    AbortPromptPayload, AppPaths, BootstrapPayload, CloseTerminalSessionPayload,
+    CreateSessionPayload, CreateWorkspacePayload, DeleteSessionPayload,
+    EnsureTerminalSessionPayload, PersistedAppState, PrepareGitActionPayload, PreparedGitAction,
+    RefreshGitPayload, RefreshWorkspaceRuntimeCatalogPayload, RemoveWorkspacePayload,
+    RenameSessionPayload, RenameWorkspacePayload, ReorderSessionPayload, ReorderWorkspacePayload,
+    ResizeTerminalPayload, ResolveApprovalPayload, ResolveExtensionUiRequestPayload,
+    RunGitActionPayload, RunGitActionResult, RunTerminalCommandPayload, RunTerminalCommandResult,
     RuntimeBootstrapPayload, RuntimeHealthPayload, SelectWorkspaceSessionPayload,
     SendPromptPayload, SessionIdentityPayload, UndoUserTurnPayload, UpdateWorkspaceSettingsPayload,
     WorkspaceRuntimeCatalogPayload, WriteTerminalInputPayload, WriteTextFilePayload,
@@ -73,6 +73,25 @@ async fn bootstrap_state(
     }
 
     Ok(BootstrapPayload { state, git })
+}
+
+#[tauri::command]
+async fn app_paths(app: AppHandle) -> Result<AppPaths, String> {
+    let app_data_dir = storage::app_data_dir(&app).map_err(|error| error.to_string())?;
+    let logs_dir = app
+        .path()
+        .app_log_dir()
+        .map_err(|error| error.to_string())?;
+    fs::create_dir_all(&logs_dir).map_err(|error| error.to_string())?;
+
+    Ok(AppPaths {
+        keybindings_path: app_data_dir
+            .join("keybindings.json")
+            .to_string_lossy()
+            .into_owned(),
+        app_data_dir: app_data_dir.to_string_lossy().into_owned(),
+        logs_dir: logs_dir.to_string_lossy().into_owned(),
+    })
 }
 
 #[tauri::command]
@@ -999,6 +1018,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             bootstrap_state,
+            app_paths,
             create_workspace,
             create_session,
             select_workspace_session,

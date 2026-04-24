@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type {
   BootstrapPayload,
+  AppPaths,
   GitSnapshot,
   MessageImageAttachment,
   PersistedAppState,
@@ -21,6 +22,10 @@ import type {
 
 export async function bootstrapState() {
   return normalize(await invoke<BootstrapPayload>("bootstrap_state"));
+}
+
+export async function getAppPaths() {
+  return normalize(await invoke<AppPaths>("app_paths"));
 }
 
 export async function createWorkspace(payload: {

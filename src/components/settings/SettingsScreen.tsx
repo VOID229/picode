@@ -9,8 +9,9 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { openPath } from "../../lib/tauri";
+import { getAppPaths, openPath } from "../../lib/tauri";
 import { useAppStore } from "../../state/useAppStore";
+import type { AppPaths } from "../../domains/types";
 
 function Toggle({ checked }: { checked: boolean }) {
   return (
@@ -122,6 +123,7 @@ function SettingsSection({
 export function SettingsScreen() {
   const [activeTab, setActiveTab] = useState("general");
   const [piBinaryInput, setPiBinaryInput] = useState("");
+  const [appPaths, setAppPaths] = useState<AppPaths | null>(null);
 
   const controlStyle = {
     background: "#111",
@@ -170,6 +172,26 @@ export function SettingsScreen() {
   useEffect(() => {
     setPiBinaryInput(state?.preferences.piBinaryPath ?? "");
   }, [state?.preferences.piBinaryPath]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    void getAppPaths()
+      .then((paths) => {
+        if (!cancelled) {
+          setAppPaths(paths);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setAppPaths(null);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const commitPiBinaryOverride = async (nextValue: string) => {
     if (!state) {
@@ -1109,12 +1131,24 @@ export function SettingsScreen() {
                             marginBottom: "4px",
                           }}
                         >
-                          /Users/gal/.picode/userdata/keybindings.json
+                          {appPaths?.keybindingsPath ?? "Resolving path..."}
                         </div>
                         Opens in your preferred editor.
                       </div>
                     }
-                    control={<button style={btnStyle}>Open file</button>}
+                    control={
+                      <button
+                        style={btnStyle}
+                        disabled={!appPaths}
+                        onClick={() => {
+                          if (appPaths) {
+                            void openPath(appPaths.keybindingsPath);
+                          }
+                        }}
+                      >
+                        Open file
+                      </button>
+                    }
                   />
                 </SettingsSection>
 
@@ -1162,11 +1196,23 @@ export function SettingsScreen() {
                             marginTop: "4px",
                           }}
                         >
-                          /Users/gal/.picode/userdata/logs
+                          {appPaths?.logsDir ?? "Resolving path..."}
                         </div>
                       </div>
                     }
-                    control={<button style={btnStyle}>Open logs folder</button>}
+                    control={
+                      <button
+                        style={btnStyle}
+                        disabled={!appPaths}
+                        onClick={() => {
+                          if (appPaths) {
+                            void openPath(appPaths.logsDir);
+                          }
+                        }}
+                      >
+                        Open logs folder
+                      </button>
+                    }
                   />
                 </SettingsSection>
               </>

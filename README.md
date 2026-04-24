@@ -2,14 +2,21 @@
 
 Picode is a minimal desktop GUI for coding agents using Pi.
 
-Built with Tauri v2, React, and TypeScript, it provides a native shell for managing projects, sessions, git context, and Pi-backed agent runs from one interface.
+Built with Tauri v2, React, and TypeScript, it provides a native shell for managing your agents and projects.
+
+## Install
+
+Download the latest macOS DMG from the [latest GitHub release](https://github.com/VOID229/picode/releases/latest), open it, and drag `picode.app` into Applications.
+
+Linux support exists in the codebase but is not refined yet. There are currently no polished Linux installation artifacts such as `.rpm`, `.deb`, or AppImage packages; Linux users should treat the app as source-build only for now.
 
 ## Features
 
 - Workspace and session management
 - Git context and local project state
 - Uses a system-installed `pi` CLI over official RPC mode
-- macOS and Linux build targets
+- macOS DMG packaging
+- Experimental Linux source builds
 
 ## Providers
 
@@ -18,7 +25,10 @@ Picode uses Pi as the backend which can connect to:
 - Codex
 - Claude
 - Gemini
+- OpenCode
 - Ollama
+- LM Studio
+- And more...
 
 ## Local Development
 
@@ -32,7 +42,7 @@ Install the required tooling first:
 Install Pi globally and complete its login/config flow:
 
 ```bash
-npm install -g @mariozechner/pi-coding-agent
+bun add --global @mariozechner/pi-coding-agent
 pi
 /login
 ```
@@ -69,10 +79,10 @@ Create a macOS DMG:
 bun run dmg
 ```
 
-Current packaging targets:
+Current release packaging:
 
-- macOS: `dmg`
-- Linux: `appimage`, `deb`, `rpm`
+- macOS: DMG
+- Linux: not refined yet; no official `.rpm`, `.deb`, or AppImage installer is currently shipped
 
 ## Notes
 
@@ -80,3 +90,7 @@ Picode is still early. Expect rough edges.
 
 App state is stored locally in the platform app-data directory.
 Pi session files are stored under the app-data directory in `pi-sessions/`.
+
+## License
+
+Picode is licensed under the GNU Affero General Public License v3.0 only. See [LICENSE](LICENSE).

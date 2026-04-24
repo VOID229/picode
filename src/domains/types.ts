@@ -293,6 +293,12 @@ export interface BootstrapPayload {
   git: Record<string, GitSnapshot>;
 }
 
+export interface AppPaths {
+  appDataDir: string;
+  keybindingsPath: string;
+  logsDir: string;
+}
+
 export interface RuntimeBootstrapPayload {
   install: PiInstallStatus;
 }
