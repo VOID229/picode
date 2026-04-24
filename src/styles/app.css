@@ -1356,20 +1356,21 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.58);
-  backdrop-filter: blur(8px);
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(4px);
 }
 
 .git-modal {
   position: relative;
-  width: min(480px, calc(100vw - 32px));
-  max-height: calc(100vh - 32px);
+  width: min(520px, calc(100vw - 32px));
+  max-height: 70vh;
   overflow-y: auto;
-  border-radius: 14px;
-  background: #232323;
+  border: 1px solid #333;
+  border-radius: 16px;
+  background: #161616;
   padding: 22px 24px 20px;
   color: #f0f0ed;
-  box-shadow: 0 20px 46px rgba(0, 0, 0, 0.42);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6);
 }
 
 .git-modal__close {

@@ -1069,6 +1069,9 @@ export function ConversationView({
           display: flex;
           flex-direction: column;
           gap: 2px;
+          max-height: min(420px, calc(100vh - 220px));
+          overflow-y: auto;
+          overscroll-behavior: contain;
         }
         .custom-dropdown-item {
           display: flex;
