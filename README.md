@@ -1,5 +1,18 @@
 # Picode
 
+```text
+      _              _
+ _ __ (_) ___ ___  __| | ___
+| '_ \| |/ __/ _ \/ _` |/ _ \
+| |_) | | (_| (_) | (_| |  __/
+| .__/|_|\___\___/ \__,_|\___|
+|_|
+```
+
+`macOS` `Tauri` `React` `TypeScript` `Pi` `AGPL-3.0`
+
+![Picode desktop app demo](docs/assets/picode-demo.png)
+
 Picode is a minimal desktop GUI for coding agents using Pi.
 
 Built with Tauri v2, React, and TypeScript, it provides a native shell for managing your agents and projects.
@@ -18,7 +31,7 @@ Linux support exists in the codebase but is not refined yet. There are currently
 
 ## Features
 
-- Workspace and session management
+- projects and threads management
 - Git context and local project state
 - Uses a system-installed `pi` CLI over official RPC mode
 - macOS DMG packaging
@@ -92,7 +105,7 @@ Current release packaging:
 
 ## Notes
 
-Picode is still early. Expect rough edges.
+Picode is still very early. Expect bugs.
 
 App state is stored locally in the platform app-data directory.
 Pi session files are stored under the app-data directory in `pi-sessions/`.
