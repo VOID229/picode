@@ -42,10 +42,6 @@ export function AppShell() {
     (store) => store.refreshWorkspaceRuntimeCatalog,
   );
   const runTerminalCommand = useAppStore((store) => store.runTerminalCommand);
-  const ensureTerminalSession = useAppStore(
-    (store) => store.ensureTerminalSession,
-  );
-  const createTerminalTab = useAppStore((store) => store.createTerminalTab);
   const terminalPaneOpen = useAppStore((store) => store.terminalPaneOpen);
   const setTerminalPaneOpen = useAppStore((store) => store.setTerminalPaneOpen);
   const navigate = useNavigate();
@@ -146,15 +142,8 @@ export function AppShell() {
     await openPath(activeWorkspace.path);
   };
 
-  const handleTerminalToggle = async () => {
-    const next = !terminalPaneOpen;
-    setTerminalPaneOpen(next);
-    if (next && activeWorkspace) {
-      const terminalTabId =
-        useAppStore.getState().terminals[activeWorkspace.id]?.activeTabId ??
-        (await createTerminalTab(activeWorkspace.id));
-      await ensureTerminalSession(activeWorkspace.id, terminalTabId);
-    }
+  const handleTerminalToggle = () => {
+    setTerminalPaneOpen(!terminalPaneOpen);
   };
 
   const handleCommitPrompt = async (message: string) => {

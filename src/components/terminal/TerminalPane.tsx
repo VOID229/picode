@@ -1,10 +1,12 @@
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
-import { Plus, RotateCcw, Trash2, X } from "lucide-react";
-import { useEffect, useRef } from "react";
+import { Plus, X } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { WorkspaceRecord } from "../../domains/types";
 import { useAppStore } from "../../state/useAppStore";
+import { ContextMenu } from "../layout/ContextMenu";
+import { PromptModal } from "../layout/PromptModal";
 
 interface TerminalPaneProps {
   workspace: WorkspaceRecord | null;
@@ -18,34 +20,103 @@ interface TerminalBinding {
   terminalTabId: string | null;
 }
 
+function getTerminalTabLabel(title: string | undefined, fallbackIndex: number) {
+  const trimmed = title?.trim();
+  return trimmed && trimmed.length > 0
+    ? trimmed
+    : `terminal ${fallbackIndex + 1}`;
+}
+
 export function TerminalPane({ workspace }: TerminalPaneProps) {
   const paneOpen = useAppStore((state) => state.terminalPaneOpen);
   const terminals = useAppStore((state) => state.terminals);
-  const createTerminalTab = useAppStore((state) => state.createTerminalTab);
   const closeTerminalTab = useAppStore((state) => state.closeTerminalTab);
-  const clearTerminalBuffer = useAppStore((state) => state.clearTerminalBuffer);
+  const createTerminalTab = useAppStore((state) => state.createTerminalTab);
   const ensureTerminalSession = useAppStore(
     (state) => state.ensureTerminalSession,
   );
-  const restartTerminalTab = useAppStore((state) => state.restartTerminalTab);
+  const renameTerminalTab = useAppStore((state) => state.renameTerminalTab);
   const resizeTerminal = useAppStore((state) => state.resizeTerminal);
   const setActiveTerminalTab = useAppStore(
     (state) => state.setActiveTerminalTab,
   );
+  const setTerminalPaneOpen = useAppStore((state) => state.setTerminalPaneOpen);
   const writeTerminalInput = useAppStore((state) => state.writeTerminalInput);
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const bindingRef = useRef<TerminalBinding | null>(null);
   const activeBindingIdRef = useRef<string | null>(null);
-  const terminalsRef = useRef(terminals);
-
-  terminalsRef.current = terminals;
+  const resizeFrameRef = useRef<number | null>(null);
+  const lastResizeKeyRef = useRef<string | null>(null);
+  const [tabContextMenu, setTabContextMenu] = useState<{
+    tabId: string;
+    x: number;
+    y: number;
+  } | null>(null);
+  const [renamingTabId, setRenamingTabId] = useState<string | null>(null);
 
   const workspaceTerminals = workspace ? terminals[workspace.id] : undefined;
   const activeTerminalTabId = workspaceTerminals?.activeTabId ?? null;
   const activeTerminal = activeTerminalTabId
     ? workspaceTerminals?.tabs[activeTerminalTabId]
     : undefined;
+  const activeTerminalStatus = activeTerminal?.status;
+  const renamingTabIndex = renamingTabId
+    ? (workspaceTerminals?.tabOrder.findIndex(
+        (tabId) => tabId === renamingTabId,
+      ) ?? -1)
+    : -1;
+  const renamingTab = renamingTabId
+    ? workspaceTerminals?.tabs[renamingTabId]
+    : undefined;
+
+  const scheduleTerminalLayout = useCallback(
+    (options?: { focus?: boolean }) => {
+      if (resizeFrameRef.current !== null) {
+        cancelAnimationFrame(resizeFrameRef.current);
+      }
+
+      resizeFrameRef.current = requestAnimationFrame(() => {
+        resizeFrameRef.current = null;
+
+        const binding = bindingRef.current;
+        const container = containerRef.current;
+        if (
+          !paneOpen ||
+          !binding ||
+          !container ||
+          !binding.workspaceId ||
+          !binding.terminalTabId
+        ) {
+          return;
+        }
+
+        if (container.clientWidth === 0 || container.clientHeight === 0) {
+          return;
+        }
+
+        binding.fit.fit();
+
+        const resizeKey = `${binding.workspaceId}:${binding.terminalTabId}:${binding.term.cols}:${binding.term.rows}`;
+        if (lastResizeKeyRef.current !== resizeKey) {
+          lastResizeKeyRef.current = resizeKey;
+          void resizeTerminal(
+            binding.workspaceId,
+            binding.terminalTabId,
+            binding.term.cols,
+            binding.term.rows,
+          );
+        }
+
+        if (options?.focus) {
+          binding.term.focus();
+        }
+
+        activeBindingIdRef.current = `${binding.workspaceId}:${binding.terminalTabId}`;
+      });
+    },
+    [paneOpen, resizeTerminal],
+  );
 
   useEffect(() => {
     const container = containerRef.current;
@@ -114,10 +185,17 @@ export function TerminalPane({ workspace }: TerminalPaneProps) {
     });
 
     return () => {
+      if (resizeFrameRef.current !== null) {
+        cancelAnimationFrame(resizeFrameRef.current);
+      }
       bindingRef.current?.term.dispose();
       bindingRef.current = null;
     };
   }, [writeTerminalInput]);
+
+  useEffect(() => {
+    lastResizeKeyRef.current = null;
+  }, [activeTerminalTabId, paneOpen, workspace?.id]);
 
   useEffect(() => {
     const binding = bindingRef.current;
@@ -165,45 +243,24 @@ export function TerminalPane({ workspace }: TerminalPaneProps) {
     let cancelled = false;
 
     const prepareTerminal = async () => {
-      const terminalTabId =
-        activeTerminalTabId ?? (await createTerminalTab(workspace.id));
+      let terminalTabId = activeTerminalTabId;
+
+      if (!terminalTabId) {
+        terminalTabId = await createTerminalTab(workspace.id);
+      } else if (
+        !activeTerminalStatus ||
+        activeTerminalStatus === "idle" ||
+        activeTerminalStatus === "error" ||
+        activeTerminalStatus === "exited"
+      ) {
+        await ensureTerminalSession(workspace.id, terminalTabId);
+      }
+
       if (cancelled) {
         return;
       }
 
-      await ensureTerminalSession(workspace.id, terminalTabId);
-      if (cancelled) {
-        return;
-      }
-
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          if (cancelled) {
-            return;
-          }
-
-          const binding = bindingRef.current;
-          const container = containerRef.current;
-          if (
-            !binding ||
-            !container ||
-            container.clientWidth === 0 ||
-            container.clientHeight === 0
-          ) {
-            return;
-          }
-
-          binding.fit.fit();
-          void resizeTerminal(
-            workspace.id,
-            terminalTabId,
-            binding.term.cols,
-            binding.term.rows,
-          );
-          binding.term.focus();
-          activeBindingIdRef.current = `${workspace.id}:${terminalTabId}`;
-        });
-      });
+      scheduleTerminalLayout({ focus: true });
     };
 
     void prepareTerminal().catch(() => {
@@ -217,13 +274,36 @@ export function TerminalPane({ workspace }: TerminalPaneProps) {
       activeBindingIdRef.current = null;
     };
   }, [
+    activeTerminalStatus,
     activeTerminalTabId,
     createTerminalTab,
     ensureTerminalSession,
     paneOpen,
-    resizeTerminal,
+    scheduleTerminalLayout,
     workspace,
   ]);
+
+  useEffect(() => {
+    const handleRenameShortcut = (event: KeyboardEvent) => {
+      if (
+        !paneOpen ||
+        !workspace ||
+        !activeTerminalTabId ||
+        !(event.metaKey || event.ctrlKey) ||
+        event.key.toLowerCase() !== "r"
+      ) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      setRenamingTabId(activeTerminalTabId);
+    };
+
+    window.addEventListener("keydown", handleRenameShortcut, true);
+    return () =>
+      window.removeEventListener("keydown", handleRenameShortcut, true);
+  }, [activeTerminalTabId, paneOpen, workspace]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -232,30 +312,12 @@ export function TerminalPane({ workspace }: TerminalPaneProps) {
     }
 
     const observer = new ResizeObserver(() => {
-      const binding = bindingRef.current;
-      if (
-        !paneOpen ||
-        !binding ||
-        !binding.workspaceId ||
-        !binding.terminalTabId ||
-        container.clientWidth === 0 ||
-        container.clientHeight === 0
-      ) {
-        return;
-      }
-
-      binding.fit.fit();
-      void resizeTerminal(
-        binding.workspaceId,
-        binding.terminalTabId,
-        binding.term.cols,
-        binding.term.rows,
-      );
+      scheduleTerminalLayout();
     });
 
     observer.observe(container);
     return () => observer.disconnect();
-  }, [paneOpen, resizeTerminal]);
+  }, [scheduleTerminalLayout]);
 
   return (
     <section
@@ -263,30 +325,66 @@ export function TerminalPane({ workspace }: TerminalPaneProps) {
       aria-hidden={!paneOpen}
     >
       <div className="terminal-pane__meta">
-        <div className="terminal-pane__tabs">
-          {workspaceTerminals?.tabOrder.map((tabId, index) => {
-            const tab = workspaceTerminals.tabs[tabId];
-            return (
-              <button
-                key={tabId}
-                className={`terminal-pane__tab ${
-                  tabId === activeTerminalTabId
-                    ? "terminal-pane__tab--active"
-                    : ""
-                }`}
-                onClick={() => {
-                  setActiveTerminalTab(workspace!.id, tabId);
-                }}
-                type="button"
-              >
-                <span>
-                  {tab.activeCommand?.command || `Shell ${index + 1}`}
-                </span>
-              </button>
-            );
-          })}
+        <div className="terminal-pane__tabs-wrap">
+          <div
+            className="terminal-pane__tabs"
+            role="tablist"
+            aria-label="Terminal tabs"
+          >
+            {workspaceTerminals?.tabOrder.map((tabId, index) => {
+              const tab = workspaceTerminals.tabs[tabId];
+              const tabLabel = getTerminalTabLabel(tab.title, index);
+
+              return (
+                <div
+                  key={tabId}
+                  className={`terminal-pane__tab ${
+                    tabId === activeTerminalTabId
+                      ? "terminal-pane__tab--active"
+                      : ""
+                  }`}
+                >
+                  <button
+                    className="terminal-pane__tab-trigger"
+                    onClick={() => {
+                      if (workspace) {
+                        setActiveTerminalTab(workspace.id, tabId);
+                      }
+                    }}
+                    onContextMenu={(event) => {
+                      event.preventDefault();
+                      setTabContextMenu({
+                        tabId,
+                        x: event.clientX,
+                        y: event.clientY,
+                      });
+                    }}
+                    type="button"
+                    role="tab"
+                    aria-selected={tabId === activeTerminalTabId}
+                  >
+                    <span className="terminal-pane__tab-label">{tabLabel}</span>
+                  </button>
+                  <button
+                    className="terminal-pane__tab-close"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      if (workspace) {
+                        void closeTerminalTab(workspace.id, tabId);
+                      }
+                    }}
+                    type="button"
+                    title="Close terminal tab"
+                    aria-label={`Close ${tabLabel}`}
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
           <button
-            className="terminal-pane__icon-btn"
+            className="terminal-pane__icon-btn terminal-pane__icon-btn--tab-add"
             onClick={() => {
               if (workspace) {
                 void createTerminalTab(workspace.id);
@@ -300,57 +398,26 @@ export function TerminalPane({ workspace }: TerminalPaneProps) {
         </div>
 
         <div className="terminal-pane__actions">
-          <span className="terminal-pane__status">
-            {activeTerminal?.activeCommand
-              ? `Running ${activeTerminal.activeCommand.command}`
-              : activeTerminal?.status === "connecting"
+          {activeTerminal?.status !== "ready" && (
+            <span className="terminal-pane__status">
+              {activeTerminal?.status === "connecting"
                 ? "Connecting shell"
                 : activeTerminal?.status === "error"
                   ? activeTerminal.error || "Terminal error"
                   : activeTerminal?.status === "exited"
                     ? activeTerminal.error || "Shell exited"
-                    : activeTerminal
-                      ? "Ready"
-                      : workspace
-                        ? "No shell"
-                        : "Select a workspace"}
-          </span>
+                    : workspace
+                      ? "No shell"
+                      : "Select a workspace"}
+            </span>
+          )}
           <button
             className="terminal-pane__icon-btn"
-            disabled={!workspace || !activeTerminalTabId}
             onClick={() => {
-              if (workspace && activeTerminalTabId) {
-                clearTerminalBuffer(workspace.id, activeTerminalTabId);
-              }
+              setTerminalPaneOpen(false);
             }}
             type="button"
-            title="Clear terminal"
-          >
-            <Trash2 size={14} />
-          </button>
-          <button
-            className="terminal-pane__icon-btn"
-            disabled={!workspace || !activeTerminalTabId}
-            onClick={() => {
-              if (workspace && activeTerminalTabId) {
-                void restartTerminalTab(workspace.id, activeTerminalTabId);
-              }
-            }}
-            type="button"
-            title="Restart shell"
-          >
-            <RotateCcw size={14} />
-          </button>
-          <button
-            className="terminal-pane__icon-btn"
-            disabled={!workspace || !activeTerminalTabId}
-            onClick={() => {
-              if (workspace && activeTerminalTabId) {
-                void closeTerminalTab(workspace.id, activeTerminalTabId);
-              }
-            }}
-            type="button"
-            title="Close terminal tab"
+            title="Hide terminal pane"
           >
             <X size={14} />
           </button>
@@ -360,6 +427,37 @@ export function TerminalPane({ workspace }: TerminalPaneProps) {
       <div className="terminal-pane__viewport">
         <div className="terminal-pane__surface" ref={containerRef} />
       </div>
+
+      {tabContextMenu && (
+        <ContextMenu
+          x={tabContextMenu.x}
+          y={tabContextMenu.y}
+          items={[
+            {
+              label: "Rename terminal",
+              onClick: () => {
+                setRenamingTabId(tabContextMenu.tabId);
+              },
+            },
+          ]}
+          onClose={() => setTabContextMenu(null)}
+        />
+      )}
+
+      {workspace && renamingTabId && (
+        <PromptModal
+          title="Rename terminal"
+          initialValue={getTerminalTabLabel(
+            renamingTab?.title,
+            Math.max(renamingTabIndex, 0),
+          )}
+          onConfirm={(value) => {
+            renameTerminalTab(workspace.id, renamingTabId, value);
+            setRenamingTabId(null);
+          }}
+          onCancel={() => setRenamingTabId(null)}
+        />
+      )}
     </section>
   );
 }

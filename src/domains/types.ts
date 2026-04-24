@@ -236,6 +236,7 @@ export interface TerminalSessionState {
   id: string;
   status: TerminalConnectionState;
   buffer: string;
+  title?: string;
   activeCommand?: TerminalCommandState;
   lastCommand?: TerminalCommandState;
   error?: string;

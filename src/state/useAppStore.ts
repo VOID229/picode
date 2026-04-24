@@ -161,6 +161,11 @@ interface AppStoreState {
     terminalTabId: string,
   ) => Promise<void>;
   createTerminalTab: (workspaceId: string) => Promise<string>;
+  renameTerminalTab: (
+    workspaceId: string,
+    terminalTabId: string,
+    title: string,
+  ) => void;
   setActiveTerminalTab: (workspaceId: string, terminalTabId: string) => void;
   clearTerminalBuffer: (workspaceId: string, terminalTabId: string) => void;
   restartTerminalTab: (
@@ -190,14 +195,8 @@ interface AppStoreState {
   refreshRuntimeHealth: () => Promise<void>;
   refreshWorkspaceRuntimeCatalog: (workspaceId: string) => Promise<void>;
   setComposerDraft: (sessionId: string, draft: string) => void;
-  setComposerImages: (
-    sessionId: string,
-    images: ComposerImageDraft[],
-  ) => void;
-  addComposerImages: (
-    sessionId: string,
-    images: ComposerImageDraft[],
-  ) => void;
+  setComposerImages: (sessionId: string, images: ComposerImageDraft[]) => void;
+  addComposerImages: (sessionId: string, images: ComposerImageDraft[]) => void;
   removeComposerImage: (sessionId: string, imageId: string) => void;
   clearComposerDraft: (sessionId: string) => void;
   clearComposerImages: (sessionId: string) => void;
@@ -698,12 +697,6 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
     await ensureTerminalSessionCommand({ workspaceId, terminalTabId });
   },
   async closeTerminalTab(workspaceId, terminalTabId) {
-    try {
-      await closeTerminalSessionCommand({ workspaceId, terminalTabId });
-    } catch {
-      // Ignore missing/stale PTY errors when closing local UI state.
-    }
-
     set((store) => {
       const workspaceTerminals = store.terminals[workspaceId];
       if (!workspaceTerminals) {
@@ -720,6 +713,12 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
         },
       };
     });
+
+    try {
+      await closeTerminalSessionCommand({ workspaceId, terminalTabId });
+    } catch {
+      // Ignore missing/stale PTY errors when closing local UI state.
+    }
   },
   async createTerminalTab(workspaceId) {
     const terminalTabId = createTerminalTabId();
@@ -738,6 +737,33 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
     }));
     await get().ensureTerminalSession(workspaceId, terminalTabId);
     return terminalTabId;
+  },
+  renameTerminalTab(workspaceId, terminalTabId, title) {
+    set((store) => {
+      const workspaceTerminals = store.terminals[workspaceId];
+      const terminal = workspaceTerminals?.tabs[terminalTabId];
+      if (!workspaceTerminals || !terminal) {
+        return store;
+      }
+
+      const nextTitle = title.trim();
+
+      return {
+        terminals: {
+          ...store.terminals,
+          [workspaceId]: {
+            ...workspaceTerminals,
+            tabs: {
+              ...workspaceTerminals.tabs,
+              [terminalTabId]: {
+                ...terminal,
+                title: nextTitle || undefined,
+              },
+            },
+          },
+        },
+      };
+    });
   },
   setActiveTerminalTab(workspaceId, terminalTabId) {
     set((store) => {
@@ -784,6 +810,9 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
     });
   },
   async restartTerminalTab(workspaceId, terminalTabId) {
+    const currentTitle =
+      get().terminals[workspaceId]?.tabs[terminalTabId]?.title;
+
     await get().closeTerminalTab(workspaceId, terminalTabId);
     set((store) => ({
       terminals: {
@@ -799,7 +828,10 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
               ensureWorkspaceTerminal(store.terminals, workspaceId),
               terminalTabId,
             ).tabs,
-            [terminalTabId]: createTerminalState(terminalTabId),
+            [terminalTabId]: {
+              ...createTerminalState(terminalTabId),
+              title: currentTitle,
+            },
           },
         },
       },
@@ -1266,10 +1298,11 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
   },
   applyTerminalEvent(event) {
     set((store) => {
-      const workspaceTerminals = upsertTerminalTab(
-        ensureWorkspaceTerminal(store.terminals, event.workspaceId),
-        event.terminalTabId,
-      );
+      const workspaceTerminals = store.terminals[event.workspaceId];
+      if (!workspaceTerminals?.tabs[event.terminalTabId]) {
+        return store;
+      }
+
       const current = workspaceTerminals.tabs[event.terminalTabId];
 
       switch (event.type) {

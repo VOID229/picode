@@ -784,77 +784,177 @@ body {
   flex-direction: column;
   min-height: 0;
   overflow: hidden;
-  transition: flex-basis 0.18s ease;
-  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  background: #121212;
+  contain: layout paint;
 }
 
 .terminal-pane--open {
-  flex-basis: 260px;
+  flex-basis: 276px;
 }
 
 .terminal-pane__meta {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  padding: 10px 18px 8px;
-  color: #9e9e98;
-  font-size: 0.78rem;
+  gap: 12px;
+  min-height: 38px;
+  padding: 0 10px 0 12px;
+  color: #8d8d88;
+  font-size: 0.76rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  background: #101010;
+}
+
+.terminal-pane__tabs-wrap {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
 }
 
 .terminal-pane__tabs {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 4px;
   min-width: 0;
+  flex: 0 1 auto;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+.terminal-pane__tabs::-webkit-scrollbar {
+  display: none;
 }
 
 .terminal-pane__tab {
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.03);
-  color: #bcbcb7;
-  border-radius: 999px;
-  padding: 5px 10px;
-  font-size: 0.78rem;
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  min-width: 0;
+  max-width: 240px;
+  height: 30px;
+  padding: 0 4px 0 10px;
+  border-radius: 7px;
+  background: transparent;
+  color: #84847f;
+  transition:
+    background 0.14s ease,
+    color 0.14s ease;
+}
+
+.terminal-pane__tab:hover {
+  background: rgba(255, 255, 255, 0.035);
+  color: #c9c9c3;
+}
+
+.terminal-pane__tab--active,
+.terminal-pane__tab--active:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: #efefe9;
+}
+
+.terminal-pane__tab-trigger {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
   cursor: pointer;
-  max-width: 220px;
+}
+
+.terminal-pane__tab-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  margin-left: 4px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: #777772;
+  cursor: pointer;
+  opacity: 0;
+  transition:
+    background 0.14s ease,
+    color 0.14s ease,
+    opacity 0.14s ease;
+}
+
+.terminal-pane__tab:hover .terminal-pane__tab-close,
+.terminal-pane__tab:focus-within .terminal-pane__tab-close,
+.terminal-pane__tab--active .terminal-pane__tab-close {
+  opacity: 1;
+}
+
+.terminal-pane__tab-close:hover,
+.terminal-pane__tab-close:focus-visible {
+  background: rgba(255, 255, 255, 0.08);
+  color: #efefe9;
+  outline: none;
+}
+
+.terminal-pane__tab-label {
+  display: block;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.terminal-pane__tab--active {
-  background: rgba(255, 255, 255, 0.08);
-  color: #f2f0eb;
 }
 
 .terminal-pane__actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 2px;
+  flex-shrink: 0;
+  min-width: 0;
 }
 
 .terminal-pane__status {
+  max-width: min(34vw, 360px);
+  margin-right: 6px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  color: #71716c;
 }
 
 .terminal-pane__icon-btn {
   width: 28px;
   height: 28px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.03);
-  color: #cfcfca;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: #7f7f7a;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
+  transition:
+    background 0.14s ease,
+    color 0.14s ease;
+}
+
+.terminal-pane__icon-btn:hover:not(:disabled),
+.terminal-pane__icon-btn:focus-visible:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+  color: #efefe9;
+  outline: none;
 }
 
 .terminal-pane__icon-btn:disabled {
-  opacity: 0.45;
+  opacity: 0.38;
   cursor: default;
 }
 
@@ -862,15 +962,15 @@ body {
   position: relative;
   flex: 1;
   min-height: 0;
-  height: calc(100% - 36px);
-  padding: 0 12px 12px;
+  padding: 0;
+  background: #121212;
 }
 
 .terminal-pane__surface {
   width: 100%;
   height: 100%;
   overflow: hidden;
-  border-radius: 10px;
+  border-radius: 0;
   background: #121212;
 }
 
