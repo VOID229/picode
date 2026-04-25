@@ -353,6 +353,8 @@ pub struct LayoutPreferences {
 #[serde(rename_all = "camelCase")]
 pub struct AppPreferences {
     pub theme: String,
+    #[serde(default = "default_model_selection_scope")]
+    pub model_selection_scope: String,
     #[serde(default = "default_provider_id")]
     pub provider_id: String,
     #[serde(default = "default_model_id")]
@@ -880,6 +882,10 @@ fn default_show_raw_tool_calls() -> bool {
     false
 }
 
+fn default_model_selection_scope() -> String {
+    "thread".to_string()
+}
+
 fn default_provider_status() -> ProviderStatus {
     ProviderStatus::Unavailable
 }
@@ -988,6 +994,7 @@ pub fn default_providers() -> Vec<ProviderOption> {
 pub fn default_preferences() -> AppPreferences {
     AppPreferences {
         theme: "dark".to_string(),
+        model_selection_scope: default_model_selection_scope(),
         provider_id: default_provider_id(),
         model_id: default_model_id(),
         title_model_provider_id: default_provider_id(),

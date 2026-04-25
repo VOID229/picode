@@ -8,6 +8,7 @@ export type ThemeId =
 
 export type ApprovalMode = "supervised" | "auto-accept-edits" | "full-access";
 export type PromptMode = "plan" | "build";
+export type ModelSelectionScope = "global" | "thread";
 export type ProviderStatus =
   | "ready"
   | "requires_oauth"
@@ -257,6 +258,7 @@ export interface LayoutPreferences {
 
 export interface AppPreferences {
   theme: ThemeId;
+  modelSelectionScope: ModelSelectionScope;
   providerId: string;
   modelId: string;
   titleModelProviderId: string;

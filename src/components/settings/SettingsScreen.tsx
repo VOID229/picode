@@ -683,6 +683,45 @@ export function SettingsScreen() {
                     control={<Toggle checked={true} />}
                   />
                   <SettingRow
+                    label="Model selection memory"
+                    description="Choose whether provider, model, and reasoning stay global or follow the last configuration saved on each thread."
+                    control={
+                      <button
+                        style={{
+                          ...btnStyle,
+                          padding: 0,
+                          border: "none",
+                          background: "transparent",
+                        }}
+                        onClick={() => {
+                          if (!state) {
+                            return;
+                          }
+
+                          void updatePreferences({
+                            ...state.preferences,
+                            modelSelectionScope:
+                              state.preferences.modelSelectionScope === "global"
+                                ? "thread"
+                                : "global",
+                          });
+                        }}
+                        title={
+                          state?.preferences.modelSelectionScope === "global"
+                            ? "Global selection is on"
+                            : "Per-thread selection is on"
+                        }
+                        type="button"
+                      >
+                        <Toggle
+                          checked={
+                            state?.preferences.modelSelectionScope === "global"
+                          }
+                        />
+                      </button>
+                    }
+                  />
+                  <SettingRow
                     label="Auto thread titles"
                     description="Generate a short thread title after the first successful exchange when the thread is still named New thread."
                     control={

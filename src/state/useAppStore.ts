@@ -368,6 +368,13 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
 
     initializePromise = (async () => {
       const payload = await bootstrapState();
+      set({
+        isBootstrapping: false,
+        state: payload.state,
+        git: payload.git,
+        connectionReady: true,
+      });
+
       let runtimePayload:
         | Awaited<ReturnType<typeof bootstrapRuntime>>
         | undefined;
@@ -382,14 +389,7 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
 
       hasInitialized = true;
 
-      set({
-        isBootstrapping: false,
-        state: payload.state,
-        git: payload.git,
-        connectionReady: true,
-        runtimeInstall: runtimePayload?.install,
-        runtimeGlobalError,
-      });
+      set({ runtimeInstall: runtimePayload?.install, runtimeGlobalError });
 
       const activeWorkspaceId = payload.state.activeWorkspaceId;
       if (runtimePayload?.install.status === "ready" && activeWorkspaceId) {
@@ -463,8 +463,13 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
       sessionId,
     });
     set({ state });
-    if (get().runtimeInstall?.status === "ready") {
-      await get().refreshWorkspaceRuntimeCatalog(workspaceId);
+    const store = get();
+    if (
+      store.runtimeInstall?.status === "ready" &&
+      store.workspaceCatalogStatus[workspaceId] !== "loading" &&
+      !store.workspaceCatalogLoaded[workspaceId]
+    ) {
+      void store.refreshWorkspaceRuntimeCatalog(workspaceId);
     }
   },
   async createWorkspace(path, name) {

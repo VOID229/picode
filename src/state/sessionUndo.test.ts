@@ -61,6 +61,7 @@ function createState(): PersistedAppState {
     ],
     preferences: {
       theme: "dark",
+      modelSelectionScope: "thread",
       providerId: "openai-codex",
       modelId: "gpt-5.4",
       effort: "high",

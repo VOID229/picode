@@ -87,6 +87,21 @@ export function ConversationView({
 
   const runtimeInstall = useAppStore((store) => store.runtimeInstall);
   const stateProviders = useAppStore((store) => store.state?.providers ?? []);
+  const modelSelectionScope = useAppStore(
+    (store) => store.state?.preferences.modelSelectionScope ?? "thread",
+  );
+  const globalProviderId = useAppStore(
+    (store) => store.state?.preferences.providerId ?? "",
+  );
+  const globalModelId = useAppStore(
+    (store) => store.state?.preferences.modelId ?? "",
+  );
+  const globalEffort = useAppStore(
+    (store) => store.state?.preferences.effort ?? "high",
+  );
+  const globalFastMode = useAppStore(
+    (store) => store.state?.preferences.fastMode ?? false,
+  );
   const workspaceCatalogs = useAppStore((store) => store.workspaceCatalogs);
   const workspaceCatalogStatus = useAppStore(
     (store) => store.workspaceCatalogStatus,
@@ -386,7 +401,15 @@ export function ConversationView({
     const workspaceProviders = workspaceCatalogs[workspace.id] ?? [];
     const displayProviders =
       workspaceProviders.length > 0 ? workspaceProviders : stateProviders;
-    const selection = resolveSessionSelection(session, workspace);
+    const selection =
+      modelSelectionScope === "global"
+        ? {
+            providerId: globalProviderId,
+            modelId: globalModelId,
+            effort: globalEffort,
+            fastMode: globalFastMode,
+          }
+        : resolveSessionSelection(session, workspace);
     const capabilities = resolveComposerCapabilities({
       providers: displayProviders,
       selection,
@@ -413,6 +436,11 @@ export function ConversationView({
     });
   }, [
     session,
+    globalEffort,
+    globalFastMode,
+    globalModelId,
+    globalProviderId,
+    modelSelectionScope,
     stateProviders,
     updateWorkspaceSettings,
     workspace,
@@ -437,7 +465,15 @@ export function ConversationView({
   const workspaceCatalogError = workspaceCatalogErrors[workspace.id];
   const displayProviders =
     workspaceProviders.length > 0 ? workspaceProviders : stateProviders;
-  const selection = resolveSessionSelection(session, workspace);
+  const selection =
+    modelSelectionScope === "global"
+      ? {
+          providerId: globalProviderId,
+          modelId: globalModelId,
+          effort: globalEffort,
+          fastMode: globalFastMode,
+        }
+      : resolveSessionSelection(session, workspace);
   const activeProvider = displayProviders.find(
     (provider) => provider.id === selection.providerId,
   );
@@ -455,7 +491,9 @@ export function ConversationView({
   );
   const normalizedSelection = composerCapabilities.normalizedSelection;
 
-  const hasWorkspaceCatalog = workspaceProviders.length > 0;
+  const selectableProviders =
+    workspaceProviders.length > 0 ? workspaceProviders : displayProviders;
+  const hasSelectableCatalog = selectableProviders.length > 0;
   const catalogLoaded = workspaceCatalogLoaded[workspace.id] ?? false;
   const sendDisabledReason =
     runtimeInstall?.status === "missing"
@@ -539,6 +577,7 @@ export function ConversationView({
                 turn={turn}
                 workspaceId={workspace.id}
                 sessionId={session.id}
+                isPaused={Boolean(activeQuestionRequest)}
                 onResolveApproval={resolveApproval}
                 onUndo={handleUndo}
               />
@@ -672,7 +711,7 @@ export function ConversationView({
                 <div
                   className="composer-select-wrapper pointer"
                   onClick={() => {
-                    if (hasWorkspaceCatalog) {
+                    if (hasSelectableCatalog) {
                       toggleComposerMenu("provider");
                     }
                   }}
@@ -686,7 +725,7 @@ export function ConversationView({
                           : "Runtime unavailable")}
                   </span>
                   <ChevronIcon />
-                  {providerDropdownOpen && hasWorkspaceCatalog && (
+                  {providerDropdownOpen && hasSelectableCatalog && (
                     <>
                       <div
                         style={{
@@ -704,7 +743,7 @@ export function ConversationView({
                         className="custom-dropdown"
                         style={{ minWidth: "200px" }}
                       >
-                        {workspaceProviders.map((provider) => (
+                        {selectableProviders.map((provider) => (
                           <div
                             key={provider.id}
                             className="custom-dropdown-item"
@@ -744,7 +783,7 @@ export function ConversationView({
                 <div
                   className="composer-select-wrapper pointer"
                   onClick={() => {
-                    if (hasWorkspaceCatalog) {
+                    if (hasSelectableCatalog) {
                       toggleComposerMenu("model");
                     }
                   }}
@@ -759,7 +798,7 @@ export function ConversationView({
                           : "Runtime unavailable")}
                   </span>
                   <ChevronIcon />
-                  {modelDropdownOpen && hasWorkspaceCatalog && (
+                  {modelDropdownOpen && hasSelectableCatalog && (
                     <>
                       <div
                         style={{
@@ -1194,10 +1233,12 @@ function TurnRenderer({
   sessionId,
   onResolveApproval,
   onUndo,
+  isPaused,
 }: {
   turn: Turn;
   workspaceId: string;
   sessionId: string;
+  isPaused: boolean;
   onResolveApproval: (
     workspaceId: string,
     sessionId: string,
@@ -1266,7 +1307,10 @@ function TurnRenderer({
 
   // For turns with tool activity, keep the elapsed-time header anchored above
   // the activity list while work is still streaming and after it completes.
-  if (hasToolActivity && turn.startTime) {
+  if (
+    (hasToolActivity || (!turn.isCompleted && turn.startTime)) &&
+    turn.startTime
+  ) {
     // Split into: user message, worked-for-block wrapping tools, then final assistant text + files changed
     const userSegments: React.ReactNode[] = [];
     const toolContent: React.ReactNode[] = [];
@@ -1351,12 +1395,18 @@ function TurnRenderer({
             startTime={turn.startTime}
             endTime={turn.isCompleted ? turn.endTime : undefined}
             isLive={!turn.isCompleted}
+            paused={isPaused}
           >
             <div
               style={{ display: "flex", flexDirection: "column", gap: "8px" }}
             >
               {toolContent}
             </div>
+          </WorkedForBlock>
+        )}
+        {toolContent.length === 0 && !turn.isCompleted && (
+          <WorkedForBlock startTime={turn.startTime} isLive paused={isPaused}>
+            <LiveThinkingRow label="Starting" />
           </WorkedForBlock>
         )}
         {finalTextSegments}

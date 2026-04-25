@@ -1272,7 +1272,8 @@ fn prompt_for_mode(prompt: &str, mode: &PromptMode) -> String {
                 "Before writing the plan, ground yourself in the task: ask clarifying questions with request_user_input when the requirements are ambiguous, or inspect relevant files when local code context is needed.\n",
                 "Only after you understand the core grounding, send exactly one assistant message containing one <proposed_plan> block and no text outside it.\n",
                 "Inside the block, provide concise markdown with a title, summary, key changes, test plan, and assumptions.\n",
-                "Then immediately call request_user_input with exactly two options before ending the turn.\n",
+                "Do not call request_user_input to ask about implementation until after the complete <proposed_plan> block has been sent to the user.\n",
+                "After the full plan message is sent, immediately call request_user_input with exactly two options before ending the turn.\n",
                 "The request_user_input call must ask whether to proceed with the proposed plan and must provide exactly two options: \"Implement plan\" and \"No, do something differently\".\n",
                 "The second option must clearly allow the user to free-type what should change, and you must wait for that tool result before doing anything else.\n\n",
                 "User request:\n{}"
@@ -2562,19 +2563,40 @@ async fn fetch_workspace_catalog_and_normalize(
 
     let (selected_provider_id, selected_model_id) = {
         let mut state = shared.state.lock().await;
-        let workspace = state
-            .workspaces
-            .iter_mut()
-            .find(|workspace| workspace.id == workspace_id)
-            .context("workspace not found")?;
+        let global_selection = state.preferences.model_selection_scope == "global";
 
-        let changed = normalize_workspace_selection(
-            &mut workspace.provider_id,
-            &mut workspace.model_id,
-            &providers,
-        );
-        let selected_provider_id = workspace.provider_id.clone();
-        let selected_model_id = workspace.model_id.clone();
+        let (selected_provider_id, selected_model_id, changed) = if global_selection {
+            state
+                .workspaces
+                .iter()
+                .find(|workspace| workspace.id == workspace_id)
+                .context("workspace not found")?;
+            let mut provider_id = state.preferences.provider_id.clone();
+            let mut model_id = state.preferences.model_id.clone();
+            let changed =
+                normalize_workspace_selection(&mut provider_id, &mut model_id, &providers);
+            if changed {
+                state.preferences.provider_id = provider_id.clone();
+                state.preferences.model_id = model_id.clone();
+            }
+            (provider_id, model_id, changed)
+        } else {
+            let workspace = state
+                .workspaces
+                .iter_mut()
+                .find(|workspace| workspace.id == workspace_id)
+                .context("workspace not found")?;
+            let changed = normalize_workspace_selection(
+                &mut workspace.provider_id,
+                &mut workspace.model_id,
+                &providers,
+            );
+            (
+                workspace.provider_id.clone(),
+                workspace.model_id.clone(),
+                changed,
+            )
+        };
 
         if changed {
             storage::save(app, &state)?;
@@ -2919,6 +2941,15 @@ async fn run_prompt_stream(app: AppHandle, shared: AppState, payload: SendPrompt
 
         let (workspace_path, provider_id, model_id, effort, fast_mode) = {
             let mut state = shared.state.lock().await;
+            let global_selection =
+                (state.preferences.model_selection_scope == "global").then(|| {
+                    (
+                        state.preferences.provider_id.clone(),
+                        state.preferences.model_id.clone(),
+                        state.preferences.effort.clone(),
+                        state.preferences.fast_mode,
+                    )
+                });
             let workspace = state
                 .workspaces
                 .iter_mut()
@@ -2929,6 +2960,13 @@ async fn run_prompt_stream(app: AppHandle, shared: AppState, payload: SendPrompt
                 .iter_mut()
                 .find(|session| session.id == session_id)
                 .context("session not found")?;
+
+            if let Some((provider_id, model_id, effort, fast_mode)) = global_selection {
+                session.selection.provider_id = provider_id;
+                session.selection.model_id = model_id;
+                session.selection.effort = effort;
+                session.selection.fast_mode = fast_mode;
+            }
 
             normalize_session_selection(&mut session.selection, &catalog.providers);
 

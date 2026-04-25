@@ -6,12 +6,45 @@ interface WorkedForBlockProps {
   startTime: string;
   endTime?: string;
   isLive?: boolean;
+  paused?: boolean;
   children: React.ReactNode;
 }
 
-function formatDuration(startIso: string, endIso: string): string {
-  const start = new Date(startIso).getTime();
+const pauseStateByStart = new Map<
+  string,
+  { activeSince?: number; accumulatedMs: number }
+>();
+
+function resolvePauseAdjustedEnd(
+  startIso: string,
+  endIso: string,
+  paused: boolean,
+) {
   const end = new Date(endIso).getTime();
+  const state = pauseStateByStart.get(startIso) ?? { accumulatedMs: 0 };
+
+  if (paused && !state.activeSince) {
+    state.activeSince = end;
+  } else if (!paused && state.activeSince) {
+    state.accumulatedMs += Math.max(0, end - state.activeSince);
+    state.activeSince = undefined;
+  }
+
+  pauseStateByStart.set(startIso, state);
+  return (
+    end -
+    state.accumulatedMs -
+    (state.activeSince ? end - state.activeSince : 0)
+  );
+}
+
+function formatDuration(
+  startIso: string,
+  endIso: string,
+  paused: boolean,
+): string {
+  const start = new Date(startIso).getTime();
+  const end = resolvePauseAdjustedEnd(startIso, endIso, paused);
   const diffMs = Math.max(0, end - start);
   const totalSeconds = Math.round(diffMs / 1000);
 
@@ -28,14 +61,15 @@ export function WorkedForBlock({
   startTime,
   endTime,
   isLive = false,
+  paused = false,
   children,
 }: WorkedForBlockProps) {
   const [expanded, setExpanded] = useState(false);
   const [now, setNow] = useState(() => new Date().toISOString());
-  const duration = formatDuration(startTime, endTime ?? now);
+  const duration = formatDuration(startTime, endTime ?? now, paused);
 
   useEffect(() => {
-    if (!isLive || endTime) {
+    if (!isLive || endTime || paused) {
       return;
     }
 
@@ -44,7 +78,7 @@ export function WorkedForBlock({
     }, 1000);
 
     return () => window.clearInterval(interval);
-  }, [endTime, isLive]);
+  }, [endTime, isLive, paused]);
 
   return (
     <div className="worked-for-block">

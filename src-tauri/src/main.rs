@@ -182,30 +182,46 @@ async fn update_workspace_settings(
     payload: UpdateWorkspaceSettingsPayload,
 ) -> Result<PersistedAppState, String> {
     let mut state = shared.state.lock().await;
-    let workspace = state
-        .workspaces
-        .iter_mut()
-        .find(|workspace| workspace.id == payload.workspace_id)
-        .context("workspace not found")
-        .map_err(|error| error.to_string())?;
-    workspace.approval_mode = payload.approval_mode;
-    workspace.provider_id = payload.provider_id;
-    workspace.model_id = payload.model_id;
-    workspace.effort = payload.effort.unwrap_or(workspace.effort.clone());
-    workspace.fast_mode = payload.fast_mode.unwrap_or(workspace.fast_mode);
-    workspace.policy = payload.policy;
-
-    if let Some(session_id) = payload.session_id {
-        if let Some(session) = workspace
-            .sessions
+    let global_selection = state.preferences.model_selection_scope == "global";
+    let provider_id = payload.provider_id;
+    let model_id = payload.model_id;
+    let (effort, fast_mode) = {
+        let workspace = state
+            .workspaces
             .iter_mut()
-            .find(|session| session.id == session_id)
-        {
-            session.selection.provider_id = workspace.provider_id.clone();
-            session.selection.model_id = workspace.model_id.clone();
-            session.selection.effort = workspace.effort.clone();
-            session.selection.fast_mode = workspace.fast_mode;
+            .find(|workspace| workspace.id == payload.workspace_id)
+            .context("workspace not found")
+            .map_err(|error| error.to_string())?;
+        workspace.approval_mode = payload.approval_mode;
+        let effort = payload.effort.unwrap_or(workspace.effort.clone());
+        let fast_mode = payload.fast_mode.unwrap_or(workspace.fast_mode);
+        workspace.provider_id = provider_id.clone();
+        workspace.model_id = model_id.clone();
+        workspace.effort = effort.clone();
+        workspace.fast_mode = fast_mode;
+        workspace.policy = payload.policy;
+
+        if let Some(session_id) = payload.session_id {
+            if let Some(session) = workspace
+                .sessions
+                .iter_mut()
+                .find(|session| session.id == session_id)
+            {
+                session.selection.provider_id = provider_id.clone();
+                session.selection.model_id = model_id.clone();
+                session.selection.effort = effort.clone();
+                session.selection.fast_mode = fast_mode;
+            }
         }
+
+        (effort, fast_mode)
+    };
+
+    if global_selection {
+        state.preferences.provider_id = provider_id.clone();
+        state.preferences.model_id = model_id.clone();
+        state.preferences.effort = effort.clone();
+        state.preferences.fast_mode = fast_mode;
     }
     storage::save(&app, &state).map_err(|error| error.to_string())?;
     Ok(state.clone())
