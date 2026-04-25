@@ -2863,6 +2863,8 @@ pub async fn launch_prompt_stream(
 
     {
         let mut state = shared.state.lock().await;
+        let should_commit_used_selection = state.preferences.model_selection_scope == "thread"
+            && state.preferences.thread_model_memory == "used";
         let workspace = state
             .workspaces
             .iter_mut()
@@ -2873,6 +2875,12 @@ pub async fn launch_prompt_stream(
             .iter_mut()
             .find(|session| session.id == payload.session_id)
             .context("session not found")?;
+
+        if let Some(selection) = payload.selection.clone() {
+            if should_commit_used_selection {
+                session.selection = selection;
+            }
+        }
 
         if !session.timeline.iter().any(|item| {
             matches!(
@@ -2941,14 +2949,25 @@ async fn run_prompt_stream(app: AppHandle, shared: AppState, payload: SendPrompt
 
         let (workspace_path, provider_id, model_id, effort, fast_mode) = {
             let mut state = shared.state.lock().await;
-            let global_selection =
-                (state.preferences.model_selection_scope == "global").then(|| {
+            let global_selection = state.preferences.model_selection_scope == "global";
+            let incoming_selection = payload.selection.clone();
+            let preferred_selection = global_selection
+                .then(|| {
                     (
                         state.preferences.provider_id.clone(),
                         state.preferences.model_id.clone(),
                         state.preferences.effort.clone(),
                         state.preferences.fast_mode,
                     )
+                }).or_else(|| {
+                    incoming_selection.map(|selection| {
+                        (
+                            selection.provider_id,
+                            selection.model_id,
+                            selection.effort,
+                            selection.fast_mode,
+                        )
+                    })
                 });
             let workspace = state
                 .workspaces
@@ -2961,27 +2980,51 @@ async fn run_prompt_stream(app: AppHandle, shared: AppState, payload: SendPrompt
                 .find(|session| session.id == session_id)
                 .context("session not found")?;
 
-            if let Some((provider_id, model_id, effort, fast_mode)) = global_selection {
-                session.selection.provider_id = provider_id;
-                session.selection.model_id = model_id;
-                session.selection.effort = effort;
+            if !global_selection {
+                if let Some((provider_id, model_id, effort, fast_mode)) = preferred_selection.clone()
+                {
+                    session.selection.provider_id = provider_id;
+                    session.selection.model_id = model_id;
+                    session.selection.effort = effort;
+                    session.selection.fast_mode = fast_mode;
+                }
+
+                normalize_session_selection(&mut session.selection, &catalog.providers);
+            }
+
+            let (provider_id, model_id, effort, fast_mode) = if let Some((
+                mut provider_id,
+                mut model_id,
+                effort,
+                fast_mode,
+            )) = preferred_selection
+            {
+                normalize_workspace_selection(&mut provider_id, &mut model_id, &catalog.providers);
+                (provider_id, model_id, effort, fast_mode)
+            } else {
+                (
+                    session.selection.provider_id.clone(),
+                    session.selection.model_id.clone(),
+                    session.selection.effort.clone(),
+                    session.selection.fast_mode,
+                )
+            };
+
+            if !global_selection {
+                session.selection.provider_id = provider_id.clone();
+                session.selection.model_id = model_id.clone();
+                session.selection.effort = effort.clone();
                 session.selection.fast_mode = fast_mode;
             }
 
-            normalize_session_selection(&mut session.selection, &catalog.providers);
-
-            session.runtime.provider_id = Some(session.selection.provider_id.clone());
-            session.runtime.model_id = Some(session.selection.model_id.clone());
+            session.runtime.provider_id = Some(provider_id.clone());
+            session.runtime.model_id = Some(model_id.clone());
             session.runtime.pi_session_file = Some(session_file_string.clone());
             session.runtime.last_known_ready = true;
             session.runtime.last_error = None;
             session.updated_at = now_iso();
 
             let workspace_path = expand_user_path(&workspace.path);
-            let provider_id = session.selection.provider_id.clone();
-            let model_id = session.selection.model_id.clone();
-            let effort = session.selection.effort.clone();
-            let fast_mode = session.selection.fast_mode;
             storage::save(&app, &state)?;
 
             (workspace_path, provider_id, model_id, effort, fast_mode)

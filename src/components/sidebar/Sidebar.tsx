@@ -31,20 +31,23 @@ import type {
 } from "../../domains/types";
 import { cn } from "../../lib/cn";
 import { copyTextToClipboard } from "../../lib/clipboard";
+import {
+  isMacPlatform,
+  isPrimaryShortcut,
+  isThreadShortcut,
+} from "../../lib/keyboardShortcuts";
 import { useAppStore } from "../../state/useAppStore";
 import { ContextMenu, type ContextMenuItem } from "../layout/ContextMenu";
-import { ProjectPicker } from "./ProjectPicker";
 import { PromptModal } from "../layout/PromptModal";
 
 interface SidebarProps {
   state: PersistedAppState;
+  onAddProject: () => void;
 }
 
-export function Sidebar({ state }: SidebarProps) {
+export function Sidebar({ state, onAddProject }: SidebarProps) {
   const [query, setQuery] = useState("");
-  const [isPickerOpen, setIsPickerOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
-  const createWorkspace = useAppStore((store) => store.createWorkspace);
   const moveWorkspace = useAppStore((store) => store.moveWorkspace);
 
   const [projectSortOrder, setProjectSortOrder] = useState<
@@ -66,10 +69,12 @@ export function Sidebar({ state }: SidebarProps) {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Meta" || e.key === "Control") setIsModifierHeld(true);
+      if (isPrimaryShortcut(e)) setIsModifierHeld(true);
     };
     const handleKeyUp = (e: KeyboardEvent) => {
-      if (e.key === "Meta" || e.key === "Control") setIsModifierHeld(false);
+      if (e.key === (isMacPlatform() ? "Meta" : "Control")) {
+        setIsModifierHeld(false);
+      }
     };
     const handleBlur = () => setIsModifierHeld(false);
 
@@ -348,7 +353,7 @@ export function Sidebar({ state }: SidebarProps) {
             <Plus
               size={14}
               className="pointer action-icon"
-              onClick={() => setIsPickerOpen(true)}
+              onClick={onAddProject}
             />
           </div>
         </div>
@@ -430,16 +435,6 @@ export function Sidebar({ state }: SidebarProps) {
           Settings
         </Link>
       </div>
-
-      {isPickerOpen && (
-        <ProjectPicker
-          onClose={() => setIsPickerOpen(false)}
-          onSelect={(path) => {
-            void createWorkspace(path);
-            setIsPickerOpen(false);
-          }}
-        />
-      )}
     </aside>
   );
 }
@@ -594,7 +589,7 @@ function ProjectNode({
     if (workspace.id !== state.activeWorkspaceId) return;
 
     const handleShortcut = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && /^[1-9]$/.test(e.key)) {
+      if (isThreadShortcut(e) && /^[1-9]$/.test(e.key)) {
         const index = parseInt(e.key, 10) - 1;
         if (visibleSessions[index]) {
           e.preventDefault();

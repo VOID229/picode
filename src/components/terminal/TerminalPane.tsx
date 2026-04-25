@@ -4,6 +4,7 @@ import "@xterm/xterm/css/xterm.css";
 import { Plus, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { WorkspaceRecord } from "../../domains/types";
+import { isTerminalShortcut } from "../../lib/keyboardShortcuts";
 import { useAppStore } from "../../state/useAppStore";
 import { ContextMenu } from "../layout/ContextMenu";
 import { PromptModal } from "../layout/PromptModal";
@@ -304,6 +305,38 @@ export function TerminalPane({ workspace }: TerminalPaneProps) {
     return () =>
       window.removeEventListener("keydown", handleRenameShortcut, true);
   }, [activeTerminalTabId, paneOpen, workspace]);
+
+  useEffect(() => {
+    const handleTerminalTabShortcut = (event: KeyboardEvent) => {
+      if (!paneOpen || !workspace || !isTerminalShortcut(event)) {
+        return;
+      }
+
+      if (!/^[1-9]$/.test(event.key)) {
+        return;
+      }
+
+      const tabId = workspaceTerminals?.tabOrder[parseInt(event.key, 10) - 1];
+      if (!tabId) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      setActiveTerminalTab(workspace.id, tabId);
+      scheduleTerminalLayout({ focus: true });
+    };
+
+    window.addEventListener("keydown", handleTerminalTabShortcut, true);
+    return () =>
+      window.removeEventListener("keydown", handleTerminalTabShortcut, true);
+  }, [
+    paneOpen,
+    scheduleTerminalLayout,
+    setActiveTerminalTab,
+    workspace,
+    workspaceTerminals?.tabOrder,
+  ]);
 
   useEffect(() => {
     const container = containerRef.current;

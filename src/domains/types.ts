@@ -9,6 +9,7 @@ export type ThemeId =
 export type ApprovalMode = "supervised" | "auto-accept-edits" | "full-access";
 export type PromptMode = "plan" | "build";
 export type ModelSelectionScope = "global" | "thread";
+export type ThreadModelMemory = "selected" | "used";
 export type ProviderStatus =
   | "ready"
   | "requires_oauth"
@@ -259,6 +260,7 @@ export interface LayoutPreferences {
 export interface AppPreferences {
   theme: ThemeId;
   modelSelectionScope: ModelSelectionScope;
+  threadModelMemory: ThreadModelMemory;
   providerId: string;
   modelId: string;
   titleModelProviderId: string;

@@ -11,6 +11,7 @@ import type {
   PiInstallStatus,
   PromptMode,
   PiRuntimeEvent,
+  SessionModelSelection,
   TerminalEvent,
   TerminalSessionState,
   TimelineItem,
@@ -163,6 +164,7 @@ interface AppStoreState {
     prompt: string,
     mode: PromptMode,
     images?: MessageImageAttachment[],
+    selection?: SessionModelSelection,
   ) => Promise<void>;
   abortPrompt: (workspaceId: string, sessionId: string) => Promise<void>;
   resolveApproval: (
@@ -640,7 +642,14 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
     set({ state });
     await get().refreshGit(workspaceId);
   },
-  async sendPrompt(workspaceId, sessionId, prompt, mode, images = []) {
+  async sendPrompt(
+    workspaceId,
+    sessionId,
+    prompt,
+    mode,
+    images = [],
+    selection,
+  ) {
     const createdAt = new Date().toISOString();
     const userMessageId = crypto.randomUUID();
     set((store) => {
@@ -675,6 +684,7 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
         prompt,
         mode,
         images,
+        selection,
       });
     } catch (error) {
       set((store) => {

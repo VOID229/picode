@@ -355,6 +355,8 @@ pub struct AppPreferences {
     pub theme: String,
     #[serde(default = "default_model_selection_scope")]
     pub model_selection_scope: String,
+    #[serde(default = "default_thread_model_memory")]
+    pub thread_model_memory: String,
     #[serde(default = "default_provider_id")]
     pub provider_id: String,
     #[serde(default = "default_model_id")]
@@ -513,6 +515,8 @@ pub struct SendPromptPayload {
     pub user_message_id: String,
     pub prompt: String,
     pub mode: PromptMode,
+    #[serde(default)]
+    pub selection: Option<SessionModelSelection>,
     #[serde(default)]
     pub images: Vec<MessageImageAttachment>,
 }
@@ -886,6 +890,10 @@ fn default_model_selection_scope() -> String {
     "thread".to_string()
 }
 
+fn default_thread_model_memory() -> String {
+    "selected".to_string()
+}
+
 fn default_provider_status() -> ProviderStatus {
     ProviderStatus::Unavailable
 }
@@ -995,6 +1003,7 @@ pub fn default_preferences() -> AppPreferences {
     AppPreferences {
         theme: "dark".to_string(),
         model_selection_scope: default_model_selection_scope(),
+        thread_model_memory: default_thread_model_memory(),
         provider_id: default_provider_id(),
         model_id: default_model_id(),
         title_model_provider_id: default_provider_id(),

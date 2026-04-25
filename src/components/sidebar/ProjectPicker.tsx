@@ -24,6 +24,7 @@ export function ProjectPicker({ onClose, onSelect }: ProjectPickerProps) {
   const [directories, setDirectories] = useState<string[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [loading, setLoading] = useState(false);
+  const dialogRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const loadDirectories = useCallback(async (path: string) => {
@@ -80,6 +81,10 @@ export function ProjectPicker({ onClose, onSelect }: ProjectPickerProps) {
   };
 
   useEffect(() => {
+    dialogRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
       if (e.key === "Backspace" && !(e.target instanceof HTMLInputElement))
@@ -105,8 +110,8 @@ export function ProjectPicker({ onClose, onSelect }: ProjectPickerProps) {
       }
     };
 
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
+    window.addEventListener("keydown", handleKeyDown, true);
+    return () => window.removeEventListener("keydown", handleKeyDown, true);
   }, [
     onClose,
     handleNavigateBack,
@@ -146,6 +151,8 @@ export function ProjectPicker({ onClose, onSelect }: ProjectPickerProps) {
       onClick={onClose}
     >
       <div
+        ref={dialogRef}
+        tabIndex={-1}
         onClick={(e) => e.stopPropagation()}
         style={{
           width: "520px",

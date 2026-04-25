@@ -80,6 +80,9 @@ export function ConversationView({
   const [lastUndoneChange, setLastUndoneChange] = useState<UndoneChange | null>(
     null,
   );
+  const [draftSelection, setDraftSelection] = useState<
+    ChatSession["selection"] | null
+  >(null);
   const [sessionStats, setSessionStats] = useState<SessionStats | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const timelineRef = useRef<HTMLDivElement>(null);
@@ -89,6 +92,9 @@ export function ConversationView({
   const stateProviders = useAppStore((store) => store.state?.providers ?? []);
   const modelSelectionScope = useAppStore(
     (store) => store.state?.preferences.modelSelectionScope ?? "thread",
+  );
+  const threadModelMemory = useAppStore(
+    (store) => store.state?.preferences.threadModelMemory ?? "selected",
   );
   const globalProviderId = useAppStore(
     (store) => store.state?.preferences.providerId ?? "",
@@ -134,6 +140,37 @@ export function ConversationView({
     (store) => store.updateWorkspaceSettings,
   );
 
+  const handleSelectionChange = useCallback(
+    (nextSelection: ChatSession["selection"]) => {
+      if (!workspace || !session) {
+        return;
+      }
+
+      if (modelSelectionScope === "thread" && threadModelMemory === "used") {
+        setDraftSelection(nextSelection);
+        return;
+      }
+
+      void updateWorkspaceSettings({
+        workspaceId: workspace.id,
+        sessionId: modelSelectionScope === "global" ? undefined : session.id,
+        approvalMode: workspace.approvalMode,
+        providerId: nextSelection.providerId,
+        modelId: nextSelection.modelId,
+        effort: nextSelection.effort,
+        fastMode: nextSelection.fastMode,
+        policy: workspace.policy,
+      });
+    },
+    [
+      modelSelectionScope,
+      session,
+      threadModelMemory,
+      updateWorkspaceSettings,
+      workspace,
+    ],
+  );
+
   const closeComposerMenus = () => {
     setProviderDropdownOpen(false);
     setModelDropdownOpen(false);
@@ -161,6 +198,7 @@ export function ConversationView({
 
   useEffect(() => {
     setLastUndoneChange(null);
+    setDraftSelection(null);
     setSessionStats(null);
   }, [workspace?.id, session?.id]);
 
@@ -212,7 +250,14 @@ export function ConversationView({
     }
 
     try {
-      await sendPrompt(workspace.id, session.id, value, currentMode, images);
+      await sendPrompt(
+        workspace.id,
+        session.id,
+        value,
+        currentMode,
+        images,
+        normalizedSelection,
+      );
       setLastUndoneChange(null);
     } catch (error) {
       setComposerDraft(session.id, value);
@@ -402,14 +447,15 @@ export function ConversationView({
     const displayProviders =
       workspaceProviders.length > 0 ? workspaceProviders : stateProviders;
     const selection =
-      modelSelectionScope === "global"
+      draftSelection ??
+      (modelSelectionScope === "global"
         ? {
             providerId: globalProviderId,
             modelId: globalModelId,
             effort: globalEffort,
             fastMode: globalFastMode,
           }
-        : resolveSessionSelection(session, workspace);
+        : resolveSessionSelection(session, workspace));
     const capabilities = resolveComposerCapabilities({
       providers: displayProviders,
       selection,
@@ -426,7 +472,7 @@ export function ConversationView({
 
     void updateWorkspaceSettings({
       workspaceId: workspace.id,
-      sessionId: session.id,
+      sessionId: modelSelectionScope === "global" ? undefined : session.id,
       approvalMode: workspace.approvalMode,
       providerId: capabilities.normalizedSelection.providerId,
       modelId: capabilities.normalizedSelection.modelId,
@@ -440,6 +486,7 @@ export function ConversationView({
     globalFastMode,
     globalModelId,
     globalProviderId,
+    draftSelection,
     modelSelectionScope,
     stateProviders,
     updateWorkspaceSettings,
@@ -466,14 +513,15 @@ export function ConversationView({
   const displayProviders =
     workspaceProviders.length > 0 ? workspaceProviders : stateProviders;
   const selection =
-    modelSelectionScope === "global"
+    draftSelection ??
+    (modelSelectionScope === "global"
       ? {
           providerId: globalProviderId,
           modelId: globalModelId,
           effort: globalEffort,
           fastMode: globalFastMode,
         }
-      : resolveSessionSelection(session, workspace);
+      : resolveSessionSelection(session, workspace));
   const activeProvider = displayProviders.find(
     (provider) => provider.id === selection.providerId,
   );
@@ -751,17 +799,13 @@ export function ConversationView({
                             onClick={(event) => {
                               event.stopPropagation();
                               closeComposerMenus();
-                              void updateWorkspaceSettings({
-                                workspaceId: workspace.id,
-                                sessionId: session.id,
-                                approvalMode: workspace.approvalMode,
+                              handleSelectionChange({
                                 providerId: provider.id,
                                 modelId:
                                   provider.models[0]?.id ??
                                   normalizedSelection.modelId,
                                 effort: normalizedSelection.effort,
                                 fastMode: normalizedSelection.fastMode,
-                                policy: workspace.policy,
                               });
                             }}
                           >
@@ -824,15 +868,11 @@ export function ConversationView({
                             onClick={(event) => {
                               event.stopPropagation();
                               closeComposerMenus();
-                              void updateWorkspaceSettings({
-                                workspaceId: workspace.id,
-                                sessionId: session.id,
-                                approvalMode: workspace.approvalMode,
+                              handleSelectionChange({
                                 providerId: normalizedSelection.providerId,
                                 modelId: model.id,
                                 effort: normalizedSelection.effort,
                                 fastMode: normalizedSelection.fastMode,
-                                policy: workspace.policy,
                               });
                             }}
                           >
@@ -889,15 +929,11 @@ export function ConversationView({
                                 onClick={(event) => {
                                   event.stopPropagation();
                                   closeComposerMenus();
-                                  void updateWorkspaceSettings({
-                                    workspaceId: workspace.id,
-                                    sessionId: session.id,
-                                    approvalMode: workspace.approvalMode,
+                                  handleSelectionChange({
                                     providerId: normalizedSelection.providerId,
                                     modelId: normalizedSelection.modelId,
                                     effort: id,
                                     fastMode: normalizedSelection.fastMode,
-                                    policy: workspace.policy,
                                   });
                                 }}
                               >
@@ -932,16 +968,12 @@ export function ConversationView({
                                   onClick={(event) => {
                                     event.stopPropagation();
                                     closeComposerMenus();
-                                    void updateWorkspaceSettings({
-                                      workspaceId: workspace.id,
-                                      sessionId: session.id,
-                                      approvalMode: workspace.approvalMode,
+                                    handleSelectionChange({
                                       providerId:
                                         normalizedSelection.providerId,
                                       modelId: normalizedSelection.modelId,
                                       effort: normalizedSelection.effort,
                                       fastMode: option.id,
-                                      policy: workspace.policy,
                                     });
                                   }}
                                 >

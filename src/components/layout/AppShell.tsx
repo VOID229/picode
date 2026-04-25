@@ -1,5 +1,7 @@
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import type { WorkspaceRecord } from "../../domains/types";
+import { isPrimaryShortcut } from "../../lib/keyboardShortcuts";
 import { openPath } from "../../lib/tauri";
 import { useAppStore } from "../../state/useAppStore";
 import { AddActionModal } from "../action/AddActionModal";
@@ -7,6 +9,7 @@ import { ConversationView } from "../chat/ConversationView";
 import { CommandPalette } from "../command/CommandPalette";
 import { CommitChangesModal } from "../git/CommitChangesModal";
 import { Sidebar } from "../sidebar/Sidebar";
+import { ProjectPicker } from "../sidebar/ProjectPicker";
 import { TerminalPane } from "../terminal/TerminalPane";
 import type { GitAction } from "../../domains/types";
 import {
@@ -30,12 +33,16 @@ function shellQuote(value: string) {
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
+type OpenTarget = "zed" | "finder";
+
 export function AppShell() {
   const isBootstrapping = useAppStore((state) => state.isBootstrapping);
   const state = useAppStore((store) => store.state);
   const git = useAppStore((store) => store.git);
   const customActions = useAppStore((store) => store.customActions);
-  const createSession = useAppStore((store) => store.createSession);
+  const createWorkspace = useAppStore((store) => store.createWorkspace);
+  const createTerminalTab = useAppStore((store) => store.createTerminalTab);
+  const closeTerminalTab = useAppStore((store) => store.closeTerminalTab);
   const runtimeInstall = useAppStore((store) => store.runtimeInstall);
   const refreshWorkspaceRuntimeCatalog = useAppStore(
     (store) => store.refreshWorkspaceRuntimeCatalog,
@@ -50,16 +57,18 @@ export function AppShell() {
   const [editingActionId, setEditingActionId] = useState<string | undefined>();
   const [showGitDropdown, setShowGitDropdown] = useState(false);
   const [showOpenDropdown, setShowOpenDropdown] = useState(false);
+  const [openTarget, setOpenTarget] = useState<OpenTarget>("zed");
+  const [showProjectPicker, setShowProjectPicker] = useState(false);
   const [gitActionMode, setGitActionMode] = useState<GitAction | null>(null);
 
   useEffect(() => {
     const handleShortcut = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+      if (isPrimaryShortcut(event) && event.key.toLowerCase() === "k") {
         event.preventDefault();
         useAppStore.getState().setCommandPaletteOpen(true);
       }
 
-      if ((event.metaKey || event.ctrlKey) && event.key === ",") {
+      if (isPrimaryShortcut(event) && event.key === ",") {
         event.preventDefault();
         navigate("/settings");
       }
@@ -132,16 +141,88 @@ export function AppShell() {
     });
   };
 
+  const openWorkspace = async (
+    workspace: WorkspaceRecord,
+    target: OpenTarget,
+  ) => {
+    if (target === "zed") {
+      await runTerminalCommand(
+        workspace.id,
+        `open -a Zed ${shellQuote(workspace.path)}`,
+        { openPane: false },
+      );
+      return;
+    }
+
+    await openPath(workspace.path);
+  };
+
   const handlePrimaryOpen = async () => {
     if (!activeWorkspace) {
       return;
     }
-    await openPath(activeWorkspace.path);
+    await openWorkspace(activeWorkspace, openTarget);
   };
 
   const handleTerminalToggle = () => {
     setTerminalPaneOpen(!terminalPaneOpen);
   };
+
+  useEffect(() => {
+    const handleShortcut = (event: KeyboardEvent) => {
+      if (!isPrimaryShortcut(event)) {
+        return;
+      }
+
+      const key = event.key.toLowerCase();
+
+      if (key === "n") {
+        event.preventDefault();
+        setShowProjectPicker(true);
+        return;
+      }
+
+      if (showProjectPicker) {
+        return;
+      }
+
+      if (key === "o") {
+        event.preventDefault();
+        void handlePrimaryOpen();
+        return;
+      }
+
+      if (!activeWorkspace || !terminalPaneOpen) {
+        return;
+      }
+
+      if (key === "t") {
+        event.preventDefault();
+        void createTerminalTab(activeWorkspace.id);
+        return;
+      }
+
+      if (key === "w") {
+        const terminalTabId =
+          useAppStore.getState().terminals[activeWorkspace.id]?.activeTabId;
+        if (!terminalTabId) {
+          return;
+        }
+        event.preventDefault();
+        void closeTerminalTab(activeWorkspace.id, terminalTabId);
+      }
+    };
+
+    window.addEventListener("keydown", handleShortcut);
+    return () => window.removeEventListener("keydown", handleShortcut);
+  }, [
+    activeWorkspace,
+    closeTerminalTab,
+    createTerminalTab,
+    handlePrimaryOpen,
+    showProjectPicker,
+    terminalPaneOpen,
+  ]);
 
   if (isBootstrapping || !state) {
     return (
@@ -153,7 +234,7 @@ export function AppShell() {
 
   return (
     <div className="app-shell">
-      <Sidebar state={state} />
+      <Sidebar state={state} onAddProject={() => setShowProjectPicker(true)} />
 
       <main className="main-pane" style={{ background: "var(--bg)" }}>
         <header
@@ -369,11 +450,8 @@ export function AppShell() {
                       className="dropdown-item"
                       onClick={() => {
                         setShowOpenDropdown(false);
-                        void runTerminalCommand(
-                          activeWorkspace.id,
-                          `open -a Zed ${shellQuote(activeWorkspace.path)}`,
-                          { openPane: false },
-                        );
+                        setOpenTarget("zed");
+                        void openWorkspace(activeWorkspace, "zed");
                       }}
                     >
                       <AppWindow size={14} />
@@ -386,7 +464,8 @@ export function AppShell() {
                       className="dropdown-item"
                       onClick={() => {
                         setShowOpenDropdown(false);
-                        void openPath(activeWorkspace.path);
+                        setOpenTarget("finder");
+                        void openWorkspace(activeWorkspace, "finder");
                       }}
                     >
                       <Folder size={14} />
@@ -532,6 +611,16 @@ export function AppShell() {
       )}
 
       <CommandPalette />
+
+      {showProjectPicker && (
+        <ProjectPicker
+          onClose={() => setShowProjectPicker(false)}
+          onSelect={(path) => {
+            void createWorkspace(path);
+            setShowProjectPicker(false);
+          }}
+        />
+      )}
 
       <style>{`
         .topbar-btn {

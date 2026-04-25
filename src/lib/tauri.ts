@@ -18,6 +18,7 @@ import type {
   RunGitActionResult,
   WorkspaceRuntimeCatalogPayload,
   WorkspaceRecord,
+  SessionModelSelection,
 } from "../domains/types";
 
 export async function bootstrapState() {
@@ -98,6 +99,7 @@ export async function sendPrompt(payload: {
   prompt: string;
   mode: PromptMode;
   images?: MessageImageAttachment[];
+  selection?: SessionModelSelection;
 }) {
   return normalize(await invoke<PersistedAppState>("send_prompt", { payload }));
 }

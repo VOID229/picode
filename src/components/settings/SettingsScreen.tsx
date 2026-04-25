@@ -683,42 +683,39 @@ export function SettingsScreen() {
                     control={<Toggle checked={true} />}
                   />
                   <SettingRow
-                    label="Model selection memory"
-                    description="Choose whether provider, model, and reasoning stay global or follow the last configuration saved on each thread."
+                    label="Model selection behavior"
+                    description="Choose how provider, model, and reasoning are restored when switching threads."
                     control={
-                      <button
-                        style={{
-                          ...btnStyle,
-                          padding: 0,
-                          border: "none",
-                          background: "transparent",
-                        }}
-                        onClick={() => {
+                      <select
+                        style={{ ...controlStyle, minWidth: "210px" }}
+                        value={
+                          state?.preferences.modelSelectionScope === "global"
+                            ? "global"
+                            : state?.preferences.threadModelMemory === "used"
+                              ? "used"
+                              : "selected"
+                        }
+                        onChange={(event) => {
                           if (!state) {
                             return;
                           }
 
+                          const value = event.target.value;
                           void updatePreferences({
                             ...state.preferences,
                             modelSelectionScope:
-                              state.preferences.modelSelectionScope === "global"
-                                ? "thread"
-                                : "global",
+                              value === "global" ? "global" : "thread",
+                            threadModelMemory:
+                              value === "used" ? "used" : "selected",
                           });
                         }}
-                        title={
-                          state?.preferences.modelSelectionScope === "global"
-                            ? "Global selection is on"
-                            : "Per-thread selection is on"
-                        }
-                        type="button"
                       >
-                        <Toggle
-                          checked={
-                            state?.preferences.modelSelectionScope === "global"
-                          }
-                        />
-                      </button>
+                        <option value="selected">
+                          Switch to last selected
+                        </option>
+                        <option value="used">Switch to last used</option>
+                        <option value="global">Always global</option>
+                      </select>
                     }
                   />
                   <SettingRow
