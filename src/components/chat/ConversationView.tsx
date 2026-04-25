@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
   type ClipboardEvent,
+  type WheelEvent,
 } from "react";
 import type {
   ChatSession,
@@ -351,6 +352,12 @@ export function ConversationView({
     }
   }, [session?.id, session?.updatedAt]);
 
+  const handleTimelineWheel = useCallback((event: WheelEvent) => {
+    if (event.deltaY < 0) {
+      shouldStickToBottomRef.current = false;
+    }
+  }, []);
+
   useLayoutEffect(() => {
     const node = timelineRef.current;
     if (!node) {
@@ -608,6 +615,7 @@ export function ConversationView({
         <div
           className="timeline"
           ref={timelineRef}
+          onWheel={handleTimelineWheel}
           style={{
             flex: 1,
             minHeight: 0,
@@ -683,6 +691,7 @@ export function ConversationView({
         {activeQuestionRequest ? (
           <QuestionComposer
             request={activeQuestionRequest}
+            providerName={activeProvider?.label}
             onResolve={(value) =>
               resolveQuestionRequest(activeQuestionRequest, value)
             }
@@ -1339,10 +1348,7 @@ function TurnRenderer({
 
   // For turns with tool activity, keep the elapsed-time header anchored above
   // the activity list while work is still streaming and after it completes.
-  if (
-    (hasToolActivity || (!turn.isCompleted && turn.startTime)) &&
-    turn.startTime
-  ) {
+  if (hasToolActivity && turn.isCompleted && turn.startTime) {
     // Split into: user message, worked-for-block wrapping tools, then final assistant text + files changed
     const userSegments: React.ReactNode[] = [];
     const toolContent: React.ReactNode[] = [];
@@ -1434,11 +1440,6 @@ function TurnRenderer({
             >
               {toolContent}
             </div>
-          </WorkedForBlock>
-        )}
-        {toolContent.length === 0 && !turn.isCompleted && (
-          <WorkedForBlock startTime={turn.startTime} isLive paused={isPaused}>
-            <LiveThinkingRow label="Starting" />
           </WorkedForBlock>
         )}
         {finalTextSegments}

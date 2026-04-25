@@ -16,7 +16,7 @@ interface PlanCardProps {
 export function PlanCard({ content, workspaceId, isActive }: PlanCardProps) {
   const createSession = useAppStore((store) => store.createSession);
   const setComposerDraft = useAppStore((store) => store.setComposerDraft);
-  const [expanded, setExpanded] = useState(true);
+  const [expanded, setExpanded] = useState(false);
   const [menuPosition, setMenuPosition] = useState<{
     x: number;
     y: number;
@@ -71,7 +71,6 @@ export function PlanCard({ content, workspaceId, isActive }: PlanCardProps) {
       title="Proposed Plan"
       icon={<SquarePen size={14} />}
       isActive={isActive}
-      defaultExpanded
     >
       <section className={`plan-card${expanded ? " plan-card--expanded" : ""}`}>
         <header className="plan-card__header">

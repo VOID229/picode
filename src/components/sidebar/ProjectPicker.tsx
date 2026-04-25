@@ -22,19 +22,44 @@ interface ProjectPickerProps {
 export function ProjectPicker({ onClose, onSelect }: ProjectPickerProps) {
   const [currentPath, setCurrentPath] = useState("~/");
   const [directories, setDirectories] = useState<string[]>([]);
+  const [directoryBasePath, setDirectoryBasePath] = useState("~/");
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [loading, setLoading] = useState(false);
   const dialogRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const pathInputRef = useRef<HTMLInputElement>(null);
 
   const loadDirectories = useCallback(async (path: string) => {
     setLoading(true);
     try {
       const dirs = await readDir(path);
       setDirectories(dirs);
+      setDirectoryBasePath(path);
       setSelectedIndex(0);
     } catch (error) {
-      console.error("Failed to load directories", error);
+      const partial = splitPartialPath(path);
+      if (!partial.query) {
+        console.error("Failed to load directories", error);
+        setDirectories([]);
+        setDirectoryBasePath(path);
+        setSelectedIndex(0);
+        return;
+      }
+
+      try {
+        const dirs = await readDir(partial.basePath);
+        const normalizedQuery = partial.query.toLowerCase();
+        setDirectories(
+          dirs.filter((dir) => dir.toLowerCase().startsWith(normalizedQuery)),
+        );
+        setDirectoryBasePath(partial.basePath);
+        setSelectedIndex(0);
+      } catch (parentError) {
+        console.error("Failed to load directories", parentError);
+        setDirectories([]);
+        setDirectoryBasePath(partial.basePath);
+        setSelectedIndex(0);
+      }
     } finally {
       setLoading(false);
     }
@@ -46,11 +71,11 @@ export function ProjectPicker({ onClose, onSelect }: ProjectPickerProps) {
 
   const handleNavigateIn = (dir: string) => {
     const newPath =
-      currentPath === "/"
+      directoryBasePath === "/"
         ? `/${dir}`
-        : currentPath.endsWith("/")
-          ? `${currentPath}${dir}`
-          : `${currentPath}/${dir}`;
+        : directoryBasePath.endsWith("/")
+          ? `${directoryBasePath}${dir}`
+          : `${directoryBasePath}/${dir}`;
     setCurrentPath(newPath);
   };
 
@@ -81,12 +106,28 @@ export function ProjectPicker({ onClose, onSelect }: ProjectPickerProps) {
   };
 
   useEffect(() => {
-    dialogRef.current?.focus();
+    pathInputRef.current?.focus();
   }, []);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      const isPathInput = e.target === pathInputRef.current;
+
       if (e.key === "Escape") onClose();
+
+      if (isPathInput) {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          const path = currentPath.trim();
+          if (path) onSelect(path);
+        }
+        if (e.key === "o" && (e.metaKey || e.ctrlKey)) {
+          e.preventDefault();
+          void openPath(currentPath);
+        }
+        return;
+      }
+
       if (e.key === "Backspace" && !(e.target instanceof HTMLInputElement))
         handleNavigateBack();
       if (e.key === "ArrowDown") {
@@ -99,7 +140,8 @@ export function ProjectPicker({ onClose, onSelect }: ProjectPickerProps) {
       }
       if (e.key === "Enter") {
         if (e.metaKey || e.ctrlKey) {
-          onSelect(currentPath);
+          const path = currentPath.trim();
+          if (path) onSelect(path);
         } else if (directories[selectedIndex]) {
           handleNavigateIn(directories[selectedIndex]);
         }
@@ -200,23 +242,34 @@ export function ProjectPicker({ onClose, onSelect }: ProjectPickerProps) {
             >
               <ArrowLeft size={16} />
             </button>
-            <div
+            <input
+              ref={pathInputRef}
+              value={currentPath}
+              onChange={(event) => setCurrentPath(event.target.value)}
+              spellCheck={false}
+              aria-label="Project path"
               style={{
+                width: "100%",
+                minWidth: 0,
+                background: "transparent",
+                border: "none",
+                outline: "none",
                 fontSize: "1rem",
                 fontWeight: 500,
                 color: "#fafafa",
-                letterSpacing: "-0.01em",
+                fontFamily: "inherit",
                 overflow: "hidden",
                 textOverflow: "ellipsis",
                 whiteSpace: "nowrap",
               }}
-            >
-              {currentPath}
-            </div>
+            />
           </div>
 
           <button
-            onClick={() => onSelect(currentPath)}
+            onClick={() => {
+              const path = currentPath.trim();
+              if (path) onSelect(path);
+            }}
             style={{
               background: "#2563eb",
               color: "white",
@@ -444,4 +497,18 @@ export function ProjectPicker({ onClose, onSelect }: ProjectPickerProps) {
     </div>,
     document.body,
   );
+}
+
+function splitPartialPath(path: string) {
+  const trimmedPath = path.trim();
+  const slashIndex = trimmedPath.lastIndexOf("/");
+
+  if (slashIndex < 0) {
+    return { basePath: "./", query: trimmedPath };
+  }
+
+  return {
+    basePath: trimmedPath.slice(0, slashIndex + 1),
+    query: trimmedPath.slice(slashIndex + 1),
+  };
 }

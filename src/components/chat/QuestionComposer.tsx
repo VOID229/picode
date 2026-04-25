@@ -6,6 +6,7 @@ import { resolveQuestionKeyboardAction } from "./questionComposerLogic";
 
 interface QuestionComposerProps {
   request: PendingQuestionRequest;
+  providerName?: string;
   onResolve: (value: string | null) => Promise<void>;
 }
 
@@ -18,6 +19,7 @@ interface QuestionAnswer {
 
 export function QuestionComposer({
   request,
+  providerName = "Codex",
   onResolve,
 }: QuestionComposerProps) {
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -247,6 +249,9 @@ export function QuestionComposer({
           )}
           onClick={() => setEditingCustom(true)}
           onKeyDown={(event) => {
+            if (event.target instanceof HTMLInputElement) {
+              return;
+            }
             if (event.key === "Enter" || event.key === " ") {
               event.preventDefault();
               setEditingCustom(true);
@@ -277,7 +282,7 @@ export function QuestionComposer({
               {selected?.wasCustom
                 ? selected.value
                 : (customOptionLabel ??
-                  "No, and tell Codex what to do differently")}
+                  `No, and tell ${providerName} what to do differently`)}
             </strong>
           )}
         </div>
