@@ -6,6 +6,11 @@ const bundleRoot = path.join(root, "src-tauri", "target", "release", "bundle");
 const dmgDir = path.join(bundleRoot, "dmg");
 const appDir = path.join(bundleRoot, "macos");
 const forwardedArgs = Bun.argv.slice(2);
+const localDmgConfig = JSON.stringify({
+  bundle: {
+    createUpdaterArtifacts: false,
+  },
+});
 
 function fail(message: string): never {
   console.error(`error: ${message}`);
@@ -43,6 +48,8 @@ const tauriBuild = Bun.spawn({
     "build",
     "--bundles",
     "app,dmg",
+    "--config",
+    localDmgConfig,
     "--ci",
     ...forwardedArgs,
   ],
