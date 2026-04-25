@@ -4,7 +4,10 @@ import "@xterm/xterm/css/xterm.css";
 import { Plus, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { WorkspaceRecord } from "../../domains/types";
-import { isTerminalShortcut } from "../../lib/keyboardShortcuts";
+import {
+  getShortcutBinding,
+  matchesShortcut,
+} from "../../lib/keyboardShortcuts";
 import { useAppStore } from "../../state/useAppStore";
 import { ContextMenu } from "../layout/ContextMenu";
 import { PromptModal } from "../layout/PromptModal";
@@ -30,6 +33,7 @@ function getTerminalTabLabel(title: string | undefined, fallbackIndex: number) {
 
 export function TerminalPane({ workspace }: TerminalPaneProps) {
   const paneOpen = useAppStore((state) => state.terminalPaneOpen);
+  const shortcuts = useAppStore((state) => state.state?.preferences.shortcuts);
   const terminals = useAppStore((state) => state.terminals);
   const closeTerminalTab = useAppStore((state) => state.closeTerminalTab);
   const createTerminalTab = useAppStore((state) => state.createTerminalTab);
@@ -290,8 +294,10 @@ export function TerminalPane({ workspace }: TerminalPaneProps) {
         !paneOpen ||
         !workspace ||
         !activeTerminalTabId ||
-        !(event.metaKey || event.ctrlKey) ||
-        event.key.toLowerCase() !== "r"
+        !matchesShortcut(
+          event,
+          getShortcutBinding(shortcuts, "renameTerminalTab"),
+        )
       ) {
         return;
       }
@@ -304,11 +310,18 @@ export function TerminalPane({ workspace }: TerminalPaneProps) {
     window.addEventListener("keydown", handleRenameShortcut, true);
     return () =>
       window.removeEventListener("keydown", handleRenameShortcut, true);
-  }, [activeTerminalTabId, paneOpen, workspace]);
+  }, [activeTerminalTabId, paneOpen, shortcuts, workspace]);
 
   useEffect(() => {
     const handleTerminalTabShortcut = (event: KeyboardEvent) => {
-      if (!paneOpen || !workspace || !isTerminalShortcut(event)) {
+      if (
+        !paneOpen ||
+        !workspace ||
+        !matchesShortcut(
+          event,
+          getShortcutBinding(shortcuts, "switchTerminalTab"),
+        )
+      ) {
         return;
       }
 
@@ -333,6 +346,7 @@ export function TerminalPane({ workspace }: TerminalPaneProps) {
   }, [
     paneOpen,
     scheduleTerminalLayout,
+    shortcuts,
     setActiveTerminalTab,
     workspace,
     workspaceTerminals?.tabOrder,

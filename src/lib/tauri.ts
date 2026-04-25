@@ -13,6 +13,7 @@ import type {
   TerminalEvent,
   RuntimeBootstrapPayload,
   RuntimeHealthPayload,
+  AppUpdatePayload,
   PreparedGitAction,
   GitAction,
   RunGitActionResult,
@@ -130,6 +131,12 @@ export async function abortPrompt(payload: {
 
 export async function runtimeHealthcheck() {
   return normalize(await invoke<RuntimeHealthPayload>("runtime_healthcheck"));
+}
+
+export async function checkForAppUpdate(channel: "stable" | "nightly") {
+  return normalize(
+    await invoke<AppUpdatePayload>("check_for_app_update", { channel }),
+  );
 }
 
 export async function resolveApproval(payload: {

@@ -3,13 +3,21 @@ import {
   SlidersHorizontal,
   Link as LinkIcon,
   Archive,
+  Keyboard,
   RotateCcw,
   Trash2,
   RefreshCw,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { getAppPaths, openPath } from "../../lib/tauri";
+import { checkForAppUpdate, getAppPaths, openPath } from "../../lib/tauri";
+import {
+  eventToShortcut,
+  formatShortcut,
+  getShortcutBinding,
+  shortcutDefinitions,
+  type ShortcutId,
+} from "../../lib/keyboardShortcuts";
 import { useAppStore } from "../../state/useAppStore";
 import type { AppPaths } from "../../domains/types";
 
@@ -120,10 +128,107 @@ function SettingsSection({
   );
 }
 
+function ShortcutRecorder({
+  value,
+  onChange,
+}: {
+  value: string | null;
+  onChange: (value: string) => void;
+}) {
+  const [recording, setRecording] = useState(false);
+
+  useEffect(() => {
+    if (!recording) {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.key === "Escape") {
+        setRecording(false);
+        return;
+      }
+
+      const next = eventToShortcut(event);
+      if (next) {
+        onChange(next);
+        setRecording(false);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown, true);
+    return () => window.removeEventListener("keydown", handleKeyDown, true);
+  }, [onChange, recording]);
+
+  return (
+    <button
+      onBlur={() => setRecording(false)}
+      onClick={() => setRecording(true)}
+      style={{
+        minWidth: "112px",
+        background: "transparent",
+        color: recording ? "#fff" : "#ddd",
+        border: "none",
+        padding: "6px 8px",
+        outline: "none",
+        cursor: "pointer",
+        fontFamily: "monospace",
+        fontSize: "0.8rem",
+        textAlign: "right",
+      }}
+      type="button"
+    >
+      {recording ? "Press keys" : formatShortcut(value)}
+    </button>
+  );
+}
+
+function ShortcutActionButton({
+  children,
+  onClick,
+}: {
+  children: React.ReactNode;
+  onClick: () => void;
+}) {
+  const [hovered, setHovered] = useState(false);
+  const [pressed, setPressed] = useState(false);
+
+  return (
+    <button
+      onClick={onClick}
+      onMouseDown={() => setPressed(true)}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => {
+        setHovered(false);
+        setPressed(false);
+      }}
+      onMouseUp={() => setPressed(false)}
+      style={{
+        background: hovered ? "rgba(255,255,255,0.08)" : "transparent",
+        color: pressed ? "#fff" : "#ddd",
+        border: "1px solid #3a3a3a",
+        padding: "6px 10px",
+        borderRadius: "6px",
+        outline: "none",
+        cursor: "pointer",
+        fontSize: "0.8rem",
+        transform: pressed ? "translateY(1px)" : "translateY(0)",
+        transition: "background 0.15s, color 0.15s, transform 0.08s",
+      }}
+      type="button"
+    >
+      {children}
+    </button>
+  );
+}
+
 export function SettingsScreen() {
   const [activeTab, setActiveTab] = useState("general");
   const [piBinaryInput, setPiBinaryInput] = useState("");
   const [appPaths, setAppPaths] = useState<AppPaths | null>(null);
+  const [updateStatus, setUpdateStatus] = useState<string>("");
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
 
   const controlStyle = {
     background: "#111",
@@ -160,6 +265,35 @@ export function SettingsScreen() {
   const refreshRuntimeHealth = useAppStore(
     (store) => store.refreshRuntimeHealth,
   );
+
+  const setShortcut = (id: ShortcutId, value: string | null | undefined) => {
+    if (!state) {
+      return;
+    }
+
+    const shortcuts = { ...(state.preferences.shortcuts ?? {}) };
+    if (value === undefined) {
+      delete shortcuts[id];
+    } else {
+      shortcuts[id] = value;
+    }
+
+    void updatePreferences({
+      ...state.preferences,
+      shortcuts,
+    });
+  };
+
+  const restoreAllShortcuts = () => {
+    if (!state) {
+      return;
+    }
+
+    void updatePreferences({
+      ...state.preferences,
+      shortcuts: {},
+    });
+  };
 
   const activeWorkspace = useMemo(
     () =>
@@ -520,6 +654,40 @@ export function SettingsScreen() {
             <LinkIcon size={14} />
             <span style={{ fontSize: "0.85rem", fontWeight: 500 }}>
               Connections
+            </span>
+          </div>
+          <div
+            onClick={() => setActiveTab("shortcuts")}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "8px",
+              padding: "8px 12px",
+              borderRadius: "6px",
+              background:
+                activeTab === "shortcuts"
+                  ? "rgba(255,255,255,0.08)"
+                  : "transparent",
+              color: activeTab === "shortcuts" ? "#fff" : "#888",
+              cursor: "pointer",
+              transition: "background 0.2s, color 0.2s",
+            }}
+            onMouseEnter={(e) => {
+              if (activeTab !== "shortcuts") {
+                e.currentTarget.style.background = "#222";
+                e.currentTarget.style.color = "#ccc";
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (activeTab !== "shortcuts") {
+                e.currentTarget.style.background = "transparent";
+                e.currentTarget.style.color = "#888";
+              }
+            }}
+          >
+            <Keyboard size={14} />
+            <span style={{ fontSize: "0.85rem", fontWeight: 500 }}>
+              Shortcuts
             </span>
           </div>
           <div
@@ -1088,42 +1256,6 @@ export function SettingsScreen() {
                   />
                 </SettingsSection>
 
-                <SettingsSection title="ADVANCED">
-                  <SettingRow
-                    label="Keybindings"
-                    description={
-                      <div style={{ marginTop: "4px" }}>
-                        Open the persisted `keybindings.json` file to edit
-                        advanced bindings directly.
-                        <div
-                          style={{
-                            fontFamily: "monospace",
-                            color: "#888",
-                            marginTop: "4px",
-                            marginBottom: "4px",
-                          }}
-                        >
-                          {appPaths?.keybindingsPath ?? "Resolving path..."}
-                        </div>
-                        Opens in your preferred editor.
-                      </div>
-                    }
-                    control={
-                      <button
-                        style={btnStyle}
-                        disabled={!appPaths}
-                        onClick={() => {
-                          if (appPaths) {
-                            void openPath(appPaths.keybindingsPath);
-                          }
-                        }}
-                      >
-                        Open file
-                      </button>
-                    }
-                  />
-                </SettingsSection>
-
                 <SettingsSection title="ABOUT">
                   <SettingRow
                     label={
@@ -1137,22 +1269,79 @@ export function SettingsScreen() {
                             fontWeight: 400,
                           }}
                         >
-                          0.0.20
+                          {__APP_VERSION__}
                         </span>
                       </>
                     }
                     description="Current version of the application."
                     control={
-                      <button style={btnStyle}>Check for Updates</button>
+                      <button
+                        disabled={checkingUpdate}
+                        onClick={() => {
+                          setCheckingUpdate(true);
+                          const channel =
+                            state?.preferences.updateChannel ?? "stable";
+                          setUpdateStatus(
+                            `Checking ${channel} GitHub release...`,
+                          );
+                          void checkForAppUpdate(channel)
+                            .then((result) => {
+                              if (result.status === "up-to-date") {
+                                setUpdateStatus(
+                                  `picode ${result.currentVersion} is up to date on ${channel}.`,
+                                );
+                                return;
+                              }
+
+                              setUpdateStatus(
+                                `Downloaded ${channel} picode ${result.latestVersion} DMG and opened it.`,
+                              );
+                            })
+                            .catch((error) => {
+                              setUpdateStatus(
+                                error instanceof Error
+                                  ? error.message
+                                  : String(error),
+                              );
+                            })
+                            .finally(() => setCheckingUpdate(false));
+                        }}
+                        style={btnStyle}
+                        type="button"
+                      >
+                        {checkingUpdate ? "Checking..." : "Check for Updates"}
+                      </button>
                     }
                   />
+                  {updateStatus ? (
+                    <SettingRow
+                      label="Update status"
+                      description={updateStatus}
+                      control={<span />}
+                    />
+                  ) : null}
                   <SettingRow
                     label="Update track"
-                    description="Stable follows full releases. Nightly follows the nightly desktop channel and can switch back to stable immediately."
+                    description="Stable follows full releases. Nightly follows the prerelease tagged nightly."
                     control={
-                      <select style={controlStyle} defaultValue="Nightly">
-                        <option>Stable</option>
-                        <option>Nightly</option>
+                      <select
+                        style={controlStyle}
+                        value={state?.preferences.updateChannel ?? "stable"}
+                        onChange={(event) => {
+                          if (!state) {
+                            return;
+                          }
+
+                          void updatePreferences({
+                            ...state.preferences,
+                            updateChannel: event.target.value as
+                              | "stable"
+                              | "nightly",
+                          });
+                        }}
+                      >
+                        <option value="stable">Stable</option>
+                        <option value="nightly">Nightly</option>
                       </select>
                     }
                   />
@@ -1413,6 +1602,58 @@ export function SettingsScreen() {
                   </div>
                 </SettingsSection>
               </div>
+            )}
+
+            {activeTab === "shortcuts" && (
+              <SettingsSection title="SHORTCUTS">
+                <SettingRow
+                  label="Keyboard shortcuts"
+                  description="Click a shortcut, press the replacement keys, or clear it."
+                  control={
+                    <ShortcutActionButton onClick={restoreAllShortcuts}>
+                      Restore all defaults
+                    </ShortcutActionButton>
+                  }
+                />
+                {shortcutDefinitions.map((shortcut) => {
+                  const value = getShortcutBinding(
+                    state?.preferences.shortcuts,
+                    shortcut.id,
+                  );
+
+                  return (
+                    <SettingRow
+                      key={shortcut.id}
+                      label={shortcut.label}
+                      description={shortcut.description}
+                      control={
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "6px",
+                          }}
+                        >
+                          <ShortcutRecorder
+                            value={value}
+                            onChange={(next) => setShortcut(shortcut.id, next)}
+                          />
+                          <ShortcutActionButton
+                            onClick={() => setShortcut(shortcut.id, null)}
+                          >
+                            Clear
+                          </ShortcutActionButton>
+                          <ShortcutActionButton
+                            onClick={() => setShortcut(shortcut.id, undefined)}
+                          >
+                            Restore default
+                          </ShortcutActionButton>
+                        </div>
+                      }
+                    />
+                  );
+                })}
+              </SettingsSection>
             )}
 
             {activeTab === "archive" && (

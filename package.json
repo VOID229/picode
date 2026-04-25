@@ -9,6 +9,7 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "dmg": "bun run scripts/build-dmg.ts",
+    "release:nightly": "bun run scripts/release-nightly.ts",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build"
   },

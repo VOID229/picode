@@ -394,6 +394,10 @@ pub struct AppPreferences {
     pub fast_mode: bool,
     #[serde(default)]
     pub pi_binary_path: Option<String>,
+    #[serde(default = "default_update_channel")]
+    pub update_channel: String,
+    #[serde(default)]
+    pub shortcuts: std::collections::HashMap<String, Option<String>>,
     pub layout: LayoutPreferences,
 }
 
@@ -434,6 +438,19 @@ pub struct RuntimeBootstrapPayload {
 #[serde(rename_all = "camelCase")]
 pub struct RuntimeHealthPayload {
     pub install: PiInstallStatus,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppUpdatePayload {
+    pub current_version: String,
+    #[serde(default)]
+    pub latest_version: Option<String>,
+    pub status: String,
+    #[serde(default)]
+    pub download_path: Option<String>,
+    #[serde(default)]
+    pub release_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -886,6 +903,10 @@ fn default_show_raw_tool_calls() -> bool {
     false
 }
 
+fn default_update_channel() -> String {
+    "stable".to_string()
+}
+
 fn default_model_selection_scope() -> String {
     "thread".to_string()
 }
@@ -1023,6 +1044,8 @@ pub fn default_preferences() -> AppPreferences {
         effort: default_effort(),
         fast_mode: default_fast_mode(),
         pi_binary_path: None,
+        update_channel: default_update_channel(),
+        shortcuts: std::collections::HashMap::new(),
         layout: LayoutPreferences {
             diff_mode: "split".to_string(),
             git_panel_open: true,

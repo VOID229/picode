@@ -34,7 +34,8 @@ import { copyTextToClipboard } from "../../lib/clipboard";
 import {
   isMacPlatform,
   isPrimaryShortcut,
-  isThreadShortcut,
+  getShortcutBinding,
+  matchesShortcut,
 } from "../../lib/keyboardShortcuts";
 import { useAppStore } from "../../state/useAppStore";
 import { ContextMenu, type ContextMenuItem } from "../layout/ContextMenu";
@@ -589,7 +590,12 @@ function ProjectNode({
     if (workspace.id !== state.activeWorkspaceId) return;
 
     const handleShortcut = (e: KeyboardEvent) => {
-      if (isThreadShortcut(e) && /^[1-9]$/.test(e.key)) {
+      if (
+        matchesShortcut(
+          e,
+          getShortcutBinding(state.preferences.shortcuts, "switchThread"),
+        )
+      ) {
         const index = parseInt(e.key, 10) - 1;
         if (visibleSessions[index]) {
           e.preventDefault();

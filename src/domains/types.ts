@@ -280,6 +280,8 @@ export interface AppPreferences {
   effort: string;
   fastMode: boolean;
   piBinaryPath?: string;
+  updateChannel?: "stable" | "nightly";
+  shortcuts?: Record<string, string | null>;
   layout: LayoutPreferences;
 }
 
@@ -309,6 +311,14 @@ export interface RuntimeBootstrapPayload {
 
 export interface RuntimeHealthPayload {
   install: PiInstallStatus;
+}
+
+export interface AppUpdatePayload {
+  currentVersion: string;
+  latestVersion?: string;
+  status: "up-to-date" | "downloaded";
+  downloadPath?: string;
+  releaseUrl?: string;
 }
 
 export interface RunTerminalCommandResult {

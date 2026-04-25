@@ -1,7 +1,10 @@
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import type { WorkspaceRecord } from "../../domains/types";
-import { isPrimaryShortcut } from "../../lib/keyboardShortcuts";
+import {
+  getShortcutBinding,
+  matchesShortcut,
+} from "../../lib/keyboardShortcuts";
 import { openPath } from "../../lib/tauri";
 import { useAppStore } from "../../state/useAppStore";
 import { AddActionModal } from "../action/AddActionModal";
@@ -63,12 +66,22 @@ export function AppShell() {
 
   useEffect(() => {
     const handleShortcut = (event: KeyboardEvent) => {
-      if (isPrimaryShortcut(event) && event.key.toLowerCase() === "k") {
+      if (
+        matchesShortcut(
+          event,
+          getShortcutBinding(state?.preferences.shortcuts, "commandPalette"),
+        )
+      ) {
         event.preventDefault();
         useAppStore.getState().setCommandPaletteOpen(true);
       }
 
-      if (isPrimaryShortcut(event) && event.key === ",") {
+      if (
+        matchesShortcut(
+          event,
+          getShortcutBinding(state?.preferences.shortcuts, "settings"),
+        )
+      ) {
         event.preventDefault();
         navigate("/settings");
       }
@@ -76,7 +89,7 @@ export function AppShell() {
 
     window.addEventListener("keydown", handleShortcut);
     return () => window.removeEventListener("keydown", handleShortcut);
-  }, [navigate]);
+  }, [navigate, state?.preferences.shortcuts]);
 
   const activeWorkspace = useMemo(
     () =>
@@ -170,13 +183,12 @@ export function AppShell() {
 
   useEffect(() => {
     const handleShortcut = (event: KeyboardEvent) => {
-      if (!isPrimaryShortcut(event)) {
-        return;
-      }
-
-      const key = event.key.toLowerCase();
-
-      if (key === "n") {
+      if (
+        matchesShortcut(
+          event,
+          getShortcutBinding(state?.preferences.shortcuts, "addProject"),
+        )
+      ) {
         event.preventDefault();
         setShowProjectPicker(true);
         return;
@@ -186,7 +198,12 @@ export function AppShell() {
         return;
       }
 
-      if (key === "o") {
+      if (
+        matchesShortcut(
+          event,
+          getShortcutBinding(state?.preferences.shortcuts, "openWorkspace"),
+        )
+      ) {
         event.preventDefault();
         void handlePrimaryOpen();
         return;
@@ -196,13 +213,23 @@ export function AppShell() {
         return;
       }
 
-      if (key === "t") {
+      if (
+        matchesShortcut(
+          event,
+          getShortcutBinding(state?.preferences.shortcuts, "newTerminalTab"),
+        )
+      ) {
         event.preventDefault();
         void createTerminalTab(activeWorkspace.id);
         return;
       }
 
-      if (key === "w") {
+      if (
+        matchesShortcut(
+          event,
+          getShortcutBinding(state?.preferences.shortcuts, "closeTerminalTab"),
+        )
+      ) {
         const terminalTabId =
           useAppStore.getState().terminals[activeWorkspace.id]?.activeTabId;
         if (!terminalTabId) {
@@ -221,6 +248,7 @@ export function AppShell() {
     createTerminalTab,
     handlePrimaryOpen,
     showProjectPicker,
+    state?.preferences.shortcuts,
     terminalPaneOpen,
   ]);
 

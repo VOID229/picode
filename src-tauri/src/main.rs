@@ -5,7 +5,7 @@ mod storage;
 mod terminal;
 
 use crate::models::{
-    AbortPromptPayload, AppPaths, BootstrapPayload, CloseTerminalSessionPayload,
+    AbortPromptPayload, AppPaths, AppUpdatePayload, BootstrapPayload, CloseTerminalSessionPayload,
     CreateSessionPayload, CreateWorkspacePayload, DeleteSessionPayload,
     EnsureTerminalSessionPayload, PersistedAppState, PrepareGitActionPayload, PreparedGitAction,
     RefreshGitPayload, RefreshWorkspaceRuntimeCatalogPayload, RemoveWorkspacePayload,
@@ -91,6 +91,112 @@ async fn app_paths(app: AppHandle) -> Result<AppPaths, String> {
             .into_owned(),
         app_data_dir: app_data_dir.to_string_lossy().into_owned(),
         logs_dir: logs_dir.to_string_lossy().into_owned(),
+    })
+}
+
+#[derive(serde::Deserialize)]
+struct GithubReleaseAsset {
+    name: String,
+    browser_download_url: String,
+}
+
+#[derive(serde::Deserialize)]
+struct GithubRelease {
+    tag_name: String,
+    html_url: String,
+    assets: Vec<GithubReleaseAsset>,
+}
+
+fn is_newer_version(latest: &str, current: &str) -> bool {
+    let parse = |value: &str| {
+        value
+            .split('.')
+            .map(|part| part.parse::<u64>().unwrap_or(0))
+            .collect::<Vec<_>>()
+    };
+    let latest_parts = parse(latest);
+    let current_parts = parse(current);
+    let length = latest_parts.len().max(current_parts.len());
+
+    for index in 0..length {
+        let latest_part = latest_parts.get(index).copied().unwrap_or(0);
+        let current_part = current_parts.get(index).copied().unwrap_or(0);
+        if latest_part != current_part {
+            return latest_part > current_part;
+        }
+    }
+
+    false
+}
+
+#[tauri::command]
+async fn check_for_app_update(
+    app: AppHandle,
+    channel: Option<String>,
+) -> Result<AppUpdatePayload, String> {
+    let release_url = match channel.as_deref() {
+        Some("nightly") => "https://api.github.com/repos/VOID229/picode/releases/tags/nightly",
+        _ => "https://api.github.com/repos/VOID229/picode/releases/latest",
+    };
+    let is_nightly = channel.as_deref() == Some("nightly");
+
+    let current_version = app.package_info().version.to_string();
+    let client = reqwest::Client::new();
+    let release = client
+        .get(release_url)
+        .header(reqwest::header::USER_AGENT, "picode-updater")
+        .send()
+        .await
+        .map_err(|error| error.to_string())?
+        .error_for_status()
+        .map_err(|error| error.to_string())?
+        .json::<GithubRelease>()
+        .await
+        .map_err(|error| error.to_string())?;
+
+    let latest_version = release.tag_name.trim_start_matches('v').to_string();
+    if !is_nightly && !is_newer_version(&latest_version, &current_version) {
+        return Ok(AppUpdatePayload {
+            current_version,
+            latest_version: Some(latest_version),
+            status: "up-to-date".to_string(),
+            download_path: None,
+            release_url: Some(release.html_url),
+        });
+    }
+
+    let asset = release
+        .assets
+        .iter()
+        .find(|asset| asset.name.to_lowercase().ends_with(".dmg"))
+        .ok_or_else(|| "Latest GitHub release does not include a macOS DMG asset.".to_string())?;
+
+    let bytes = client
+        .get(&asset.browser_download_url)
+        .header(reqwest::header::USER_AGENT, "picode-updater")
+        .send()
+        .await
+        .map_err(|error| error.to_string())?
+        .error_for_status()
+        .map_err(|error| error.to_string())?
+        .bytes()
+        .await
+        .map_err(|error| error.to_string())?;
+
+    let mut download_path = std::env::temp_dir();
+    download_path.push(&asset.name);
+    tokio::fs::write(&download_path, bytes)
+        .await
+        .map_err(|error| error.to_string())?;
+
+    open_path(download_path.to_string_lossy().into_owned()).await?;
+
+    Ok(AppUpdatePayload {
+        current_version,
+        latest_version: Some(latest_version),
+        status: "downloaded".to_string(),
+        download_path: Some(download_path.to_string_lossy().into_owned()),
+        release_url: Some(release.html_url),
     })
 }
 
@@ -1035,6 +1141,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             bootstrap_state,
             app_paths,
+            check_for_app_update,
             create_workspace,
             create_session,
             select_workspace_session,
