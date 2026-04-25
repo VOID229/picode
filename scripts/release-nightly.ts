@@ -1,9 +1,17 @@
-import { existsSync, readdirSync, statSync } from "node:fs";
+import {
+  existsSync,
+  readFileSync,
+  readdirSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import path from "node:path";
 
 const root = path.resolve(import.meta.dir, "..");
 const bundleRoot = path.join(root, "src-tauri", "target", "release", "bundle");
 const dmgDir = path.join(bundleRoot, "dmg");
+const macosDir = path.join(bundleRoot, "macos");
+const manifestPath = path.join(bundleRoot, "nightly.json");
 
 function fail(message: string): never {
   console.error(`error: ${message}`);
@@ -64,6 +72,42 @@ if (!dmgPath) {
   fail(`Expected a DMG in ${dmgDir}, but none was found.`);
 }
 
+const updaterPath = latestFile(macosDir, ".app.tar.gz");
+if (!updaterPath) {
+  fail(`Expected an updater archive in ${macosDir}, but none was found.`);
+}
+
+const signaturePath = `${updaterPath}.sig`;
+if (!existsSync(signaturePath)) {
+  fail(
+    `Expected ${signaturePath}. Set TAURI_SIGNING_PRIVATE_KEY or TAURI_SIGNING_PRIVATE_KEY_PATH before building.`,
+  );
+}
+
+const baseVersion = JSON.parse(
+  readFileSync(path.join(root, "package.json"), "utf8"),
+).version;
+const buildId = new Date().toISOString().replace(/\D/g, "").slice(0, 14);
+const version = `${baseVersion}+nightly.${buildId}`;
+const updaterFileName = path.basename(updaterPath);
+const manifest = {
+  version,
+  notes: "Automated nightly build.",
+  pub_date: new Date().toISOString(),
+  platforms: {
+    "darwin-aarch64": {
+      signature: readFileSync(signaturePath, "utf8").trim(),
+      url: `https://github.com/VOID229/picode/releases/download/nightly/${updaterFileName}`,
+    },
+    "darwin-x86_64": {
+      signature: readFileSync(signaturePath, "utf8").trim(),
+      url: `https://github.com/VOID229/picode/releases/download/nightly/${updaterFileName}`,
+    },
+  },
+};
+
+writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+
 await run(["git", "tag", "-f", "nightly"]);
 await run(["git", "push", "origin", "nightly", "--force"]);
 if (await succeeds(["gh", "release", "view", "nightly"])) {
@@ -77,10 +121,13 @@ await run([
   "create",
   "nightly",
   dmgPath,
+  updaterPath,
+  signaturePath,
+  manifestPath,
   "--title",
   "picode nightly",
   "--notes",
-  "Automated nightly DMG build.",
+  "Automated nightly build.",
   "--prerelease",
   "--latest=false",
 ]);

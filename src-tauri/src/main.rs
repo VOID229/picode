@@ -20,7 +20,12 @@ use crate::models::{
 use anyhow::Context;
 use models::{GitSnapshot, SessionModelSelection, default_state, new_session};
 use std::{collections::HashMap, fs, sync::Arc};
-use tauri::{AppHandle, Manager, State};
+use tauri::{
+    AppHandle, Manager, State,
+    menu::{MenuBuilder, SubmenuBuilder},
+};
+use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
+use tauri_plugin_updater::UpdaterExt;
 use tokio::sync::Mutex;
 
 #[derive(Clone)]
@@ -94,39 +99,59 @@ async fn app_paths(app: AppHandle) -> Result<AppPaths, String> {
     })
 }
 
-#[derive(serde::Deserialize)]
-struct GithubReleaseAsset {
-    name: String,
-    browser_download_url: String,
-}
+const CHECK_FOR_UPDATES_MENU_ID: &str = "check_for_updates";
 
-#[derive(serde::Deserialize)]
-struct GithubRelease {
-    tag_name: String,
-    html_url: String,
-    assets: Vec<GithubReleaseAsset>,
-}
-
-fn is_newer_version(latest: &str, current: &str) -> bool {
-    let parse = |value: &str| {
-        value
-            .split('.')
-            .map(|part| part.parse::<u64>().unwrap_or(0))
-            .collect::<Vec<_>>()
-    };
-    let latest_parts = parse(latest);
-    let current_parts = parse(current);
-    let length = latest_parts.len().max(current_parts.len());
-
-    for index in 0..length {
-        let latest_part = latest_parts.get(index).copied().unwrap_or(0);
-        let current_part = current_parts.get(index).copied().unwrap_or(0);
-        if latest_part != current_part {
-            return latest_part > current_part;
+fn updater_endpoint(channel: Option<&str>) -> &'static str {
+    match channel {
+        Some("nightly") => {
+            "https://github.com/VOID229/picode/releases/download/nightly/nightly.json"
         }
+        _ => "https://github.com/VOID229/picode/releases/latest/download/latest.json",
     }
+}
 
-    false
+async fn check_and_install_app_update(
+    app: &AppHandle,
+    channel: Option<&str>,
+) -> Result<AppUpdatePayload, String> {
+    let current_version = app.package_info().version.to_string();
+    let endpoint = updater_endpoint(channel)
+        .parse()
+        .map_err(|error| format!("invalid updater endpoint: {error}"))?;
+
+    let mut updater_builder = app
+        .updater_builder()
+        .endpoints(vec![endpoint])
+        .map_err(|error| error.to_string())?;
+    if channel == Some("nightly") {
+        updater_builder =
+            updater_builder.version_comparator(|current, update| update.version != current);
+    }
+    let updater = updater_builder.build().map_err(|error| error.to_string())?;
+
+    let Some(update) = updater.check().await.map_err(|error| error.to_string())? else {
+        return Ok(AppUpdatePayload {
+            current_version,
+            latest_version: None,
+            status: "up-to-date".to_string(),
+            download_path: None,
+            release_url: None,
+        });
+    };
+
+    let latest_version = update.version.to_string();
+    update
+        .download_and_install(|_, _| {}, || {})
+        .await
+        .map_err(|error| error.to_string())?;
+
+    Ok(AppUpdatePayload {
+        current_version,
+        latest_version: Some(latest_version),
+        status: "installed".to_string(),
+        download_path: None,
+        release_url: None,
+    })
 }
 
 #[tauri::command]
@@ -134,70 +159,7 @@ async fn check_for_app_update(
     app: AppHandle,
     channel: Option<String>,
 ) -> Result<AppUpdatePayload, String> {
-    let release_url = match channel.as_deref() {
-        Some("nightly") => "https://api.github.com/repos/VOID229/picode/releases/tags/nightly",
-        _ => "https://api.github.com/repos/VOID229/picode/releases/latest",
-    };
-    let is_nightly = channel.as_deref() == Some("nightly");
-
-    let current_version = app.package_info().version.to_string();
-    let client = reqwest::Client::new();
-    let release = client
-        .get(release_url)
-        .header(reqwest::header::USER_AGENT, "picode-updater")
-        .send()
-        .await
-        .map_err(|error| error.to_string())?
-        .error_for_status()
-        .map_err(|error| error.to_string())?
-        .json::<GithubRelease>()
-        .await
-        .map_err(|error| error.to_string())?;
-
-    let latest_version = release.tag_name.trim_start_matches('v').to_string();
-    if !is_nightly && !is_newer_version(&latest_version, &current_version) {
-        return Ok(AppUpdatePayload {
-            current_version,
-            latest_version: Some(latest_version),
-            status: "up-to-date".to_string(),
-            download_path: None,
-            release_url: Some(release.html_url),
-        });
-    }
-
-    let asset = release
-        .assets
-        .iter()
-        .find(|asset| asset.name.to_lowercase().ends_with(".dmg"))
-        .ok_or_else(|| "Latest GitHub release does not include a macOS DMG asset.".to_string())?;
-
-    let bytes = client
-        .get(&asset.browser_download_url)
-        .header(reqwest::header::USER_AGENT, "picode-updater")
-        .send()
-        .await
-        .map_err(|error| error.to_string())?
-        .error_for_status()
-        .map_err(|error| error.to_string())?
-        .bytes()
-        .await
-        .map_err(|error| error.to_string())?;
-
-    let mut download_path = std::env::temp_dir();
-    download_path.push(&asset.name);
-    tokio::fs::write(&download_path, bytes)
-        .await
-        .map_err(|error| error.to_string())?;
-
-    open_path(download_path.to_string_lossy().into_owned()).await?;
-
-    Ok(AppUpdatePayload {
-        current_version,
-        latest_version: Some(latest_version),
-        status: "downloaded".to_string(),
-        download_path: Some(download_path.to_string_lossy().into_owned()),
-        release_url: Some(release.html_url),
-    })
+    check_and_install_app_update(&app, channel.as_deref()).await
 }
 
 #[tauri::command]
@@ -1129,14 +1091,102 @@ fn load_initial_state(app: &AppHandle) -> anyhow::Result<PersistedAppState> {
     Ok(state)
 }
 
+fn install_app_menu(app: &tauri::App) -> tauri::Result<()> {
+    let handle = app.handle();
+    let services = SubmenuBuilder::new(handle, "Services")
+        .text(CHECK_FOR_UPDATES_MENU_ID, "Check for Updates")
+        .build()?;
+    let app_menu = SubmenuBuilder::new(handle, "picode")
+        .about(None)
+        .separator()
+        .item(&services)
+        .separator()
+        .hide()
+        .hide_others()
+        .separator()
+        .quit()
+        .build()?;
+    let file_menu = SubmenuBuilder::new(handle, "File").close_window().build()?;
+    let edit_menu = SubmenuBuilder::new(handle, "Edit")
+        .undo()
+        .redo()
+        .separator()
+        .cut()
+        .copy()
+        .paste()
+        .select_all()
+        .build()?;
+    let view_menu = SubmenuBuilder::new(handle, "View").fullscreen().build()?;
+    let menu = MenuBuilder::new(handle)
+        .item(&app_menu)
+        .item(&file_menu)
+        .item(&edit_menu)
+        .item(&view_menu)
+        .build()?;
+
+    app.set_menu(menu)?;
+    Ok(())
+}
+
+fn show_update_message(app: &AppHandle, title: &str, message: String, kind: MessageDialogKind) {
+    app.dialog()
+        .message(message)
+        .title(title)
+        .kind(kind)
+        .show(|_| {});
+}
+
+fn handle_check_for_updates_menu(app: &AppHandle) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let channel = match app.state::<AppState>().state.try_lock() {
+            Ok(state) => state.preferences.update_channel.clone(),
+            Err(_) => "stable".to_string(),
+        };
+
+        match check_and_install_app_update(&app, Some(&channel)).await {
+            Ok(result) if result.status == "up-to-date" => show_update_message(
+                &app,
+                "picode is up to date",
+                format!(
+                    "picode {} is up to date on {channel}.",
+                    result.current_version
+                ),
+                MessageDialogKind::Info,
+            ),
+            Ok(result) => show_update_message(
+                &app,
+                "Update installed",
+                format!(
+                    "picode {} was installed from {channel}. Restart picode to finish updating.",
+                    result
+                        .latest_version
+                        .unwrap_or_else(|| "update".to_string())
+                ),
+                MessageDialogKind::Info,
+            ),
+            Err(error) => {
+                show_update_message(&app, "Update failed", error, MessageDialogKind::Error)
+            }
+        }
+    });
+}
+
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .setup(|app| {
             let state = load_initial_state(app.handle())?;
             app.manage(AppState::new(state));
+            install_app_menu(app)?;
             Ok(())
+        })
+        .on_menu_event(|app, event| {
+            if event.id().as_ref() == CHECK_FOR_UPDATES_MENU_ID {
+                handle_check_for_updates_menu(app);
+            }
         })
         .invoke_handler(tauri::generate_handler![
             bootstrap_state,

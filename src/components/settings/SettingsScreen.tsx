@@ -1281,9 +1281,7 @@ export function SettingsScreen() {
                           setCheckingUpdate(true);
                           const channel =
                             state?.preferences.updateChannel ?? "stable";
-                          setUpdateStatus(
-                            `Checking ${channel} GitHub release...`,
-                          );
+                          setUpdateStatus(`Checking ${channel} updates...`);
                           void checkForAppUpdate(channel)
                             .then((result) => {
                               if (result.status === "up-to-date") {
@@ -1294,7 +1292,7 @@ export function SettingsScreen() {
                               }
 
                               setUpdateStatus(
-                                `Downloaded ${channel} picode ${result.latestVersion} DMG and opened it.`,
+                                `Installed ${channel} picode ${result.latestVersion}. Restart picode to finish updating.`,
                               );
                             })
                             .catch((error) => {

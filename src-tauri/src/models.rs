@@ -904,7 +904,7 @@ fn default_show_raw_tool_calls() -> bool {
 }
 
 fn default_update_channel() -> String {
-    "stable".to_string()
+    "nightly".to_string()
 }
 
 fn default_model_selection_scope() -> String {
