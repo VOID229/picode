@@ -1271,7 +1271,9 @@ function SessionItem({
               style={{ fontSize: "0.65rem", color: "#555" }}
               className="session-status"
             >
-              {isModifierHeld && shortcutKey ? (
+              {isModifierHeld && shortcutKey &&
+              document.activeElement?.getAttribute("data-composer") !==
+                "true" ? (
                 <span
                   style={{
                     background: "rgba(255,255,255,0.1)",

@@ -66,6 +66,12 @@ export interface CustomAction {
   keybinding?: string;
 }
 
+interface Toast {
+  id: string;
+  message: string;
+  type: "success" | "error" | "info";
+}
+
 interface AppStoreState {
   isBootstrapping: boolean;
   connectionReady: boolean;
@@ -86,11 +92,14 @@ interface AppStoreState {
   workspaceCatalogErrors: Record<string, string | undefined>;
   composerDrafts: Record<string, string>;
   composerImageDrafts: Record<string, ComposerImageDraft[]>;
+  toasts: Toast[];
   initialize: () => Promise<void>;
   setConnectionReady: (ready: boolean) => void;
   setCommandPaletteOpen: (open: boolean) => void;
   setTerminalPaneOpen: (open: boolean) => void;
   setCurrentMode: (mode: "plan" | "build") => void;
+  addToast: (toast: Omit<Toast, "id">) => void;
+  removeToast: (id: string) => void;
   addCustomAction: (
     workspaceId: string,
     action: Omit<CustomAction, "id">,
@@ -358,6 +367,18 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
   workspaceCatalogErrors: {},
   composerDrafts: {},
   composerImageDrafts: {},
+  toasts: [],
+  addToast(toast) {
+    const id = crypto.randomUUID();
+    set((store) => ({
+      toasts: [...store.toasts, { ...toast, id }],
+    }));
+  },
+  removeToast(id) {
+    set((store) => ({
+      toasts: store.toasts.filter((t) => t.id !== id),
+    }));
+  },
   async initialize() {
     if (hasInitialized && get().state) {
       set({ isBootstrapping: false });

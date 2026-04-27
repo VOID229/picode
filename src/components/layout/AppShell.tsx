@@ -14,6 +14,7 @@ import { CommitChangesModal } from "../git/CommitChangesModal";
 import { Sidebar } from "../sidebar/Sidebar";
 import { ProjectPicker } from "../sidebar/ProjectPicker";
 import { TerminalPane } from "../terminal/TerminalPane";
+import { ToastContainer } from "../layout/ToastContainer";
 import type { GitAction } from "../../domains/types";
 import {
   AppWindow,
@@ -61,10 +62,6 @@ export function AppShell() {
   const location = useLocation();
   const isSettings = location.pathname === "/settings";
 
-  function isComposerFocused() {
-    return document.activeElement?.getAttribute("data-composer") === "true";
-  }
-
   const [showActionModal, setShowActionModal] = useState(false);
   const [showActionDropdown, setShowActionDropdown] = useState(false);
   const [editingActionId, setEditingActionId] = useState<string | undefined>();
@@ -76,10 +73,6 @@ export function AppShell() {
 
   useEffect(() => {
     const handleShortcut = (event: KeyboardEvent) => {
-      if (isComposerFocused()) {
-        return;
-      }
-
       if (
         matchesShortcut(
           event,
@@ -202,10 +195,6 @@ export function AppShell() {
 
   useEffect(() => {
     const handleShortcut = (event: KeyboardEvent) => {
-      if (isComposerFocused()) {
-        return;
-      }
-
       if (
         matchesShortcut(
           event,
@@ -320,7 +309,9 @@ export function AppShell() {
                 (item) => item.kind === "user-message",
               )
                 ? deferredSession.title
-                : ""}
+                : deferredSession
+                  ? "New thread"
+                  : ""}
             </span>
             {activeWorkspace && (
               <span
@@ -684,6 +675,8 @@ export function AppShell() {
           }}
         />
       )}
+
+      <ToastContainer />
 
       <style>{`
         .topbar-btn {

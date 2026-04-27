@@ -43,18 +43,18 @@ export function CommitChangesModal({
 }: CommitChangesModalProps) {
   const prepareGitAction = useAppStore((store) => store.prepareGitAction);
   const runGitAction = useAppStore((store) => store.runGitAction);
+  const addToast = useAppStore((store) => store.addToast);
   const [prepared, setPrepared] = useState<PreparedGitAction | null>(null);
   const [selectedAction, setSelectedAction] = useState<GitAction>(
     initialAction === "push" ? "push" : initialAction,
   );
   const [includeUnstaged, setIncludeUnstaged] = useState(true);
   const [message, setMessage] = useState("");
+  const [autoGenerateMessage, setAutoGenerateMessage] = useState(true);
   const [showCustomInstructions, setShowCustomInstructions] = useState(false);
   const [customInstructions, setCustomInstructions] = useState("");
   const [draft, setDraft] = useState(initialAction === "create-pr");
-  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [summary, setSummary] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -89,29 +89,53 @@ export function CommitChangesModal({
   const commitMessageId = "git-commit-message";
   const customInstructionsId = "git-custom-instructions";
 
+  const canSubmit =
+    !error &&
+    prepared &&
+    (normalizedAction === "push" || hasChanges) &&
+    (normalizedAction === "push" || autoGenerateMessage || message.trim().length > 0);
+
   const handleContinue = async () => {
-    setBusy(true);
-    setError(null);
-    setSummary(null);
+    if (!canSubmit) return;
+
+    const actionLabel =
+      normalizedAction === "commit"
+        ? "Committing"
+        : normalizedAction === "commit-push"
+          ? "Committing and pushing"
+          : normalizedAction === "create-pr"
+            ? "Creating PR"
+            : "Pushing";
+
+    onClose();
+    addToast({ message: `${actionLabel}...`, type: "info" });
+
     try {
       const result = await runGitAction({
         workspaceId: workspace.id,
         action: normalizedAction,
         includeUnstaged,
-        message,
+        message: autoGenerateMessage ? message.trim() || undefined : message.trim(),
         customInstructions,
         draft,
       });
-      setSummary(
-        result.prUrl ? `${result.summary}: ${result.prUrl}` : result.summary,
-      );
-      if (!result.prUrl) {
-        onClose();
+
+      if (result.prUrl) {
+        addToast({
+          message: `${result.summary}: ${result.prUrl}`,
+          type: "success",
+        });
+      } else {
+        addToast({
+          message: result.summary,
+          type: "success",
+        });
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy(false);
+      addToast({
+        message: err instanceof Error ? err.message : String(err),
+        type: "error",
+      });
     }
   };
 
@@ -176,24 +200,55 @@ export function CommitChangesModal({
         )}
 
         {commitFieldVisible && (
-          <div className="git-modal__field">
-            <div className="git-modal__field-head">
-              <label htmlFor={commitMessageId}>Commit message</label>
-              <button
-                type="button"
-                onClick={() => setShowCustomInstructions((current) => !current)}
+          <>
+            <label className="git-modal__toggle-row">
+              <span
+                className={cn(
+                  "git-modal__switch",
+                  autoGenerateMessage && "git-modal__switch--on",
+                )}
               >
-                Custom instructions
-              </button>
+                <input
+                  checked={autoGenerateMessage}
+                  type="checkbox"
+                  onChange={(event) =>
+                    setAutoGenerateMessage(event.target.checked)
+                  }
+                />
+                <span />
+              </span>
+              Auto-generate commit message
+            </label>
+
+            <div className="git-modal__field">
+              <div className="git-modal__field-head">
+                <label htmlFor={commitMessageId}>
+                  {autoGenerateMessage
+                    ? "Commit message (optional)"
+                    : "Commit message"}
+                </label>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setShowCustomInstructions((current) => !current)
+                  }
+                >
+                  Custom instructions
+                </button>
+              </div>
+              <textarea
+                id={commitMessageId}
+                value={message}
+                onChange={(event) => setMessage(event.target.value)}
+                placeholder={
+                  autoGenerateMessage
+                    ? "Leave blank to autogenerate a commit message"
+                    : "Enter your commit message"
+                }
+                rows={2}
+              />
             </div>
-            <textarea
-              id={commitMessageId}
-              value={message}
-              onChange={(event) => setMessage(event.target.value)}
-              placeholder="Leave blank to autogenerate a commit message"
-              rows={2}
-            />
-          </div>
+          </>
         )}
 
         {showCustomInstructions && (
@@ -267,20 +322,18 @@ export function CommitChangesModal({
         )}
 
         {error && <p className="git-modal__error">{error}</p>}
-        {summary && <p className="git-modal__summary">{summary}</p>}
 
         <div className="git-modal__footer">
           <button
             className="git-modal__continue"
             type="button"
             disabled={
-              busy ||
-              !prepared ||
+              !canSubmit ||
               (selectedAction === "create-pr" && !canCreatePr)
             }
             onClick={() => void handleContinue()}
           >
-            {busy ? "Working..." : "Continue"}
+            Continue
           </button>
         </div>
       </section>
