@@ -366,6 +366,21 @@ export function TerminalPane({ workspace }: TerminalPaneProps) {
     return () => observer.disconnect();
   }, [scheduleTerminalLayout]);
 
+  useEffect(() => {
+    if (!workspace || !activeTerminalTabId || !activeTerminal) {
+      return;
+    }
+    if (activeTerminal.status === "exited") {
+      void closeTerminalTab(workspace.id, activeTerminalTabId);
+    }
+  }, [activeTerminal, activeTerminalTabId, closeTerminalTab, workspace]);
+
+  useEffect(() => {
+    if (paneOpen && workspaceTerminals?.tabOrder.length === 0) {
+      setTerminalPaneOpen(false);
+    }
+  }, [paneOpen, workspaceTerminals?.tabOrder.length, setTerminalPaneOpen]);
+
   return (
     <section
       className={`terminal-pane ${paneOpen ? "terminal-pane--open" : ""}`}

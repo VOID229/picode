@@ -732,9 +732,14 @@ export function ConversationView({
                     void handleSubmit();
                   }
                 }
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  textareaRef.current?.blur();
+                }
               }}
               disabled={sendDisabled}
               rows={1}
+              data-composer="true"
               aria-label="Message composer"
               style={{
                 background: "transparent",

@@ -110,7 +110,7 @@ fn updater_endpoint(channel: Option<&str>) -> &'static str {
     }
 }
 
-async fn check_and_install_app_update(
+async fn check_app_update(
     app: &AppHandle,
     channel: Option<&str>,
 ) -> Result<AppUpdatePayload, String> {
@@ -129,15 +129,65 @@ async fn check_and_install_app_update(
     }
     let updater = updater_builder.build().map_err(|error| error.to_string())?;
 
-    let Some(update) = updater.check().await.map_err(|error| error.to_string())? else {
-        return Ok(AppUpdatePayload {
-            current_version,
-            latest_version: None,
-            status: "up-to-date".to_string(),
-            download_path: None,
-            release_url: None,
-        });
+    match updater.check().await {
+        Ok(None) => {
+            return Ok(AppUpdatePayload {
+                current_version,
+                latest_version: None,
+                status: "up-to-date".to_string(),
+                download_path: None,
+                release_url: None,
+            });
+        }
+        Ok(Some(update)) => {
+            return Ok(AppUpdatePayload {
+                current_version: current_version.clone(),
+                latest_version: Some(update.version.to_string()),
+                status: "update-available".to_string(),
+                download_path: None,
+                release_url: None,
+            });
+        }
+        Err(error) => {
+            let message = error.to_string();
+            if message.contains("fallback platforms") || message.contains("platforms") {
+                return Ok(AppUpdatePayload {
+                    current_version,
+                    latest_version: None,
+                    status: "no-release".to_string(),
+                    download_path: None,
+                    release_url: None,
+                });
+            }
+            return Err(message);
+        }
     };
+}
+
+async fn do_install_app_update(
+    app: &AppHandle,
+    channel: Option<&str>,
+) -> Result<AppUpdatePayload, String> {
+    let current_version = app.package_info().version.to_string();
+    let endpoint = updater_endpoint(channel)
+        .parse()
+        .map_err(|error| format!("invalid updater endpoint: {error}"))?;
+
+    let mut updater_builder = app
+        .updater_builder()
+        .endpoints(vec![endpoint])
+        .map_err(|error| error.to_string())?;
+    if channel == Some("nightly") {
+        updater_builder =
+            updater_builder.version_comparator(|current, update| update.version != current);
+    }
+    let updater = updater_builder.build().map_err(|error| error.to_string())?;
+
+    let update = updater
+        .check()
+        .await
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "No update is available.".to_string())?;
 
     let latest_version = update.version.to_string();
     update
@@ -159,7 +209,20 @@ async fn check_for_app_update(
     app: AppHandle,
     channel: Option<String>,
 ) -> Result<AppUpdatePayload, String> {
-    check_and_install_app_update(&app, channel.as_deref()).await
+    check_app_update(&app, channel.as_deref()).await
+}
+
+#[tauri::command]
+async fn install_app_update(
+    app: AppHandle,
+    channel: Option<String>,
+) -> Result<AppUpdatePayload, String> {
+    do_install_app_update(&app, channel.as_deref()).await
+}
+
+#[tauri::command]
+fn restart_app(app: AppHandle) {
+    app.restart();
 }
 
 #[tauri::command]
@@ -326,6 +389,21 @@ async fn prepare_git_action(
 }
 
 #[tauri::command]
+async fn initialize_git_repository(
+    shared: State<'_, AppState>,
+    payload: RefreshGitPayload,
+) -> Result<GitSnapshot, String> {
+    let state = shared.state.lock().await;
+    let workspace = state
+        .workspaces
+        .iter()
+        .find(|workspace| workspace.id == payload.workspace_id)
+        .context("workspace not found")
+        .map_err(|error| error.to_string())?;
+    git::initialize_repository(&workspace.path).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 async fn run_git_action(
     shared: State<'_, AppState>,
     payload: RunGitActionPayload,
@@ -474,7 +552,6 @@ async fn undo_user_turn(
             .context("workspace not found")
             .map_err(|error| error.to_string())?
     };
-    let workspace_git = git::snapshot(&workspace_path);
 
     if let Some(checkpoint) = checkpoint.as_ref() {
         if let Ok(Some(redo_checkpoint)) = git::capture_undo_checkpoint(
@@ -488,10 +565,6 @@ async fn undo_user_turn(
 
         git::restore_undo_checkpoint(&workspace_path, checkpoint)
             .map_err(|error| error.to_string())?;
-    } else if workspace_git.is_repo {
-        return Err(
-            "Undo is unavailable for this message because no checkpoint was stored.".to_string(),
-        );
     }
 
     let (removed_user_ids, session_file_to_remove) = {
@@ -1144,7 +1217,7 @@ fn handle_check_for_updates_menu(app: &AppHandle) {
             Err(_) => "stable".to_string(),
         };
 
-        match check_and_install_app_update(&app, Some(&channel)).await {
+        match check_app_update(&app, Some(&channel)).await {
             Ok(result) if result.status == "up-to-date" => show_update_message(
                 &app,
                 "picode is up to date",
@@ -1154,17 +1227,32 @@ fn handle_check_for_updates_menu(app: &AppHandle) {
                 ),
                 MessageDialogKind::Info,
             ),
-            Ok(result) => show_update_message(
+            Ok(result) if result.status == "no-release" => show_update_message(
                 &app,
-                "Update installed",
+                "No updates yet",
                 format!(
-                    "picode {} was installed from {channel}. Restart picode to finish updating.",
-                    result
-                        .latest_version
-                        .unwrap_or_else(|| "update".to_string())
+                    "No updates for picode {} on {channel} yet!",
+                    result.current_version
                 ),
                 MessageDialogKind::Info,
             ),
+            Ok(result) => {
+                let latest = result.latest_version.unwrap_or_default();
+                match do_install_app_update(&app, Some(&channel)).await {
+                    Ok(_) => show_update_message(
+                        &app,
+                        "Update installed",
+                        format!("picode {latest} was installed from {channel}. Restart picode to finish updating."),
+                        MessageDialogKind::Info,
+                    ),
+                    Err(error) => show_update_message(
+                        &app,
+                        "Update failed",
+                        error,
+                        MessageDialogKind::Error,
+                    ),
+                }
+            }
             Err(error) => {
                 show_update_message(&app, "Update failed", error, MessageDialogKind::Error)
             }
@@ -1192,6 +1280,8 @@ fn main() {
             bootstrap_state,
             app_paths,
             check_for_app_update,
+            install_app_update,
+            restart_app,
             create_workspace,
             create_session,
             select_workspace_session,
@@ -1199,6 +1289,7 @@ fn main() {
             update_workspace_settings,
             refresh_git_snapshot,
             prepare_git_action,
+            initialize_git_repository,
             run_git_action,
             send_prompt,
             resolve_extension_ui_request,

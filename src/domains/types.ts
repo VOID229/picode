@@ -316,7 +316,7 @@ export interface RuntimeHealthPayload {
 export interface AppUpdatePayload {
   currentVersion: string;
   latestVersion?: string;
-  status: "up-to-date" | "installed";
+  status: "up-to-date" | "update-available" | "installed" | "no-release";
   downloadPath?: string;
   releaseUrl?: string;
 }

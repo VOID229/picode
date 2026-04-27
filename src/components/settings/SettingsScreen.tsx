@@ -9,8 +9,14 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
-import { checkForAppUpdate, getAppPaths, openPath } from "../../lib/tauri";
+import { Link, useNavigate } from "react-router-dom";
+import {
+  checkForAppUpdate,
+  getAppPaths,
+  installAppUpdate,
+  openPath,
+  restartApp,
+} from "../../lib/tauri";
 import {
   eventToShortcut,
   formatShortcut,
@@ -224,11 +230,17 @@ function ShortcutActionButton({
 }
 
 export function SettingsScreen() {
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState("general");
   const [piBinaryInput, setPiBinaryInput] = useState("");
   const [appPaths, setAppPaths] = useState<AppPaths | null>(null);
   const [updateStatus, setUpdateStatus] = useState<string>("");
   const [checkingUpdate, setCheckingUpdate] = useState(false);
+  const [installingUpdate, setInstallingUpdate] = useState(false);
+  const [updateAvailableVersion, setUpdateAvailableVersion] = useState<
+    string | null
+  >(null);
+  const [updateInstalled, setUpdateInstalled] = useState(false);
 
   const controlStyle = {
     background: "#111",
@@ -326,6 +338,17 @@ export function SettingsScreen() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        navigate("/");
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [navigate]);
 
   const commitPiBinaryOverride = async (nextValue: string) => {
     if (!state) {
@@ -809,13 +832,13 @@ export function SettingsScreen() {
             padding: "40px",
             display: "flex",
             flexDirection: "column",
-            alignItems: "center",
           }}
         >
           <div
             style={{
               width: "100%",
               maxWidth: "800px",
+              margin: "0 auto",
               display: "flex",
               flexDirection: "column",
               gap: "40px",
@@ -1275,40 +1298,105 @@ export function SettingsScreen() {
                     }
                     description="Current version of the application."
                     control={
-                      <button
-                        disabled={checkingUpdate}
-                        onClick={() => {
-                          setCheckingUpdate(true);
-                          const channel =
-                            state?.preferences.updateChannel ?? "stable";
-                          setUpdateStatus(`Checking ${channel} updates...`);
-                          void checkForAppUpdate(channel)
-                            .then((result) => {
-                              if (result.status === "up-to-date") {
-                                setUpdateStatus(
-                                  `picode ${result.currentVersion} is up to date on ${channel}.`,
-                                );
-                                return;
-                              }
-
-                              setUpdateStatus(
-                                `Installed ${channel} picode ${result.latestVersion}. Restart picode to finish updating.`,
-                              );
-                            })
-                            .catch((error) => {
-                              setUpdateStatus(
-                                error instanceof Error
-                                  ? error.message
-                                  : String(error),
-                              );
-                            })
-                            .finally(() => setCheckingUpdate(false));
-                        }}
-                        style={btnStyle}
-                        type="button"
-                      >
-                        {checkingUpdate ? "Checking..." : "Check for Updates"}
-                      </button>
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                        <button
+                          disabled={checkingUpdate || installingUpdate}
+                          onClick={() => {
+                            setCheckingUpdate(true);
+                            setUpdateStatus("");
+                            setUpdateAvailableVersion(null);
+                            setUpdateInstalled(false);
+                            const channel =
+                              state?.preferences.updateChannel ?? "stable";
+                            void checkForAppUpdate(channel)
+                              .then((result) => {
+                                if (result.status === "up-to-date") {
+                                  setUpdateStatus(
+                                    `picode ${result.currentVersion} is up to date on ${channel}!`,
+                                  );
+                                } else if (result.status === "no-release") {
+                                  setUpdateStatus(
+                                    `No updates for picode ${result.currentVersion} on ${channel} yet!`,
+                                  );
+                                } else if (result.status === "update-available") {
+                                  setUpdateStatus(
+                                    `picode ${result.latestVersion} is available on ${channel}.`,
+                                  );
+                                  setUpdateAvailableVersion(
+                                    result.latestVersion ?? null,
+                                  );
+                                }
+                              })
+                              .catch((error) => {
+                                const message =
+                                  error instanceof Error
+                                    ? error.message
+                                    : String(error);
+                                setUpdateStatus(message);
+                              })
+                              .finally(() => setCheckingUpdate(false));
+                          }}
+                          style={btnStyle}
+                          type="button"
+                        >
+                          {checkingUpdate
+                            ? "Checking..."
+                            : updateInstalled
+                              ? "Check Again"
+                              : "Check for Updates"}
+                        </button>
+                        {updateAvailableVersion && !updateInstalled && (
+                          <button
+                            disabled={installingUpdate}
+                            onClick={() => {
+                              setInstallingUpdate(true);
+                              const channel =
+                                state?.preferences.updateChannel ?? "stable";
+                              void installAppUpdate(channel)
+                                .then((result) => {
+                                  setUpdateInstalled(true);
+                                  setUpdateAvailableVersion(null);
+                                  setUpdateStatus(
+                                    `Installed picode ${result.latestVersion ?? updateAvailableVersion}! Restart to finish updating.`,
+                                  );
+                                })
+                                .catch((error) => {
+                                  const message =
+                                    error instanceof Error
+                                      ? error.message
+                                      : String(error);
+                                  setUpdateStatus(`Install failed: ${message}`);
+                                })
+                                .finally(() => setInstallingUpdate(false));
+                            }}
+                            style={{
+                              ...btnStyle,
+                              background: "#2563eb",
+                              borderColor: "#2563eb",
+                              color: "#fff",
+                            }}
+                            type="button"
+                          >
+                            {installingUpdate
+                              ? "Installing..."
+                              : `Install ${updateAvailableVersion}`}
+                          </button>
+                        )}
+                        {updateInstalled && (
+                          <button
+                            onClick={() => restartApp()}
+                            style={{
+                              ...btnStyle,
+                              background: "#16a34a",
+                              borderColor: "#16a34a",
+                              color: "#fff",
+                            }}
+                            type="button"
+                          >
+                            Restart
+                          </button>
+                        )}
+                      </div>
                     }
                   />
                   {updateStatus ? (

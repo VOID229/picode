@@ -11,7 +11,7 @@ const root = path.resolve(import.meta.dir, "..");
 const bundleRoot = path.join(root, "src-tauri", "target", "release", "bundle");
 const dmgDir = path.join(bundleRoot, "dmg");
 const macosDir = path.join(bundleRoot, "macos");
-const manifestPath = path.join(bundleRoot, "nightly.json");
+const manifestPath = path.join(bundleRoot, "latest.json");
 
 function fail(message: string): never {
   console.error(`error: ${message}`);
@@ -50,19 +50,8 @@ async function run(cmd: string[]) {
   }
 }
 
-async function succeeds(cmd: string[]) {
-  const child = Bun.spawn({
-    cmd,
-    cwd: root,
-    stdout: "ignore",
-    stderr: "ignore",
-  });
-
-  return (await child.exited) === 0;
-}
-
 if (process.platform !== "darwin") {
-  fail("Nightly DMG releases must be created on macOS.");
+  fail("Stable DMG releases must be created on macOS.");
 }
 
 console.log("Building macOS app bundle with updater artifacts...");
@@ -92,58 +81,47 @@ if (!existsSync(signaturePath)) {
   );
 }
 
-const baseVersion = JSON.parse(
+const version = JSON.parse(
   readFileSync(path.join(root, "package.json"), "utf8"),
 ).version;
-const buildId = new Date().toISOString().replace(/\D/g, "").slice(0, 14);
-const version = `${baseVersion}+nightly.${buildId}`;
 const updaterFileName = path.basename(updaterPath);
 const manifest = {
   version,
-  notes: "Automated nightly build.",
+  notes: `picode ${version} stable release.`,
   pub_date: new Date().toISOString(),
   platforms: {
     "darwin-aarch64": {
       signature: readFileSync(signaturePath, "utf8").trim(),
-      url: `https://github.com/VOID229/picode/releases/download/nightly/${updaterFileName}`,
+      url: `https://github.com/VOID229/picode/releases/download/v${version}/${updaterFileName}`,
     },
     "darwin-aarch64-app": {
       signature: readFileSync(signaturePath, "utf8").trim(),
-      url: `https://github.com/VOID229/picode/releases/download/nightly/${updaterFileName}`,
+      url: `https://github.com/VOID229/picode/releases/download/v${version}/${updaterFileName}`,
     },
     "darwin-x86_64": {
       signature: readFileSync(signaturePath, "utf8").trim(),
-      url: `https://github.com/VOID229/picode/releases/download/nightly/${updaterFileName}`,
+      url: `https://github.com/VOID229/picode/releases/download/v${version}/${updaterFileName}`,
     },
     "darwin-x86_64-app": {
       signature: readFileSync(signaturePath, "utf8").trim(),
-      url: `https://github.com/VOID229/picode/releases/download/nightly/${updaterFileName}`,
+      url: `https://github.com/VOID229/picode/releases/download/v${version}/${updaterFileName}`,
     },
   },
 };
 
 writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 
-await run(["git", "tag", "-f", "nightly"]);
-await run(["git", "push", "origin", "nightly", "--force"]);
-if (await succeeds(["gh", "release", "view", "nightly"])) {
-  await run(["gh", "release", "delete", "nightly", "--yes", "--cleanup-tag"]);
-}
-await run(["git", "tag", "-f", "nightly"]);
-await run(["git", "push", "origin", "nightly", "--force"]);
 await run([
   "gh",
   "release",
   "create",
-  "nightly",
+  `v${version}`,
   dmgPath,
   updaterPath,
   signaturePath,
   manifestPath,
   "--title",
-  "picode nightly",
+  `picode ${version}`,
   "--notes",
-  "Automated nightly build.",
-  "--prerelease",
-  "--latest=false",
+  `picode ${version} stable release.`,
 ]);

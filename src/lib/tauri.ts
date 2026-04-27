@@ -51,6 +51,14 @@ export async function refreshGit(payload: { workspaceId: string }) {
   );
 }
 
+export async function initializeGitRepository(payload: {
+  workspaceId: string;
+}) {
+  return normalize(
+    await invoke<GitSnapshot>("initialize_git_repository", { payload }),
+  );
+}
+
 export async function prepareGitAction(payload: { workspaceId: string }) {
   return normalize(
     await invoke<PreparedGitAction>("prepare_git_action", { payload }),
@@ -137,6 +145,16 @@ export async function checkForAppUpdate(channel: "stable" | "nightly") {
   return normalize(
     await invoke<AppUpdatePayload>("check_for_app_update", { channel }),
   );
+}
+
+export async function installAppUpdate(channel: "stable" | "nightly") {
+  return normalize(
+    await invoke<AppUpdatePayload>("install_app_update", { channel }),
+  );
+}
+
+export async function restartApp() {
+  return await invoke<void>("restart_app");
 }
 
 export async function resolveApproval(payload: {

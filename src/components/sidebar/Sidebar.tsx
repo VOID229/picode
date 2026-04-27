@@ -67,6 +67,9 @@ export function Sidebar({ state, onAddProject }: SidebarProps) {
   const [draggedWorkspaceId, setDraggedWorkspaceId] = useState<string | null>(
     null,
   );
+  const [workspaceDropIndicator, setWorkspaceDropIndicator] = useState<{
+    beforeWorkspaceId: string | null;
+  } | null>(null);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -124,7 +127,11 @@ export function Sidebar({ state, onAddProject }: SidebarProps) {
 
   const handleSortClick = (e: React.MouseEvent) => {
     e.preventDefault();
-    setSortMenu({ x: e.clientX, y: e.clientY });
+    if (sortMenu) {
+      setSortMenu(null);
+    } else {
+      setSortMenu({ x: e.clientX, y: e.clientY });
+    }
   };
 
   const sortMenuItems = useMemo<ContextMenuItem[]>(
@@ -133,48 +140,57 @@ export function Sidebar({ state, onAddProject }: SidebarProps) {
       {
         label: "Last user message",
         isChecked: projectSortOrder === "last-message",
+        keepOpen: true,
         onClick: () => setProjectSortOrder("last-message"),
       },
       {
         label: "Created at",
         isChecked: projectSortOrder === "created",
+        keepOpen: true,
         onClick: () => setProjectSortOrder("created"),
       },
       {
         label: "Manual",
         isChecked: projectSortOrder === "manual",
+        keepOpen: true,
         onClick: () => setProjectSortOrder("manual"),
       },
       { label: "Sort threads", isHeader: true, separator: true },
       {
         label: "Last user message",
         isChecked: threadSortOrder === "last-message",
+        keepOpen: true,
         onClick: () => setThreadSortOrder("last-message"),
       },
       {
         label: "Created at",
         isChecked: threadSortOrder === "created",
+        keepOpen: true,
         onClick: () => setThreadSortOrder("created"),
       },
       {
         label: "Manual",
         isChecked: threadSortOrder === "manual",
+        keepOpen: true,
         onClick: () => setThreadSortOrder("manual"),
       },
       { label: "Group projects", isHeader: true, separator: true },
       {
         label: "Group by repository",
         isChecked: projectGrouping === "repo",
+        keepOpen: true,
         onClick: () => setProjectGrouping("repo"),
       },
       {
         label: "Group by repository path",
         isChecked: projectGrouping === "path",
+        keepOpen: true,
         onClick: () => setProjectGrouping("path"),
       },
       {
         label: "Keep separate",
         isChecked: projectGrouping === "none",
+        keepOpen: true,
         onClick: () => setProjectGrouping("none"),
       },
     ],
@@ -192,7 +208,52 @@ export function Sidebar({ state, onAddProject }: SidebarProps) {
 
   const handleWorkspaceDragEnd = useCallback(() => {
     setDraggedWorkspaceId(null);
+    setWorkspaceDropIndicator(null);
   }, []);
+
+  const handleWorkspaceDragOver = useCallback(
+    (event: React.DragEvent, workspaceId: string) => {
+      if (projectSortOrder !== "manual" || !draggedWorkspaceId) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+
+      const target = event.currentTarget as HTMLDivElement;
+      const rect = target.getBoundingClientRect();
+      const pointerIsInUpperHalf = event.clientY < rect.top + rect.height / 2;
+      const workspaceIndex = filteredWorkspaces.findIndex(
+        (workspace) => workspace.id === workspaceId,
+      );
+      const beforeWorkspaceId = pointerIsInUpperHalf
+        ? workspaceId
+        : (filteredWorkspaces[workspaceIndex + 1]?.id ?? null);
+
+      setWorkspaceDropIndicator((current) => {
+        if (current?.beforeWorkspaceId === beforeWorkspaceId) {
+          return current;
+        }
+        return { beforeWorkspaceId };
+      });
+    },
+    [draggedWorkspaceId, filteredWorkspaces, projectSortOrder],
+  );
+
+  const handleWorkspaceListDragOver = useCallback(
+    (event: React.DragEvent) => {
+      if (projectSortOrder !== "manual" || !draggedWorkspaceId) {
+        return;
+      }
+
+      event.preventDefault();
+
+      if (filteredWorkspaces.length === 0) {
+        setWorkspaceDropIndicator({ beforeWorkspaceId: null });
+      }
+    },
+    [draggedWorkspaceId, filteredWorkspaces.length, projectSortOrder],
+  );
 
   const handleWorkspaceDrop = useCallback(
     async (beforeWorkspaceId: string | null) => {
@@ -202,6 +263,7 @@ export function Sidebar({ state, onAddProject }: SidebarProps) {
 
       const workspaceId = draggedWorkspaceId;
       setDraggedWorkspaceId(null);
+      setWorkspaceDropIndicator(null);
 
       if (workspaceId === beforeWorkspaceId) {
         return;
@@ -349,6 +411,7 @@ export function Sidebar({ state, onAddProject }: SidebarProps) {
             <ArrowDownUp
               size={12}
               className="pointer action-icon"
+              onMouseDown={(e) => e.stopPropagation()}
               onClick={handleSortClick}
             />
             <Plus
@@ -369,18 +432,22 @@ export function Sidebar({ state, onAddProject }: SidebarProps) {
             overflowY: "auto",
             paddingBottom: "8px",
           }}
-          onDragOver={(event) => {
-            if (projectSortOrder !== "manual" || !draggedWorkspaceId) {
-              return;
-            }
-            event.preventDefault();
-          }}
+          onDragOver={handleWorkspaceListDragOver}
           onDrop={(event) => {
             if (projectSortOrder !== "manual" || !draggedWorkspaceId) {
               return;
             }
             event.preventDefault();
-            void handleWorkspaceDrop(null);
+            void handleWorkspaceDrop(
+              workspaceDropIndicator?.beforeWorkspaceId ?? null,
+            );
+          }}
+          onDragLeave={(event) => {
+            if (
+              !event.currentTarget.contains(event.relatedTarget as Node | null)
+            ) {
+              setWorkspaceDropIndicator(null);
+            }
           }}
         >
           {filteredWorkspaces.map((workspace) => (
@@ -391,12 +458,29 @@ export function Sidebar({ state, onAddProject }: SidebarProps) {
               threadSortOrder={threadSortOrder}
               projectSortOrder={projectSortOrder}
               isModifierHeld={isModifierHeld}
+              isWorkspaceDragging={draggedWorkspaceId !== null}
               isDraggingWorkspace={draggedWorkspaceId === workspace.id}
+              showWorkspaceDropIndicator={
+                projectSortOrder === "manual" &&
+                draggedWorkspaceId !== null &&
+                workspaceDropIndicator?.beforeWorkspaceId === workspace.id
+              }
+              dropBeforeWorkspaceId={
+                projectSortOrder === "manual"
+                  ? (workspaceDropIndicator?.beforeWorkspaceId ?? null)
+                  : null
+              }
               onWorkspaceDragStart={handleWorkspaceDragStart}
+              onWorkspaceDragOver={handleWorkspaceDragOver}
               onWorkspaceDragEnd={handleWorkspaceDragEnd}
               onWorkspaceDrop={handleWorkspaceDrop}
             />
           ))}
+          {projectSortOrder === "manual" &&
+            draggedWorkspaceId !== null &&
+            workspaceDropIndicator?.beforeWorkspaceId === null && (
+              <DropIndicator />
+            )}
         </div>
       </div>
 
@@ -446,8 +530,12 @@ function ProjectNode({
   threadSortOrder,
   projectSortOrder,
   isModifierHeld,
+  isWorkspaceDragging,
   isDraggingWorkspace,
+  showWorkspaceDropIndicator,
+  dropBeforeWorkspaceId,
   onWorkspaceDragStart,
+  onWorkspaceDragOver,
   onWorkspaceDragEnd,
   onWorkspaceDrop,
 }: {
@@ -456,8 +544,12 @@ function ProjectNode({
   threadSortOrder: "last-message" | "created" | "manual";
   projectSortOrder: "last-message" | "created" | "manual";
   isModifierHeld: boolean;
+  isWorkspaceDragging: boolean;
   isDraggingWorkspace: boolean;
+  showWorkspaceDropIndicator: boolean;
+  dropBeforeWorkspaceId: string | null;
   onWorkspaceDragStart: (workspaceId: string) => void;
+  onWorkspaceDragOver: (event: React.DragEvent, workspaceId: string) => void;
   onWorkspaceDragEnd: () => void;
   onWorkspaceDrop: (beforeWorkspaceId: string | null) => void;
 }) {
@@ -496,7 +588,9 @@ function ProjectNode({
   } | null>(null);
 
   const visibleSessions = useMemo(() => {
-    const sessions = workspace.sessions.filter((s) => !s.archivedAt);
+    const sessions = workspace.sessions.filter(
+      (s) => !s.archivedAt && s.timeline.some((t) => t.kind === "user-message"),
+    );
     if (threadSortOrder === "manual") {
       return sessions;
     }
@@ -590,6 +684,9 @@ function ProjectNode({
     if (workspace.id !== state.activeWorkspaceId) return;
 
     const handleShortcut = (e: KeyboardEvent) => {
+      if (document.activeElement?.getAttribute("data-composer") === "true") {
+        return;
+      }
       if (
         matchesShortcut(
           e,
@@ -662,7 +759,10 @@ function ProjectNode({
   );
 
   return (
-    <div style={{ display: "flex", flexDirection: "column" }}>
+    <div
+      style={{ display: "flex", flexDirection: "column", position: "relative" }}
+    >
+      {showWorkspaceDropIndicator && <DropIndicator />}
       <div
         style={{
           display: "flex",
@@ -684,19 +784,14 @@ function ProjectNode({
           onWorkspaceDragStart(workspace.id);
         }}
         onDragEnd={onWorkspaceDragEnd}
-        onDragOver={(event) => {
-          if (projectSortOrder !== "manual" || !isDraggingWorkspace) {
-            return;
-          }
-          event.preventDefault();
-        }}
+        onDragOver={(event) => onWorkspaceDragOver(event, workspace.id)}
         onDrop={(event) => {
-          if (projectSortOrder !== "manual" || !isDraggingWorkspace) {
+          if (projectSortOrder !== "manual" || !isWorkspaceDragging) {
             return;
           }
           event.preventDefault();
           event.stopPropagation();
-          onWorkspaceDrop(workspace.id);
+          onWorkspaceDrop(dropBeforeWorkspaceId);
         }}
         onMouseEnter={(e) => (e.currentTarget.style.background = "#222")}
         onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
@@ -862,16 +957,7 @@ function ProjectNode({
           )}
           {threadSortOrder === "manual" &&
             draggedSessionId !== null &&
-            sessionDropIndicator?.beforeSessionId === null && (
-              <div
-                style={{
-                  height: "2px",
-                  margin: "2px 8px 0 8px",
-                  background: "#2563eb",
-                  borderRadius: "999px",
-                }}
-              />
-            )}
+            sessionDropIndicator?.beforeSessionId === null && <DropIndicator />}
         </div>
       )}
 
@@ -1351,6 +1437,21 @@ function TruncatedSessionTitle({ title }: { title: string }) {
     >
       {displayTitle}
     </span>
+  );
+}
+
+function DropIndicator() {
+  return (
+    <div
+      style={{
+        height: "2px",
+        margin: "2px 8px",
+        background: "#2563eb",
+        borderRadius: "999px",
+        pointerEvents: "none",
+        boxShadow: "0 0 0 1px rgba(37, 99, 235, 0.2)",
+      }}
+    />
   );
 }
 

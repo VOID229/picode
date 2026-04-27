@@ -9,6 +9,7 @@ export interface ContextMenuItem {
   separator?: boolean;
   isHeader?: boolean;
   isChecked?: boolean;
+  keepOpen?: boolean;
 }
 
 interface ContextMenuProps {
@@ -91,7 +92,9 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
               onClick={(e) => {
                 e.stopPropagation();
                 item.onClick?.();
-                onClose();
+                if (!item.keepOpen) {
+                  onClose();
+                }
               }}
               style={{
                 display: "flex",

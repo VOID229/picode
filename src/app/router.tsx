@@ -6,9 +6,11 @@ export const router = createHashRouter([
   {
     path: "/",
     element: <AppShell />,
-  },
-  {
-    path: "/settings",
-    element: <SettingsScreen />,
+    children: [
+      {
+        path: "settings",
+        element: <SettingsScreen />,
+      },
+    ],
   },
 ]);

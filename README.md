@@ -22,7 +22,15 @@ Picode is currently unsigned. If macOS says the app is damaged, cannot be opened
 xattr -dr com.apple.quarantine /Applications/picode.app
 ```
 
-Linux support exists in the codebase but is not refined yet. There are currently no polished Linux installation artifacts such as `.rpm`, `.deb`, or AppImage packages; Linux users should treat the app as source-build only for now.
+Linux support exists in the codebase but is not refined yet. There are currently no polished Linux installations such as `.rpm`, `.deb`, or AppImage packages; Linux is source-build only for now.
+
+On Linux, you need the following dependencies:
+
+- cc
+- libglib2.0-dev
+- libgtk-3-dev
+- Rust (and recommended to run `rustup default stable`)
+- Bun
 
 ## Features
 

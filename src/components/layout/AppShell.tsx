@@ -1,5 +1,5 @@
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation, Outlet } from "react-router-dom";
 import type { WorkspaceRecord } from "../../domains/types";
 import {
   getShortcutBinding,
@@ -51,9 +51,19 @@ export function AppShell() {
     (store) => store.refreshWorkspaceRuntimeCatalog,
   );
   const runTerminalCommand = useAppStore((store) => store.runTerminalCommand);
+  const initializeGitRepository = useAppStore(
+    (store) => store.initializeGitRepository,
+  );
+  const refreshGit = useAppStore((store) => store.refreshGit);
   const terminalPaneOpen = useAppStore((store) => store.terminalPaneOpen);
   const setTerminalPaneOpen = useAppStore((store) => store.setTerminalPaneOpen);
   const navigate = useNavigate();
+  const location = useLocation();
+  const isSettings = location.pathname === "/settings";
+
+  function isComposerFocused() {
+    return document.activeElement?.getAttribute("data-composer") === "true";
+  }
 
   const [showActionModal, setShowActionModal] = useState(false);
   const [showActionDropdown, setShowActionDropdown] = useState(false);
@@ -66,6 +76,10 @@ export function AppShell() {
 
   useEffect(() => {
     const handleShortcut = (event: KeyboardEvent) => {
+      if (isComposerFocused()) {
+        return;
+      }
+
       if (
         matchesShortcut(
           event,
@@ -119,10 +133,15 @@ export function AppShell() {
     if (runtimeInstall?.status === "ready" && activeWorkspace) {
       void refreshWorkspaceRuntimeCatalog(activeWorkspace.id);
     }
+    if (activeWorkspace && git[activeWorkspace.id] === undefined) {
+      void refreshGit(activeWorkspace.id);
+    }
   }, [
     activeWorkspace?.id,
     refreshWorkspaceRuntimeCatalog,
+    refreshGit,
     runtimeInstall?.status,
+    git,
   ]);
 
   const getIcon = (iconName: string, size = 14) => {
@@ -183,6 +202,10 @@ export function AppShell() {
 
   useEffect(() => {
     const handleShortcut = (event: KeyboardEvent) => {
+      if (isComposerFocused()) {
+        return;
+      }
+
       if (
         matchesShortcut(
           event,
@@ -262,6 +285,17 @@ export function AppShell() {
 
   return (
     <div className="app-shell">
+      {isSettings && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 100,
+          }}
+        >
+          <Outlet />
+        </div>
+      )}
       <Sidebar state={state} onAddProject={() => setShowProjectPicker(true)} />
 
       <main className="main-pane" style={{ background: "var(--bg)" }}>
@@ -282,7 +316,11 @@ export function AppShell() {
             <span
               style={{ fontWeight: 600, fontSize: "0.9rem", color: "#fff" }}
             >
-              {deferredSession ? deferredSession.title : "New thread"}
+              {deferredSession?.timeline.some(
+                (item) => item.kind === "user-message",
+              )
+                ? deferredSession.title
+                : ""}
             </span>
             {activeWorkspace && (
               <span
@@ -482,7 +520,7 @@ export function AppShell() {
                         void openWorkspace(activeWorkspace, "zed");
                       }}
                     >
-                      <AppWindow size={14} />
+                      <ZedLogo size={14} />
                       <span style={{ flex: 1 }}>Zed</span>
                       <span style={{ fontSize: "0.7rem", color: "#666" }}>
                         ⌘O
@@ -510,10 +548,7 @@ export function AppShell() {
                 disabled={!activeWorkspace}
                 onClick={() => {
                   if (activeWorkspace) {
-                    void runTerminalCommand(activeWorkspace.id, "git init", {
-                      openPane: true,
-                      refreshGit: true,
-                    });
+                    void initializeGitRepository(activeWorkspace.id);
                   }
                 }}
               >
@@ -744,5 +779,25 @@ export function AppShell() {
         }
       `}</style>
     </div>
+  );
+}
+
+function ZedLogo({ size = 14 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 96 96"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      style={{ flexShrink: 0 }}
+    >
+      <path
+        fill="#ffff"
+        fillRule="evenodd"
+        d="M9 6a3 3 0 0 0-3 3v66H0V9a9 9 0 0 1 9-9h80.379c4.009 0 6.016 4.847 3.182 7.682L43.055 57.187H57V51h6v7.688a4.5 4.5 0 0 1-4.5 4.5H37.055L26.743 73.5H73.5V36h6v37.5a6 6 0 0 1-6 6H20.743L10.243 90H87a3 3 0 0 0 3-3V21h6v66a9 9 0 0 1-9 9H6.621c-4.009 0-6.016-4.847-3.182-7.682L52.757 39H39v6h-6v-7.5a4.5 4.5 0 0 1 4.5-4.5h21.257l10.5-10.5H22.5V60h-6V22.5a6 6 0 0 1 6-6h52.757L85.757 6H9Z"
+        clipRule="evenodd"
+      />
+    </svg>
   );
 }

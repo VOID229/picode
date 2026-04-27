@@ -28,9 +28,22 @@ pub struct UntrackedFileSnapshot {
     pub content: Vec<u8>,
 }
 
+fn resolve_git_binary() -> String {
+    if Command::new("git").arg("--version").output().map(|o| o.status.success()).unwrap_or(false) {
+        return "git".to_string();
+    }
+    for candidate in ["/usr/bin/git", "/opt/homebrew/bin/git", "/usr/local/bin/git"] {
+        if Command::new(candidate).arg("--version").output().map(|o| o.status.success()).unwrap_or(false) {
+            return candidate.to_string();
+        }
+    }
+    "git".to_string()
+}
+
 pub fn snapshot(path: &str) -> GitSnapshot {
     let path = expand_user_path(path);
-    let status_output = Command::new("git")
+    let git_binary = resolve_git_binary();
+    let status_output = Command::new(&git_binary)
         .args(["-C", &path, "status", "--short", "--branch"])
         .output();
 
@@ -48,11 +61,11 @@ pub fn snapshot(path: &str) -> GitSnapshot {
     let branch = branch_line.trim_start_matches("## ").to_string();
     let entries: Vec<&str> = lines.collect();
 
-    let diff_output = Command::new("git")
+    let diff_output = Command::new(&git_binary)
         .args(["-C", &path, "diff", "--no-ext-diff", "--unified=3"])
         .output()
         .ok();
-    let staged_output = Command::new("git")
+    let staged_output = Command::new(&git_binary)
         .args([
             "-C",
             &path,
@@ -156,6 +169,17 @@ pub fn prepare_git_action(path: &str) -> Result<PreparedGitAction> {
         can_create_pr: pr_unavailable_reason.is_none(),
         pr_unavailable_reason,
     })
+}
+
+pub fn initialize_repository(path: &str) -> Result<GitSnapshot> {
+    let path = expand_user_path(path);
+    if !snapshot(&path).is_repo {
+        git_output(&path, &["init", "-b", "main"]).or_else(|_| git_output(&path, &["init"]))?;
+    }
+
+    ensure_repository_head(&path)?;
+
+    Ok(snapshot(&path))
 }
 
 pub fn diff_for_message(path: &str, include_unstaged: bool) -> Result<String> {
@@ -414,6 +438,7 @@ pub fn capture_undo_checkpoint(
     if !snapshot(&path).is_repo {
         return Ok(None);
     }
+    ensure_repository_head(&path)?;
 
     let branch = git_output_lines(&path, &["branch", "--show-current"])?
         .into_iter()
@@ -503,7 +528,8 @@ pub fn restore_undo_checkpoint(path: &str, checkpoint: &UndoCheckpoint) -> Resul
 }
 
 fn git_output(path: &str, args: &[&str]) -> Result<String> {
-    let output = Command::new("git")
+    let git_binary = resolve_git_binary();
+    let output = Command::new(&git_binary)
         .arg("-C")
         .arg(path)
         .args(args)
@@ -530,7 +556,8 @@ fn git_output_lines(path: &str, args: &[&str]) -> Result<Vec<String>> {
 }
 
 fn run_git(path: &str, args: &[&str]) -> Result<()> {
-    let status = Command::new("git")
+    let git_binary = resolve_git_binary();
+    let status = Command::new(&git_binary)
         .arg("-C")
         .arg(path)
         .args(args)
@@ -539,6 +566,39 @@ fn run_git(path: &str, args: &[&str]) -> Result<()> {
 
     if !status.success() {
         return Err(anyhow!("git {} failed", args.join(" ")));
+    }
+
+    Ok(())
+}
+
+fn ensure_repository_head(path: &str) -> Result<()> {
+    if git_output(path, &["rev-parse", "--verify", "HEAD"]).is_ok() {
+        return Ok(());
+    }
+
+    run_git_with_identity(path, &["commit", "--allow-empty", "-m", "Initial commit"])
+}
+
+fn run_git_with_identity(path: &str, args: &[&str]) -> Result<()> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(path)
+        .args([
+            "-c",
+            "user.name=picode",
+            "-c",
+            "user.email=picode@localhost",
+        ])
+        .args(args)
+        .output()
+        .with_context(|| format!("failed to run git {}", args.join(" ")))?;
+
+    if !output.status.success() {
+        return Err(anyhow!(
+            "git {} failed: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&output.stderr)
+        ));
     }
 
     Ok(())

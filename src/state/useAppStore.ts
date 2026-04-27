@@ -26,6 +26,7 @@ import {
   createSession as createSessionCommand,
   createWorkspace as createWorkspaceCommand,
   refreshGit as refreshGitCommand,
+  initializeGitRepository as initializeGitRepositoryCommand,
   prepareGitAction as prepareGitActionCommand,
   runGitAction as runGitActionCommand,
   refreshWorkspaceRuntimeCatalog as refreshWorkspaceRuntimeCatalogCommand,
@@ -213,6 +214,7 @@ interface AppStoreState {
       terminalTabId?: string;
     },
   ) => Promise<void>;
+  initializeGitRepository: (workspaceId: string) => Promise<void>;
   refreshRuntimeHealth: () => Promise<void>;
   refreshWorkspaceRuntimeCatalog: (workspaceId: string) => Promise<void>;
   setComposerDraft: (sessionId: string, draft: string) => void;
@@ -491,6 +493,7 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
     if (get().runtimeInstall?.status === "ready") {
       await get().refreshWorkspaceRuntimeCatalog(workspace.id);
     }
+    await get().refreshGit(workspace.id);
   },
   async createSession(workspaceId, options) {
     const store = get();
@@ -520,6 +523,12 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
   },
   async refreshGit(workspaceId) {
     const snapshot = await refreshGitCommand({ workspaceId });
+    set((store) => ({
+      git: { ...store.git, [workspaceId]: snapshot },
+    }));
+  },
+  async initializeGitRepository(workspaceId) {
+    const snapshot = await initializeGitRepositoryCommand({ workspaceId });
     set((store) => ({
       git: { ...store.git, [workspaceId]: snapshot },
     }));
