@@ -1242,15 +1242,14 @@ fn handle_check_for_updates_menu(app: &AppHandle) {
                     Ok(_) => show_update_message(
                         &app,
                         "Update installed",
-                        format!("picode {latest} was installed from {channel}. Restart picode to finish updating."),
+                        format!(
+                            "picode {latest} was installed from {channel}. Restart picode to finish updating."
+                        ),
                         MessageDialogKind::Info,
                     ),
-                    Err(error) => show_update_message(
-                        &app,
-                        "Update failed",
-                        error,
-                        MessageDialogKind::Error,
-                    ),
+                    Err(error) => {
+                        show_update_message(&app, "Update failed", error, MessageDialogKind::Error)
+                    }
                 }
             }
             Err(error) => {

@@ -29,11 +29,25 @@ pub struct UntrackedFileSnapshot {
 }
 
 fn resolve_git_binary() -> String {
-    if Command::new("git").arg("--version").output().map(|o| o.status.success()).unwrap_or(false) {
+    if Command::new("git")
+        .arg("--version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+    {
         return "git".to_string();
     }
-    for candidate in ["/usr/bin/git", "/opt/homebrew/bin/git", "/usr/local/bin/git"] {
-        if Command::new(candidate).arg("--version").output().map(|o| o.status.success()).unwrap_or(false) {
+    for candidate in [
+        "/usr/bin/git",
+        "/opt/homebrew/bin/git",
+        "/usr/local/bin/git",
+    ] {
+        if Command::new(candidate)
+            .arg("--version")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+        {
             return candidate.to_string();
         }
     }
