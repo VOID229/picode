@@ -6,7 +6,6 @@
 ![macOS](https://img.shields.io/badge/macOS-DMG-lightgrey)
 ![Linux](https://img.shields.io/badge/Linux-experimental-f59e0b)
 
-![Picode desktop app demo](docs/assets/picode-demo.png)
 
 Picode is a minimal desktop GUI for coding agents using Pi.
 

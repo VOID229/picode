@@ -1150,3 +1150,247 @@ function resolveAntigravityPair(provider: ProviderOption, modelId: string) {
 
   return null;
 }
+
+// ── Compact Tool Activity UI helpers ───────────────────────────
+
+export type CompactToolPhase =
+  | "searching"
+  | "reading"
+  | "editing"
+  | "running"
+  | "reviewing"
+  | "done"
+  | "error";
+
+export type CompactToolItemType = "search" | "read" | "edit" | "command" | "other";
+
+export interface CompactToolItem {
+  id: string;
+  type: CompactToolItemType;
+  label: string;
+  path?: string;
+  command?: string;
+  status: "running" | "success" | "error";
+  raw: ToolActivityItem;
+}
+
+export interface CompactToolState {
+  phase: CompactToolPhase;
+  currentLabel: string | null;
+  items: CompactToolItem[];
+}
+
+export function mapActivityPhaseToCompact(
+  phase: ActivityPhase,
+  isLive: boolean,
+): CompactToolPhase {
+  if (!isLive) return "done";
+  switch (phase) {
+    case "searching":
+      return "searching";
+    case "reading-files":
+      return "reading";
+    case "writing-files":
+      return "editing";
+    case "running-command":
+      return "running";
+    case "verifying":
+      return "reviewing";
+    case "thinking":
+      return "reviewing";
+    default:
+      return "reading";
+  }
+}
+
+function mapActivityStatus(
+  status: ToolActivityItem["activity"]["status"],
+): CompactToolItem["status"] {
+  switch (status) {
+    case "running":
+      return "running";
+    case "failed":
+      return "error";
+    case "completed":
+    default:
+      return "success";
+  }
+}
+
+function mapToCompactItemType(item: ToolActivityItem): CompactToolItemType {
+  const category = classifyToolCategory(
+    item.activity.toolName,
+    item.activity.summary,
+  );
+  switch (category) {
+    case "searched":
+      return "search";
+    case "edited":
+      return "edit";
+    case "ran":
+      return "command";
+    case "explored":
+    default:
+      return "read";
+  }
+}
+
+function extractCommandString(item: ToolActivityItem): string | undefined {
+  const args = parseToolArgs(item.activity.summary);
+  if (args && typeof args.command === "string" && args.command.trim()) {
+    return args.command.trim();
+  }
+  const toolName = item.activity.toolName.trim().toLowerCase();
+  if (["bash", "shell", "run", "exec", "command"].includes(toolName)) {
+    // Try to extract a bare command from the summary when it's not JSON-wrapped
+    const summary = item.activity.summary.trim();
+    const firstBrace = summary.indexOf("{");
+    if (firstBrace === -1) {
+      return summary || undefined;
+    }
+    // If there's text before the JSON, treat it as the command
+    const preamble = summary.slice(0, firstBrace).trim();
+    if (preamble) {
+      return preamble;
+    }
+  }
+  return undefined;
+}
+
+export function deriveCompactToolItems(
+  segment: ActivitySegment,
+): CompactToolItem[] {
+  return segment.items
+    .filter((item): item is ToolActivityItem => item.kind === "tool-activity")
+    .map((item) => {
+      const type = mapToCompactItemType(item);
+      const paths = extractToolPaths(item.activity.summary);
+      const command =
+        type === "command" ? extractCommandString(item) : undefined;
+      const path = paths[0] ?? undefined;
+
+      let label: string;
+      if (type === "command" && command) {
+        label = command;
+      } else if (path) {
+        label = path;
+      } else {
+        label = item.activity.toolName;
+      }
+
+      return {
+        id: item.id,
+        type,
+        label,
+        path,
+        command,
+        status: mapActivityStatus(item.activity.status),
+        raw: item,
+      };
+    });
+}
+
+export function deriveCompactToolState(
+  segment: ActivitySegment,
+): CompactToolState {
+  const items = deriveCompactToolItems(segment);
+  const phase = mapActivityPhaseToCompact(
+    segment.phase,
+    Boolean(segment.isLive),
+  );
+
+  const currentLabel = segment.isLive ? formatCompactLiveLabel(phase) : null;
+
+  return { phase, currentLabel, items };
+}
+
+export function formatCompactLiveLabel(phase: CompactToolPhase): string {
+  switch (phase) {
+    case "searching":
+      return "Searching…";
+    case "reading":
+      return "Reading files…";
+    case "editing":
+      return "Editing files…";
+    case "running":
+      return "Running commands…";
+    case "reviewing":
+      return "Reviewing…";
+    case "error":
+      return "Error";
+    case "done":
+    default:
+      return "Working…";
+  }
+}
+
+export function formatCompactSummary(items: CompactToolItem[]): string {
+  const counts: Record<CompactToolItemType, number> = {
+    search: 0,
+    read: 0,
+    edit: 0,
+    command: 0,
+    other: 0,
+  };
+  for (const item of items) {
+    counts[item.type]++;
+  }
+
+  const parts: string[] = [];
+  if (counts.read > 0) parts.push(`Read ${counts.read}`);
+  if (counts.edit > 0) parts.push(`Edited ${counts.edit}`);
+  if (counts.command > 0) parts.push(`Commands ${counts.command}`);
+  if (counts.search > 0) parts.push(`Searched ${counts.search}`);
+  if (counts.other > 0) parts.push(`Other ${counts.other}`);
+
+  if (parts.length === 0) return "Tools used";
+  return `Tools used: ${parts.join(" · ")}`;
+}
+
+export function groupCompactToolItems(
+  items: CompactToolItem[],
+): Record<CompactToolItemType, CompactToolItem[]> {
+  const groups: Record<CompactToolItemType, CompactToolItem[]> = {
+    search: [],
+    read: [],
+    edit: [],
+    command: [],
+    other: [],
+  };
+  for (const item of items) {
+    groups[item.type].push(item);
+  }
+  return groups;
+}
+
+export function formatCompactGroupLabel(type: CompactToolItemType): string {
+  switch (type) {
+    case "search":
+      return "Searched";
+    case "read":
+      return "Read files";
+    case "edit":
+      return "Edited files";
+    case "command":
+      return "Commands";
+    case "other":
+      return "Other";
+  }
+}
+
+export function formatCompactGroupLabelRunning(
+  type: CompactToolItemType,
+): string {
+  switch (type) {
+    case "search":
+      return "Searching";
+    case "read":
+      return "Reading files";
+    case "edit":
+      return "Editing files";
+    case "command":
+      return "Commands running";
+    case "other":
+      return "Working";
+  }
+}

@@ -1313,10 +1313,22 @@ function TurnRenderer({
       ? extractFileChanges(allToolItems)
       : [];
 
+  const handleUndoTurn = turn.userMessageId
+    ? () =>
+        onUndo({
+          userMessageId: turn.userMessageId!,
+          toolFileChanges: fileChanges,
+        })
+    : undefined;
+
   // Build the inner content (tool groups + interleaved text)
   const innerContent = turn.segments.map((segment, segIndex) => {
     if (segment.type === "activity") {
-      if (segment.isLive && segment.livePhase) {
+      if (
+        segment.isLive &&
+        segment.livePhase &&
+        segment.activityPhase === "thinking"
+      ) {
         return (
           <LiveThinkingRow
             key={`seg-${segIndex}`}
@@ -1347,6 +1359,7 @@ function TurnRenderer({
         workspaceId={workspaceId}
         sessionId={sessionId}
         onResolveApproval={onResolveApproval}
+        onUndo={item.kind === "user-message" ? handleUndoTurn : undefined}
       />
     ));
   });
@@ -1363,7 +1376,11 @@ function TurnRenderer({
     for (let i = 0; i < turn.segments.length; i++) {
       const segment = turn.segments[i];
       if (segment.type === "activity") {
-        if (segment.isLive && segment.livePhase) {
+        if (
+          segment.isLive &&
+          segment.livePhase &&
+          segment.activityPhase === "thinking"
+        ) {
           toolContent.push(
             <LiveThinkingRow
               key={`seg-${i}`}
@@ -1395,6 +1412,7 @@ function TurnRenderer({
               workspaceId={workspaceId}
               sessionId={sessionId}
               onResolveApproval={onResolveApproval}
+              onUndo={handleUndoTurn}
             />
           )),
         );

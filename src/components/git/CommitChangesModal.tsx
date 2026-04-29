@@ -50,7 +50,7 @@ export function CommitChangesModal({
   );
   const [includeUnstaged, setIncludeUnstaged] = useState(true);
   const [message, setMessage] = useState("");
-  const [autoGenerateMessage, setAutoGenerateMessage] = useState(true);
+  const [autoGenerateMessage, setAutoGenerateMessage] = useState(false);
   const [showCustomInstructions, setShowCustomInstructions] = useState(false);
   const [customInstructions, setCustomInstructions] = useState("");
   const [draft, setDraft] = useState(initialAction === "create-pr");

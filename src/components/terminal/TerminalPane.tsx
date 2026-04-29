@@ -14,6 +14,7 @@ import { PromptModal } from "../layout/PromptModal";
 
 interface TerminalPaneProps {
   workspace: WorkspaceRecord | null;
+  height?: number;
 }
 
 interface TerminalBinding {
@@ -31,7 +32,7 @@ function getTerminalTabLabel(title: string | undefined, fallbackIndex: number) {
     : `terminal ${fallbackIndex + 1}`;
 }
 
-export function TerminalPane({ workspace }: TerminalPaneProps) {
+export function TerminalPane({ workspace, height = 276 }: TerminalPaneProps) {
   const paneOpen = useAppStore((state) => state.terminalPaneOpen);
   const shortcuts = useAppStore((state) => state.state?.preferences.shortcuts);
   const terminals = useAppStore((state) => state.terminals);
@@ -385,6 +386,7 @@ export function TerminalPane({ workspace }: TerminalPaneProps) {
     <section
       className={`terminal-pane ${paneOpen ? "terminal-pane--open" : ""}`}
       aria-hidden={!paneOpen}
+      style={{ flexBasis: paneOpen ? height : 0 }}
     >
       <div className="terminal-pane__meta">
         <div className="terminal-pane__tabs-wrap">

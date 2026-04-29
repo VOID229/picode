@@ -30,7 +30,7 @@ pub struct ApprovalPolicy {
     pub network_enabled: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ProviderOption {
     pub id: String,
@@ -46,7 +46,7 @@ pub struct ProviderOption {
     pub models: Vec<ModelOption>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelOption {
     pub id: String,
@@ -61,7 +61,7 @@ pub struct ModelOption {
     pub provider_source: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ProviderStatus {
     Ready,
@@ -72,7 +72,7 @@ pub enum ProviderStatus {
     Error,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum ProviderAuthKind {
     Oauth,

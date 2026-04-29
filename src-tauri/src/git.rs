@@ -130,11 +130,17 @@ pub fn snapshot(path: &str) -> GitSnapshot {
         dirty: !entries.is_empty(),
         staged_count: entries
             .iter()
-            .filter(|entry| !entry.starts_with(" ") && !entry.starts_with("??"))
+            .filter(|entry| {
+                let first = entry.chars().next();
+                first.is_some() && first != Some(' ') && first != Some('?')
+            })
             .count(),
         unstaged_count: entries
             .iter()
-            .filter(|entry| entry.starts_with(" M") || entry.starts_with("??"))
+            .filter(|entry| {
+                let second = entry.chars().nth(1);
+                second.is_some() && second != Some(' ')
+            })
             .count(),
         files,
     }
@@ -571,15 +577,16 @@ fn git_output_lines(path: &str, args: &[&str]) -> Result<Vec<String>> {
 
 fn run_git(path: &str, args: &[&str]) -> Result<()> {
     let git_binary = resolve_git_binary();
-    let status = Command::new(&git_binary)
+    let output = Command::new(&git_binary)
         .arg("-C")
         .arg(path)
         .args(args)
-        .status()
+        .output()
         .with_context(|| format!("failed to run git {}", args.join(" ")))?;
 
-    if !status.success() {
-        return Err(anyhow!("git {} failed", args.join(" ")));
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(anyhow!("git {} failed: {}", args.join(" "), stderr.trim()));
     }
 
     Ok(())

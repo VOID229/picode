@@ -16,6 +16,7 @@ import type {
   TerminalSessionState,
   TimelineItem,
   WorkspaceCatalogStatus,
+  WorkspaceRuntimeCatalogPayload,
   WorkspaceTerminalState,
   WorkspaceRecord,
 } from "../domains/types";
@@ -225,7 +226,9 @@ interface AppStoreState {
   ) => Promise<void>;
   initializeGitRepository: (workspaceId: string) => Promise<void>;
   refreshRuntimeHealth: () => Promise<void>;
-  refreshWorkspaceRuntimeCatalog: (workspaceId: string) => Promise<void>;
+  refreshWorkspaceRuntimeCatalog: (
+    workspaceId: string,
+  ) => Promise<WorkspaceRuntimeCatalogPayload | undefined>;
   setComposerDraft: (sessionId: string, draft: string) => void;
   setComposerImages: (sessionId: string, images: ComposerImageDraft[]) => void;
   addComposerImages: (sessionId: string, images: ComposerImageDraft[]) => void;
@@ -1017,7 +1020,7 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
   },
   async refreshWorkspaceRuntimeCatalog(workspaceId) {
     if (get().runtimeInstall?.status !== "ready") {
-      return;
+      return undefined;
     }
 
     set((store) => ({
@@ -1058,6 +1061,7 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
         }
 
         const nextState = structuredClone(store.state);
+        nextState.providers = payload.providers;
         const workspace = nextState.workspaces.find(
           (item) => item.id === workspaceId,
         );
@@ -1086,6 +1090,7 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
           },
         };
       });
+      return payload;
     } catch (error) {
       set((store) => ({
         workspaceCatalogStatus: {
@@ -1101,6 +1106,7 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
           [workspaceId]: error instanceof Error ? error.message : String(error),
         },
       }));
+      return undefined;
     }
   },
   setComposerDraft(sessionId, draft) {

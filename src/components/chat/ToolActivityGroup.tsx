@@ -1,38 +1,41 @@
 import { ChevronRight } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
-import type { TimelineItem, ToolActivityItem } from "../../domains/types";
+import { useState } from "react";
+import type { TimelineItem } from "../../domains/types";
 import { cn } from "../../lib/cn";
 import { useAppStore } from "../../state/useAppStore";
+import type { ActivitySegment } from "./chatRuntime";
 import {
-  formatActivityPhaseLabel,
-  formatToolGroupLabel,
-  groupToolActivities,
-  isLiveToolActivity,
-  summarizeToolActivityDetails,
-  type ActivitySegment,
-  type ToolFileAction,
+  deriveCompactToolState,
+  formatCompactGroupLabel,
+  formatCompactGroupLabelRunning,
+  formatCompactLiveLabel,
+  formatCompactSummary,
+  groupCompactToolItems,
+  type CompactToolItem,
+  type CompactToolItemType,
 } from "./chatRuntime";
 
 interface ToolActivityGroupProps {
   segment: ActivitySegment;
 }
 
-const MIN_LIVE_LABEL_MS = 3000;
-
 export function ToolActivityGroup({ segment }: ToolActivityGroupProps) {
   const [expanded, setExpanded] = useState(false);
   const [rawExpanded, setRawExpanded] = useState(false);
-  const [displayLive, setDisplayLive] = useState(false);
   const showRawToolCalls = useAppStore(
     (store) => store.state?.preferences.showRawToolCalls ?? false,
   );
-  const liveStartedAtRef = useRef<number | null>(null);
-  const liveTimeoutRef = useRef<number | null>(null);
-  const wasRunningRef = useRef(false);
 
-  const toolItems = segment.items.filter(
-    (item): item is ToolActivityItem => item.kind === "tool-activity",
-  );
+  const state = deriveCompactToolState(segment);
+  const isLive = Boolean(segment.isLive);
+  const isRunningPhase = state.phase === "running";
+  const hasItems = state.items.length > 0;
+
+  // Only commands can be expanded while live; done state is always expandable
+  const canExpand =
+    (isLive && isRunningPhase && hasItems) || (!isLive && hasItems);
+
+  // Collect notice items for fallback rendering
   const noticeItems = segment.items.filter(
     (
       item,
@@ -43,89 +46,23 @@ export function ToolActivityGroup({ segment }: ToolActivityGroupProps) {
     } => item.kind === "system-notice" || item.kind === "warning",
   );
 
-  if (toolItems.length === 0 && noticeItems.length === 0) {
+  if (state.items.length === 0 && noticeItems.length === 0) {
     return null;
   }
 
-  const details = summarizeToolActivityDetails(toolItems);
-  const summary = groupToolActivities(toolItems, details);
-  const anyRunning = Boolean(segment.isLive) || isLiveToolActivity(toolItems);
-  const canShowDetails =
-    showRawToolCalls &&
-    (details.files.length > 0 ||
-      noticeItems.length > 0 ||
-      details.rawCalls.length > 0);
-  useEffect(() => {
-    const wasRunning = wasRunningRef.current;
-    wasRunningRef.current = anyRunning;
+  const headerLabel = isLive
+    ? formatCompactLiveLabel(state.phase)
+    : formatCompactSummary(state.items);
 
-    if (anyRunning) {
-      if (!wasRunning) {
-        liveStartedAtRef.current = Date.now();
-      }
-
-      if (liveTimeoutRef.current !== null) {
-        window.clearTimeout(liveTimeoutRef.current);
-        liveTimeoutRef.current = null;
-      }
-
-      setDisplayLive(true);
-      return () => {
-        if (liveTimeoutRef.current !== null) {
-          window.clearTimeout(liveTimeoutRef.current);
-          liveTimeoutRef.current = null;
-        }
-      };
-    }
-
-    if (!wasRunning || liveStartedAtRef.current === null) {
-      setDisplayLive(false);
-      return;
-    }
-
-    const elapsed = Date.now() - liveStartedAtRef.current;
-    const remaining = Math.max(0, MIN_LIVE_LABEL_MS - elapsed);
-    if (remaining === 0) {
-      liveStartedAtRef.current = null;
-      setDisplayLive(false);
-      return;
-    }
-
-    liveTimeoutRef.current = window.setTimeout(() => {
-      liveStartedAtRef.current = null;
-      liveTimeoutRef.current = null;
-      setDisplayLive(false);
-    }, remaining);
-
-    return () => {
-      if (liveTimeoutRef.current !== null) {
-        window.clearTimeout(liveTimeoutRef.current);
-        liveTimeoutRef.current = null;
-      }
-    };
-  }, [anyRunning]);
-
-  const label =
-    segment.phase !== "other"
-      ? formatActivityPhaseLabel(segment.phase, displayLive)
-      : toolItems.length > 0
-        ? formatToolGroupLabel(summary, displayLive)
-        : formatActivityPhaseLabel(segment.phase, displayLive);
+  const grouped = groupCompactToolItems(state.items);
 
   return (
     <div className="tool-activity-group">
-      <button
-        className={cn(
-          "tool-activity-group__header",
-          !canShowDetails && "tool-activity-group__header--static",
-        )}
-        onClick={() => {
-          if (canShowDetails) {
-            setExpanded(!expanded);
-          }
-        }}
-      >
-        {canShowDetails && (
+      {canExpand ? (
+        <button
+          className="tool-activity-group__header"
+          onClick={() => setExpanded(!expanded)}
+        >
           <ChevronRight
             size={14}
             className={cn(
@@ -133,18 +70,29 @@ export function ToolActivityGroup({ segment }: ToolActivityGroupProps) {
               expanded && "tool-activity-group__arrow--expanded",
             )}
           />
-        )}
-        <span
-          className={cn(
-            "tool-activity-group__label",
-            displayLive && "text-shimmer",
-          )}
-        >
-          {label}
-        </span>
-      </button>
+          <span
+            className={cn(
+              "tool-activity-group__label",
+              isLive && "tool-live-text",
+            )}
+          >
+            {headerLabel}
+          </span>
+        </button>
+      ) : (
+        <div className="tool-activity-group__header tool-activity-group__header--static">
+          <span
+            className={cn(
+              "tool-activity-group__label",
+              isLive && "tool-live-text",
+            )}
+          >
+            {headerLabel}
+          </span>
+        </div>
+      )}
 
-      {canShowDetails && (
+      {canExpand && (
         <div
           className={cn(
             "tool-activity-group__content",
@@ -152,40 +100,31 @@ export function ToolActivityGroup({ segment }: ToolActivityGroupProps) {
           )}
         >
           <div className="tool-activity-group__list">
-            {details.files.length > 0 ? (
-              details.files.map((file) => (
-                <div key={file.path} className="tool-activity-group__file">
-                  <span
-                    className="tool-activity-group__file-path"
-                    title={file.path}
-                  >
-                    {file.path}
-                  </span>
-                  <span className="tool-activity-group__file-actions">
-                    {formatToolFileActions(file.actions)}
-                  </span>
-                </div>
-              ))
-            ) : noticeItems.length > 0 ? (
-              noticeItems.map((item) => (
-                <div key={item.id} className="tool-activity-group__item">
-                  <span className="tool-activity-group__tool-name">
-                    {item.title}
-                  </span>
-                  {item.detail && (
-                    <span className="tool-activity-group__tool-summary">
-                      {item.detail}
-                    </span>
-                  )}
-                </div>
-              ))
+            {isLive && isRunningPhase ? (
+              <RunningCommandList items={state.items} />
             ) : (
-              <div className="tool-activity-group__empty">
-                No file paths captured for this step.
+              <DoneToolList grouped={grouped} />
+            )}
+
+            {noticeItems.length > 0 && state.items.length === 0 && (
+              <div className="tool-activity-group__notices">
+                {noticeItems.map((item) => (
+                  <div key={item.id} className="tool-activity-group__notice">
+                    <span className="tool-activity-group__notice-title">
+                      {item.title}
+                    </span>
+                    {item.detail && (
+                      <span className="tool-activity-group__notice-detail">
+                        {item.detail}
+                      </span>
+                    )}
+                  </div>
+                ))}
               </div>
             )}
           </div>
-          {details.rawCalls.length > 0 && (
+
+          {showRawToolCalls && state.items.length > 0 && (
             <div className="tool-activity-group__subsection">
               <button
                 className="tool-activity-group__subtoggle"
@@ -195,21 +134,21 @@ export function ToolActivityGroup({ segment }: ToolActivityGroupProps) {
                 {rawExpanded ? "Hide raw tool calls" : "Show raw tool calls"}
               </button>
               {rawExpanded && (
-                <div className="tool-activity-group__list">
-                  {details.rawCalls.map((item) => (
+                <div className="tool-activity-group__raw-list">
+                  {state.items.map((item) => (
                     <div
                       key={item.id}
                       className={cn(
-                        "tool-activity-group__item",
-                        item.activity.status === "running" &&
-                          "tool-activity-group__item--running",
+                        "tool-activity-group__raw-item",
+                        item.status === "running" &&
+                          "tool-activity-group__raw-item--running",
                       )}
                     >
-                      <span className="tool-activity-group__tool-name">
-                        {item.activity.toolName}
+                      <span className="tool-activity-group__raw-name">
+                        {item.raw.activity.toolName}
                       </span>
-                      <span className="tool-activity-group__tool-summary">
-                        {item.activity.summary}
+                      <span className="tool-activity-group__raw-summary">
+                        {item.raw.activity.summary}
                       </span>
                     </div>
                   ))}
@@ -223,20 +162,80 @@ export function ToolActivityGroup({ segment }: ToolActivityGroupProps) {
   );
 }
 
-function formatToolFileActions(actions: ToolFileAction[]) {
-  return actions
-    .map((action) => {
-      switch (action) {
-        case "edit":
-          return "edited";
-        case "search":
-          return "searched";
-        case "list":
-          return "listed";
-        case "read":
-        default:
-          return "read";
-      }
-    })
-    .join(", ");
+function RunningCommandList({ items }: { items: CompactToolItem[] }) {
+  const commandItems = items.filter((item) => item.type === "command");
+  if (commandItems.length === 0) {
+    return (
+      <div className="tool-activity-group__empty">No commands running.</div>
+    );
+  }
+
+  return (
+    <div className="tool-activity-group__group">
+      <div className="tool-activity-group__group-title">
+        {formatCompactGroupLabelRunning("command")}
+      </div>
+      <ul className="tool-activity-group__group-list">
+        {commandItems.map((item) => (
+          <li key={item.id} className="tool-activity-group__group-row">
+            <span className="tool-activity-group__group-label">
+              {item.label}
+            </span>
+            <span className="tool-activity-group__group-status">
+              {item.status === "running"
+                ? "running…"
+                : item.status === "error"
+                  ? "✗"
+                  : "✓"}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function DoneToolList({
+  grouped,
+}: {
+  grouped: Record<CompactToolItemType, CompactToolItem[]>;
+}) {
+  const order: CompactToolItemType[] = ["read", "edit", "command", "search", "other"];
+  const hasAny = order.some((type) => grouped[type].length > 0);
+
+  if (!hasAny) {
+    return (
+      <div className="tool-activity-group__empty">
+        No tool details captured.
+      </div>
+    );
+  }
+
+  return (
+    <>
+      {order.map((type) => {
+        const groupItems = grouped[type];
+        if (groupItems.length === 0) return null;
+        return (
+          <div key={type} className="tool-activity-group__group">
+            <div className="tool-activity-group__group-title">
+              {formatCompactGroupLabel(type)}
+            </div>
+            <ul className="tool-activity-group__group-list">
+              {groupItems.map((item) => (
+                <li key={item.id} className="tool-activity-group__group-row">
+                  <span className="tool-activity-group__group-label">
+                    {item.label}
+                  </span>
+                  <span className="tool-activity-group__group-status">
+                    {item.status === "error" ? "✗" : "✓"}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        );
+      })}
+    </>
+  );
 }

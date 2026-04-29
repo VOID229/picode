@@ -1,4 +1,10 @@
-import { useDeferredValue, useEffect, useMemo, useState } from "react";
+import {
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useNavigate, useLocation, Outlet } from "react-router-dom";
 import type { WorkspaceRecord } from "../../domains/types";
 import {
@@ -70,6 +76,10 @@ export function AppShell() {
   const [openTarget, setOpenTarget] = useState<OpenTarget>("zed");
   const [showProjectPicker, setShowProjectPicker] = useState(false);
   const [gitActionMode, setGitActionMode] = useState<GitAction | null>(null);
+  const [terminalHeight, setTerminalHeight] = useState(276);
+  const isResizingRef = useRef(false);
+  const startYRef = useRef(0);
+  const startHeightRef = useRef(terminalHeight);
 
   useEffect(() => {
     const handleShortcut = (event: KeyboardEvent) => {
@@ -97,6 +107,32 @@ export function AppShell() {
     window.addEventListener("keydown", handleShortcut);
     return () => window.removeEventListener("keydown", handleShortcut);
   }, [navigate, state?.preferences.shortcuts]);
+
+  useEffect(() => {
+    const handleMouseMove = (event: MouseEvent) => {
+      if (!isResizingRef.current) return;
+      const delta = startYRef.current - event.clientY;
+      const nextHeight = Math.max(
+        120,
+        Math.min(window.innerHeight * 0.8, startHeightRef.current + delta),
+      );
+      setTerminalHeight(nextHeight);
+    };
+
+    const handleMouseUp = () => {
+      if (!isResizingRef.current) return;
+      isResizingRef.current = false;
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, []);
 
   const activeWorkspace = useMemo(
     () =>
@@ -641,7 +677,22 @@ export function AppShell() {
             workspace={activeWorkspace}
             session={deferredSession}
           />
-          <TerminalPane workspace={activeWorkspace} />
+          {terminalPaneOpen && (
+            <div
+              className="terminal-resize-handle"
+              onMouseDown={(event) => {
+                isResizingRef.current = true;
+                startYRef.current = event.clientY;
+                startHeightRef.current = terminalHeight;
+                document.body.style.cursor = "row-resize";
+                document.body.style.userSelect = "none";
+              }}
+            />
+          )}
+          <TerminalPane
+            workspace={activeWorkspace}
+            height={terminalHeight}
+          />
         </section>
       </main>
 

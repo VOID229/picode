@@ -7,60 +7,73 @@ interface ModelProviderPickerProps {
 
 export function ModelProviderPicker({ workspace }: ModelProviderPickerProps) {
   const state = useAppStore((store) => store.state);
+  const workspaceCatalogs = useAppStore((store) => store.workspaceCatalogs);
   const updateWorkspaceSettings = useAppStore(
     (store) => store.updateWorkspaceSettings,
+  );
+  const refreshWorkspaceRuntimeCatalog = useAppStore(
+    (store) => store.refreshWorkspaceRuntimeCatalog,
   );
 
   if (!workspace || !state) {
     return null;
   }
 
-  const provider = state.providers.find(
-    (item) => item.id === workspace.providerId,
-  );
+  const providers = workspaceCatalogs[workspace.id] ?? state.providers;
+  const provider = providers.find((item) => item.id === workspace.providerId);
 
   const selectStyle: React.CSSProperties = {
-    background: 'var(--surface-elevated)',
-    border: '1px solid var(--line)',
-    borderRadius: '6px',
-    padding: '4px 8px',
-    fontSize: '0.8rem',
-    color: 'inherit',
-    outline: 'none',
-    cursor: 'pointer'
+    background: "var(--surface-elevated)",
+    border: "1px solid var(--line)",
+    borderRadius: "6px",
+    padding: "4px 8px",
+    fontSize: "0.8rem",
+    color: "inherit",
+    outline: "none",
+    cursor: "pointer",
   };
 
   const labelStyle: React.CSSProperties = {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-    fontSize: '0.75rem',
-    color: 'var(--text-dim)',
-    fontWeight: 500
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    fontSize: "0.75rem",
+    color: "var(--text-dim)",
+    fontWeight: 500,
   };
 
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
+    <div style={{ display: "flex", alignItems: "center", gap: "20px" }}>
       <label style={labelStyle}>
         <span>Provider</span>
         <select
           style={selectStyle}
           value={workspace.providerId}
-          onChange={(event) => {
-            const nextProvider = state.providers.find(
-              (item) => item.id === event.target.value,
+          onChange={async (event) => {
+            const providerId = event.target.value;
+            let nextProviders = providers;
+
+            if (providerId === "openai-codex") {
+              const refreshed = await refreshWorkspaceRuntimeCatalog(
+                workspace.id,
+              );
+              nextProviders = refreshed?.providers ?? nextProviders;
+            }
+
+            const nextProvider = nextProviders.find(
+              (item) => item.id === providerId,
             );
 
             void updateWorkspaceSettings({
               workspaceId: workspace.id,
               approvalMode: workspace.approvalMode,
-              providerId: event.target.value,
+              providerId,
               modelId: nextProvider?.models[0]?.id ?? workspace.modelId,
               policy: workspace.policy,
             });
           }}
         >
-          {state.providers.map((item) => (
+          {providers.map((item) => (
             <option key={item.id} value={item.id}>
               {item.label}
             </option>

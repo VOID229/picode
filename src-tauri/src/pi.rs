@@ -2565,7 +2565,12 @@ async fn fetch_workspace_catalog_and_normalize(
         let mut state = shared.state.lock().await;
         let global_selection = state.preferences.model_selection_scope == "global";
 
-        let (selected_provider_id, selected_model_id, changed) = if global_selection {
+        let providers_changed = state.providers != providers;
+        if providers_changed {
+            state.providers = providers.clone();
+        }
+
+        let (selected_provider_id, selected_model_id, selection_changed) = if global_selection {
             state
                 .workspaces
                 .iter()
@@ -2598,7 +2603,7 @@ async fn fetch_workspace_catalog_and_normalize(
             )
         };
 
-        if changed {
+        if providers_changed || selection_changed {
             storage::save(app, &state)?;
         }
 

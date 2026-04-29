@@ -31,6 +31,7 @@ interface TimelineItemViewProps {
     approvalId: string,
     decision: "approved" | "rejected",
   ) => Promise<void>;
+  onUndo?: () => void;
 }
 
 export function TimelineItemView({
@@ -38,6 +39,7 @@ export function TimelineItemView({
   workspaceId,
   sessionId,
   onResolveApproval,
+  onUndo,
 }: TimelineItemViewProps) {
   const [copyFeedbackVisible, setCopyFeedbackVisible] = useState(false);
   const copyFeedbackTimerRef = useRef<number | null>(null);
@@ -134,33 +136,44 @@ export function TimelineItemView({
             >
               <GitFork size={13} />
             </button>
-            <button
-              className="chat-message-action"
-              title="Undo"
-              type="button"
-              onClick={async () => {
-                const confirmed = window.confirm(
-                  git?.isRepo
-                    ? "Undo this message and everything after it? This restores the working tree and index to the saved checkpoint only if HEAD has not changed."
-                    : "Undo this message and everything after it? This removes the assistant response and runtime context for this turn, then puts your message back in the composer.",
-                );
-                if (!confirmed) {
-                  return;
-                }
-
-                try {
-                  await undoUserTurn(workspaceId, sessionId, item.id);
-                } catch (error) {
-                  window.alert(
-                    error instanceof Error
-                      ? error.message
-                      : "Undo is unavailable for this message.",
+            {onUndo ? (
+              <button
+                className="chat-message-action"
+                title="Undo"
+                type="button"
+                onClick={() => void onUndo()}
+              >
+                <RotateCcw size={13} />
+              </button>
+            ) : (
+              <button
+                className="chat-message-action"
+                title="Undo"
+                type="button"
+                onClick={async () => {
+                  const confirmed = window.confirm(
+                    git?.isRepo
+                      ? "Undo this message and everything after it? This restores the working tree and index to the saved checkpoint only if HEAD has not changed."
+                      : "Undo this message and everything after it? This removes the assistant response and runtime context for this turn, then puts your message back in the composer.",
                   );
-                }
-              }}
-            >
-              <RotateCcw size={13} />
-            </button>
+                  if (!confirmed) {
+                    return;
+                  }
+
+                  try {
+                    await undoUserTurn(workspaceId, sessionId, item.id);
+                  } catch (error) {
+                    window.alert(
+                      error instanceof Error
+                        ? error.message
+                        : "Undo is unavailable for this message.",
+                    );
+                  }
+                }}
+              >
+                <RotateCcw size={13} />
+              </button>
+            )}
           </div>
         </div>
       </article>
