@@ -1167,6 +1167,10 @@ pub fn new_workspace(
 }
 
 fn normalize_effort(effort: &mut String) {
+    if effort == "extra-high" {
+        *effort = "xhigh".to_string();
+    }
+
     if effort.trim().is_empty() {
         *effort = default_effort();
     }

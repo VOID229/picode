@@ -137,7 +137,46 @@ describe("shortenAssistantLabel", () => {
 });
 
 describe("resolveComposerCapabilities", () => {
-  it("supports codex fast mode with the full reasoning ladder", () => {
+  it("supports the full reasoning ladder globally without fast mode", () => {
+    expect(
+      resolveComposerCapabilities({
+        providers: [
+          {
+            id: "anthropic",
+            label: "Claude",
+            status: "ready",
+            authKind: "oauth",
+            available: true,
+            models: [
+              {
+                id: "claude-sonnet-4-5",
+                label: "Claude Sonnet 4.5",
+                providerId: "anthropic",
+                contextWindow: "200k",
+                reasoning: true,
+                available: true,
+                providerSource: "pi",
+              },
+            ],
+          },
+        ],
+        selection: {
+          providerId: "anthropic",
+          modelId: "claude-sonnet-4-5",
+          effort: "xhigh",
+          fastMode: true,
+        },
+      }),
+    ).toMatchObject({
+      supportsFastMode: false,
+      normalizedSelection: {
+        effort: "xhigh",
+        fastMode: false,
+      },
+    });
+  });
+
+  it("migrates stale extra-high selection to xhigh globally", () => {
     expect(
       resolveComposerCapabilities({
         providers: defaultProviders,
@@ -145,16 +184,10 @@ describe("resolveComposerCapabilities", () => {
           providerId: "openai-codex",
           modelId: "gpt-5.4",
           effort: "extra-high",
-          fastMode: true,
+          fastMode: false,
         },
-      }),
-    ).toMatchObject({
-      supportsFastMode: true,
-      normalizedSelection: {
-        effort: "extra-high",
-        fastMode: true,
-      },
-    });
+      }).normalizedSelection.effort,
+    ).toBe("xhigh");
   });
 
   it("treats antigravity thinking model pairs as fast/planning modes", () => {

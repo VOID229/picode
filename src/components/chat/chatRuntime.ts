@@ -48,13 +48,12 @@ export interface ComposerCapabilities {
 const BLOCK_PATTERN = /<(proposed_plan|think|thought)>\s*([\s\S]*?)\s*<\/\1>/gi;
 const DEFAULT_EFFORT = "high";
 const GENERIC_EFFORT_OPTIONS: ComposerEffortOption[] = [
+  { id: "off", label: "Off" },
+  { id: "minimal", label: "Minimal" },
   { id: "low", label: "Low" },
   { id: "medium", label: "Medium" },
   { id: "high", label: "High" },
-];
-const CODEX_EFFORT_OPTIONS: ComposerEffortOption[] = [
-  ...GENERIC_EFFORT_OPTIONS,
-  { id: "extra-high", label: "XHigh" },
+  { id: "xhigh", label: "XHigh" },
 ];
 const ANTIGRAVITY_EFFORT_OPTIONS: ComposerEffortOption[] = [
   { id: "fast", label: "Fast" },
@@ -276,22 +275,6 @@ export function resolveComposerCapabilities(options: {
     (entry) => entry.id === normalizedSelection.modelId,
   );
 
-  if (provider?.id === "openai-codex") {
-    const effortOptions = CODEX_EFFORT_OPTIONS;
-    const supportedEfforts = new Set(effortOptions.map((entry) => entry.id));
-    return {
-      effortOptions,
-      supportsFastMode: true,
-      normalizedSelection: {
-        ...normalizedSelection,
-        effort: supportedEfforts.has(normalizedSelection.effort)
-          ? normalizedSelection.effort
-          : DEFAULT_EFFORT,
-        fastMode: Boolean(normalizedSelection.fastMode),
-      },
-    };
-  }
-
   if (provider?.id === "google-antigravity" && model) {
     const pair = resolveAntigravityPair(provider, model.id);
     if (pair) {
@@ -330,14 +313,16 @@ export function resolveComposerCapabilities(options: {
     const supportedEfforts = new Set(
       GENERIC_EFFORT_OPTIONS.map((entry) => entry.id),
     );
+    const effort =
+      normalizedSelection.effort === "extra-high"
+        ? "xhigh"
+        : normalizedSelection.effort;
     return {
       effortOptions: GENERIC_EFFORT_OPTIONS,
       supportsFastMode: false,
       normalizedSelection: {
         ...normalizedSelection,
-        effort: supportedEfforts.has(normalizedSelection.effort)
-          ? normalizedSelection.effort
-          : DEFAULT_EFFORT,
+        effort: supportedEfforts.has(effort) ? effort : DEFAULT_EFFORT,
         fastMode: false,
       },
     };

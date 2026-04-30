@@ -1446,7 +1446,7 @@ export function SettingsScreen() {
                         <option value="low">Low</option>
                         <option value="medium">Medium</option>
                         <option value="high">High</option>
-                        <option value="extra-high">XHigh</option>
+                        <option value="xhigh">XHigh</option>
                       </select>
                     }
                   />
@@ -1633,7 +1633,7 @@ export function SettingsScreen() {
                         <option value="low">Low</option>
                         <option value="medium">Medium</option>
                         <option value="high">High</option>
-                        <option value="extra-high">XHigh</option>
+                        <option value="xhigh">XHigh</option>
                       </select>
                     }
                   />

@@ -1166,13 +1166,11 @@ fn normalize_workspace_selection(
     true
 }
 
-fn map_codex_effort_to_thinking(effort: &str, fast_mode: bool) -> &'static str {
-    if fast_mode {
-        return "minimal";
-    }
-
+fn map_effort_to_thinking(effort: &str) -> &'static str {
     match effort {
-        "extra-high" => "xhigh",
+        "off" => "off",
+        "minimal" => "minimal",
+        "xhigh" | "extra-high" => "xhigh",
         "medium" => "medium",
         "low" => "low",
         _ => "high",
@@ -1183,12 +1181,7 @@ fn map_provider_effort_to_thinking(
     provider_id: &str,
     model_id: &str,
     effort: &str,
-    fast_mode: bool,
 ) -> &'static str {
-    if provider_id == "openai-codex" {
-        return map_codex_effort_to_thinking(effort, fast_mode);
-    }
-
     if provider_id == "google-antigravity" {
         return match effort {
             "planning" => "high",
@@ -1199,14 +1192,7 @@ fn map_provider_effort_to_thinking(
         };
     }
 
-    match effort {
-        "extra-high" => "xhigh",
-        "medium" => "medium",
-        "low" => "low",
-        "fast" => "minimal",
-        "planning" => "high",
-        _ => "high",
-    }
+    map_effort_to_thinking(effort)
 }
 
 fn normalize_session_selection(
@@ -1281,8 +1267,7 @@ async fn attempt_thread_title(
     effort: &str,
     prompt: &str,
 ) -> Option<String> {
-    let title_thinking =
-        map_provider_effort_to_thinking(provider_id, model_id, effort, false).to_string();
+    let title_thinking = map_provider_effort_to_thinking(provider_id, model_id, effort).to_string();
     let extra_args = vec![
         "--no-session".to_string(),
         "--provider".to_string(),
@@ -2742,7 +2727,7 @@ pub async fn generate_git_commit_message(
             "--model",
             &model_id,
             "--thinking",
-            map_provider_effort_to_thinking(&provider_id, &model_id, &effort, false),
+            map_provider_effort_to_thinking(&provider_id, &model_id, &effort),
         ],
         &prompt,
     )
@@ -2764,7 +2749,6 @@ pub async fn generate_git_commit_message(
                         &fallback_provider_id,
                         &fallback_model_id,
                         &effort,
-                        false,
                     ),
                 ],
                 &prompt,
@@ -2833,7 +2817,7 @@ pub async fn generate_git_pr_message(
             "--model",
             &model_id,
             "--thinking",
-            map_provider_effort_to_thinking(&provider_id, &model_id, &effort, false),
+            map_provider_effort_to_thinking(&provider_id, &model_id, &effort),
         ],
         &prompt,
     )
@@ -2856,7 +2840,6 @@ pub async fn generate_git_pr_message(
                         &fallback_provider_id,
                         &fallback_model_id,
                         &effort,
-                        false,
                     ),
                 ],
                 &prompt,
@@ -2999,7 +2982,7 @@ async fn run_prompt_stream(app: AppHandle, shared: AppState, payload: SendPrompt
         let session_file_string = session_file.to_string_lossy().into_owned();
         let questions_extension = extension_path(&app)?;
 
-        let (workspace_path, provider_id, model_id, effort, fast_mode) = {
+        let (workspace_path, provider_id, model_id, effort) = {
             let mut state = shared.state.lock().await;
             let global_selection = state.preferences.model_selection_scope == "global";
             let incoming_selection = payload.selection.clone();
@@ -3088,7 +3071,7 @@ async fn run_prompt_stream(app: AppHandle, shared: AppState, payload: SendPrompt
             );
             storage::save(&app, &state)?;
 
-            (workspace_path, provider_id, model_id, effort, fast_mode)
+            (workspace_path, provider_id, model_id, effort)
         };
 
         let mut command = command_for_binary(&binary_path);
@@ -3109,7 +3092,6 @@ async fn run_prompt_stream(app: AppHandle, shared: AppState, payload: SendPrompt
                 &provider_id,
                 &model_id,
                 &effort,
-                fast_mode,
             ))
             .current_dir(&workspace_path)
             .stdin(Stdio::piped())
@@ -3337,6 +3319,17 @@ mod tests {
             Some("0.67.69".to_string())
         );
         assert_eq!(select_version_output(b"", b""), None);
+    }
+
+    #[test]
+    fn effort_maps_to_pi_thinking_levels() {
+        assert_eq!(map_effort_to_thinking("off"), "off");
+        assert_eq!(map_effort_to_thinking("minimal"), "minimal");
+        assert_eq!(map_effort_to_thinking("low"), "low");
+        assert_eq!(map_effort_to_thinking("medium"), "medium");
+        assert_eq!(map_effort_to_thinking("high"), "high");
+        assert_eq!(map_effort_to_thinking("xhigh"), "xhigh");
+        assert_eq!(map_effort_to_thinking("extra-high"), "xhigh");
     }
 
     #[test]

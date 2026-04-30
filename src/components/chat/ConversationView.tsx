@@ -925,8 +925,7 @@ export function ConversationView({
                   </span>
                   <ChevronIcon />
                   {effortDropdownOpen &&
-                    (composerCapabilities.effortOptions.length > 0 ||
-                      composerCapabilities.supportsFastMode) && (
+                    composerCapabilities.effortOptions.length > 0 && (
                       <>
                         <div
                           style={{
@@ -968,46 +967,6 @@ export function ConversationView({
                                 )}
                               </div>
                             ),
-                          )}
-
-                          {composerCapabilities.supportsFastMode && (
-                            <>
-                              <div
-                                style={{
-                                  height: "1px",
-                                  background: "var(--line)",
-                                  margin: "4px 0",
-                                }}
-                              />
-                              <div className="dropdown-section-label">
-                                Fast Mode
-                              </div>
-                              {[
-                                { id: false, label: "off" },
-                                { id: true, label: "on" },
-                              ].map((option) => (
-                                <div
-                                  key={option.label}
-                                  className="custom-dropdown-item"
-                                  style={{ justifyContent: "space-between" }}
-                                  onClick={(event) => {
-                                    event.stopPropagation();
-                                    closeComposerMenus();
-                                    handleSelectionChange({
-                                      providerId:
-                                        normalizedSelection.providerId,
-                                      modelId: normalizedSelection.modelId,
-                                      effort: normalizedSelection.effort,
-                                      fastMode: option.id,
-                                    });
-                                  }}
-                                >
-                                  <span>{option.label}</span>
-                                  {normalizedSelection.fastMode ===
-                                    option.id && <Check size={14} />}
-                                </div>
-                              ))}
-                            </>
                           )}
                         </div>
                       </>
