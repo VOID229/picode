@@ -104,7 +104,10 @@ export function requireTauriSigningKey() {
     !process.env.TAURI_SIGNING_PRIVATE_KEY_PATH &&
     existsSync(defaultKeyPath)
   ) {
-    process.env.TAURI_SIGNING_PRIVATE_KEY_PATH = defaultKeyPath;
+    process.env.TAURI_SIGNING_PRIVATE_KEY = readFileSync(
+      defaultKeyPath,
+      "utf8",
+    );
   }
 
   if (
