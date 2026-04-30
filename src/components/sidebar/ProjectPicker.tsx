@@ -198,7 +198,7 @@ export function ProjectPicker({ onClose, onSelect }: ProjectPickerProps) {
         onClick={(e) => e.stopPropagation()}
         style={{
           width: "520px",
-          background: "#161616",
+          background: "var(--surface)",
           borderRadius: "16px",
           border: "1px solid #333",
           boxShadow: "0 20px 50px rgba(0,0,0,0.6)",
@@ -233,7 +233,7 @@ export function ProjectPicker({ onClose, onSelect }: ProjectPickerProps) {
               style={{
                 background: "transparent",
                 border: "none",
-                color: "#888",
+                color: "var(--text-muted)",
                 cursor: "pointer",
                 padding: "4px",
                 display: "flex",
@@ -271,7 +271,7 @@ export function ProjectPicker({ onClose, onSelect }: ProjectPickerProps) {
               if (path) onSelect(path);
             }}
             style={{
-              background: "#2563eb",
+              background: "var(--accent)",
               color: "white",
               border: "none",
               padding: "6px 14px",
@@ -362,14 +362,23 @@ export function ProjectPicker({ onClose, onSelect }: ProjectPickerProps) {
                     index === selectedIndex
                       ? "rgba(255,255,255,0.05)"
                       : "transparent",
-                  color: index === selectedIndex ? "#fff" : "#888",
+                  color:
+                    index === selectedIndex
+                      ? "var(--text)"
+                      : "var(--text-muted)",
                   transition: "background 0.1s",
                 }}
               >
                 <Folder
                   size={18}
-                  stroke={index === selectedIndex ? "#2563eb" : "#666"}
-                  fill={index === selectedIndex ? "#2563eb" : "transparent"}
+                  stroke={
+                    index === selectedIndex
+                      ? "var(--accent)"
+                      : "var(--text-dim)"
+                  }
+                  fill={
+                    index === selectedIndex ? "var(--accent)" : "transparent"
+                  }
                   style={{ opacity: index === selectedIndex ? 1 : 0.6 }}
                 />
                 <span style={{ fontSize: "0.95rem" }}>{dir}</span>
@@ -382,7 +391,7 @@ export function ProjectPicker({ onClose, onSelect }: ProjectPickerProps) {
         <div
           style={{
             padding: "12px 20px",
-            background: "#161616",
+            background: "var(--surface)",
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
@@ -393,14 +402,14 @@ export function ProjectPicker({ onClose, onSelect }: ProjectPickerProps) {
             style={{
               display: "flex",
               gap: "12px",
-              color: "#666",
+              color: "var(--text-dim)",
               fontSize: "0.8rem",
             }}
           >
             <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
               <div
                 style={{
-                  background: "#222",
+                  background: "var(--surface-elevated)",
                   border: "1px solid #333",
                   padding: "4px",
                   borderRadius: "4px",
@@ -418,7 +427,7 @@ export function ProjectPicker({ onClose, onSelect }: ProjectPickerProps) {
             <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
               <div
                 style={{
-                  background: "#222",
+                  background: "var(--surface-elevated)",
                   border: "1px solid #333",
                   padding: "2px 6px",
                   borderRadius: "4px",
@@ -431,7 +440,7 @@ export function ProjectPicker({ onClose, onSelect }: ProjectPickerProps) {
             <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
               <div
                 style={{
-                  background: "#222",
+                  background: "var(--surface-elevated)",
                   border: "1px solid #333",
                   padding: "2px 6px",
                   borderRadius: "4px",
@@ -444,7 +453,7 @@ export function ProjectPicker({ onClose, onSelect }: ProjectPickerProps) {
             <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
               <div
                 style={{
-                  background: "#222",
+                  background: "var(--surface-elevated)",
                   border: "1px solid #333",
                   padding: "2px 6px",
                   borderRadius: "4px",
@@ -460,7 +469,7 @@ export function ProjectPicker({ onClose, onSelect }: ProjectPickerProps) {
             onClick={() => void openPath(currentPath)}
             className="finder-button"
             style={{
-              color: "#888",
+              color: "var(--text-muted)",
               fontSize: "0.8rem",
               background: "transparent",
               padding: "4px 8px",
@@ -472,11 +481,11 @@ export function ProjectPicker({ onClose, onSelect }: ProjectPickerProps) {
               alignItems: "center",
             }}
             onMouseEnter={(e) => {
-              e.currentTarget.style.color = "#fff";
-              e.currentTarget.style.background = "#222";
+              e.currentTarget.style.color = "var(--text)";
+              e.currentTarget.style.background = "var(--surface-elevated)";
             }}
             onMouseLeave={(e) => {
-              e.currentTarget.style.color = "#888";
+              e.currentTarget.style.color = "var(--text-muted)";
               e.currentTarget.style.background = "transparent";
             }}
           >

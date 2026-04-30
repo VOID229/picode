@@ -421,7 +421,7 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
 
       const activeWorkspaceId = payload.state.activeWorkspaceId;
       if (runtimePayload?.install.status === "ready" && activeWorkspaceId) {
-        await get().refreshWorkspaceRuntimeCatalog(activeWorkspaceId);
+        void get().refreshWorkspaceRuntimeCatalog(activeWorkspaceId);
       }
     })()
       .catch((error) => {

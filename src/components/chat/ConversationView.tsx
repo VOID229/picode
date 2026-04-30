@@ -21,7 +21,7 @@ import { FilesChangedBlock } from "./FilesChangedBlock";
 import { ImageAttachmentGallery } from "./ImageAttachmentGallery";
 import { QuestionComposer } from "./QuestionComposer";
 import { TimelineItemView } from "./TimelineItemView";
-import { ToolActivityGroup } from "./ToolActivityGroup";
+import { ActivityStream } from "./ToolActivityGroup";
 import { WorkedForBlock } from "./WorkedForBlock";
 import {
   deriveLivePhase,
@@ -29,6 +29,7 @@ import {
   resolveComposerCapabilities,
   resolveSessionSelection,
   segmentTurnItems,
+  type ActivitySegment,
   type FileChange,
   type TurnSegment,
 } from "./chatRuntime";
@@ -503,7 +504,7 @@ export function ConversationView({
 
   if (!workspace || !session) {
     return (
-      <div className="empty-state" style={{ color: "#555" }}>
+      <div className="empty-state" style={{ color: "var(--text-dim)" }}>
         Select a thread to continue.
       </div>
     );
@@ -585,7 +586,9 @@ export function ConversationView({
     sessionStats?.contextUsage &&
     sessionStats.contextUsage.tokens > sessionStats.contextUsage.contextWindow,
   );
-  const contextUsageColor = isContextOverLimit ? "#cf6679" : "#9aa0a6";
+  const contextUsageColor = isContextOverLimit
+    ? "var(--danger)"
+    : "var(--text-dim)";
 
   return (
     <div
@@ -606,7 +609,7 @@ export function ConversationView({
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            color: "#555",
+            color: "var(--text-dim)",
           }}
         >
           Send a message to start the conversation.
@@ -658,7 +661,7 @@ export function ConversationView({
               borderRadius: "10px",
               padding: "10px 12px",
               background: "rgba(255,255,255,0.03)",
-              color: "#c4c4c7",
+              color: "var(--text-muted)",
               fontSize: "0.82rem",
               lineHeight: 1.5,
             }}
@@ -699,8 +702,8 @@ export function ConversationView({
         ) : (
           <div
             style={{
-              background: "#18181A",
-              border: `1px solid ${isFocused ? "#2563eb" : "#333"}`,
+              background: "var(--composer)",
+              border: `1px solid ${isFocused ? "var(--accent)" : "var(--composer-border)"}`,
               borderRadius: "12px",
               padding: "12px 16px",
               display: "flex",
@@ -745,7 +748,7 @@ export function ConversationView({
                 background: "transparent",
                 border: "none",
                 resize: "none",
-                color: "#eaeaea",
+                color: "var(--text)",
                 fontSize: "0.95rem",
                 outline: "none",
                 maxHeight: "200px",
@@ -766,7 +769,7 @@ export function ConversationView({
                   display: "flex",
                   alignItems: "center",
                   gap: "16px",
-                  color: "#666",
+                  color: "var(--text-dim)",
                   fontSize: "0.8rem",
                 }}
               >
@@ -835,7 +838,11 @@ export function ConversationView({
                 </div>
 
                 <div
-                  style={{ width: "1px", height: "12px", background: "#333" }}
+                  style={{
+                    width: "1px",
+                    height: "12px",
+                    background: "var(--line)",
+                  }}
                 />
 
                 <div
@@ -902,7 +909,11 @@ export function ConversationView({
                 </div>
 
                 <div
-                  style={{ width: "1px", height: "12px", background: "#333" }}
+                  style={{
+                    width: "1px",
+                    height: "12px",
+                    background: "var(--line)",
+                  }}
                 />
 
                 <div
@@ -964,7 +975,7 @@ export function ConversationView({
                               <div
                                 style={{
                                   height: "1px",
-                                  background: "#333",
+                                  background: "var(--line)",
                                   margin: "4px 0",
                                 }}
                               />
@@ -1004,7 +1015,11 @@ export function ConversationView({
                 </div>
 
                 <div
-                  style={{ width: "1px", height: "12px", background: "#333" }}
+                  style={{
+                    width: "1px",
+                    height: "12px",
+                    background: "var(--line)",
+                  }}
                 />
 
                 <div
@@ -1023,7 +1038,11 @@ export function ConversationView({
                 </div>
 
                 <div
-                  style={{ width: "1px", height: "12px", background: "#333" }}
+                  style={{
+                    width: "1px",
+                    height: "12px",
+                    background: "var(--line)",
+                  }}
                 />
               </div>
 
@@ -1059,7 +1078,7 @@ export function ConversationView({
                         width: "10px",
                         height: "10px",
                         borderRadius: "50%",
-                        background: "#18181A",
+                        background: "var(--composer)",
                         boxShadow: "0 0 0 1px rgba(255,255,255,0.04)",
                       }}
                     />
@@ -1073,16 +1092,16 @@ export function ConversationView({
                     borderRadius: "50%",
                     background:
                       session.status === "streaming"
-                        ? "#ef4444"
+                        ? "var(--danger)"
                         : !sendDisabled && canSubmit
-                          ? "#2563eb"
-                          : "#333",
+                          ? "var(--accent)"
+                          : "var(--line)",
                     color:
                       session.status === "streaming"
-                        ? "#fff"
+                        ? "var(--text)"
                         : !sendDisabled && canSubmit
-                          ? "#fff"
-                          : "#666",
+                          ? "var(--text)"
+                          : "var(--text-dim)",
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
@@ -1321,88 +1340,25 @@ function TurnRenderer({
         })
     : undefined;
 
-  // Build the inner content (tool groups + interleaved text)
-  const innerContent = turn.segments.map((segment, segIndex) => {
-    if (segment.type === "activity") {
-      if (
-        segment.isLive &&
-        segment.livePhase &&
-        segment.activityPhase === "thinking"
-      ) {
-        return (
-          <LiveThinkingRow
-            key={`seg-${segIndex}`}
-            label={segment.livePhase.label}
-            detail={segment.livePhase.detail}
-          />
-        );
-      }
-
-      return (
-        <ToolActivityGroup
-          key={`seg-${segIndex}`}
-          segment={{
-            phase: segment.activityPhase ?? "other",
-            items: segment.items,
-            isLive: segment.isLive,
-            livePhase: segment.livePhase,
-          }}
-        />
-      );
-    }
-
-    // Text (assistant-message) or other items
-    return segment.items.map((item) => (
-      <TimelineItemView
-        key={item.id}
-        item={item}
-        workspaceId={workspaceId}
-        sessionId={sessionId}
-        onResolveApproval={onResolveApproval}
-        onUndo={item.kind === "user-message" ? handleUndoTurn : undefined}
-      />
-    ));
-  });
-
   // For turns with tool activity, keep the elapsed-time header anchored above
   // the activity list while work is still streaming and after it completes.
   if (hasToolActivity && turn.isCompleted && turn.startTime) {
-    // Split into: user message, worked-for-block wrapping tools, then final assistant text + files changed
+    // Split into: user message, consolidated activity stream, then final assistant text + files changed
     const userSegments: React.ReactNode[] = [];
-    const toolContent: React.ReactNode[] = [];
+    const activitySegments: ActivitySegment[] = [];
     const finalTextSegments: React.ReactNode[] = [];
 
     let passedTools = false;
     for (let i = 0; i < turn.segments.length; i++) {
       const segment = turn.segments[i];
       if (segment.type === "activity") {
-        if (
-          segment.isLive &&
-          segment.livePhase &&
-          segment.activityPhase === "thinking"
-        ) {
-          toolContent.push(
-            <LiveThinkingRow
-              key={`seg-${i}`}
-              label={segment.livePhase.label}
-              detail={segment.livePhase.detail}
-            />,
-          );
-          continue;
-        }
-
         passedTools = true;
-        toolContent.push(
-          <ToolActivityGroup
-            key={`seg-${i}`}
-            segment={{
-              phase: segment.activityPhase ?? "other",
-              items: segment.items,
-              isLive: segment.isLive,
-              livePhase: segment.livePhase,
-            }}
-          />,
-        );
+        activitySegments.push({
+          phase: segment.activityPhase ?? "other",
+          items: segment.items,
+          isLive: segment.isLive,
+          livePhase: segment.livePhase,
+        });
       } else if (!passedTools && segment.items[0]?.kind === "user-message") {
         userSegments.push(
           ...segment.items.map((item) => (
@@ -1451,18 +1407,14 @@ function TurnRenderer({
         style={{ display: "flex", flexDirection: "column", gap: "14px" }}
       >
         {userSegments}
-        {toolContent.length > 0 && (
+        {activitySegments.length > 0 && (
           <WorkedForBlock
             startTime={turn.startTime}
             endTime={turn.isCompleted ? turn.endTime : undefined}
             isLive={!turn.isCompleted}
             paused={isPaused}
           >
-            <div
-              style={{ display: "flex", flexDirection: "column", gap: "8px" }}
-            >
-              {toolContent}
-            </div>
+            <ActivityStream segments={activitySegments} />
           </WorkedForBlock>
         )}
         {finalTextSegments}
@@ -1484,13 +1436,44 @@ function TurnRenderer({
     );
   }
 
-  // For streaming/incomplete turns, render inline
+  // For streaming/incomplete turns, render inline with consolidated activity
+  const allActivitySegments: ActivitySegment[] = [];
+  const inlineContent: React.ReactNode[] = [];
+
+  for (let i = 0; i < turn.segments.length; i++) {
+    const segment = turn.segments[i];
+    if (segment.type === "activity") {
+      allActivitySegments.push({
+        phase: segment.activityPhase ?? "other",
+        items: segment.items,
+        isLive: segment.isLive,
+        livePhase: segment.livePhase,
+      });
+    } else {
+      inlineContent.push(
+        ...segment.items.map((item) => (
+          <TimelineItemView
+            key={item.id}
+            item={item}
+            workspaceId={workspaceId}
+            sessionId={sessionId}
+            onResolveApproval={onResolveApproval}
+            onUndo={item.kind === "user-message" ? handleUndoTurn : undefined}
+          />
+        )),
+      );
+    }
+  }
+
   return (
     <div
       className="turn-block"
       style={{ display: "flex", flexDirection: "column", gap: "14px" }}
     >
-      {innerContent}
+      {inlineContent}
+      {allActivitySegments.length > 0 && (
+        <ActivityStream segments={allActivitySegments} />
+      )}
       {fileChanges.length > 0 && (
         <FilesChangedBlock
           toolFileChanges={fileChanges}
@@ -1505,23 +1488,6 @@ function TurnRenderer({
           }
         />
       )}
-    </div>
-  );
-}
-
-function LiveThinkingRow({
-  label,
-  detail,
-}: {
-  label: string;
-  detail?: string;
-}) {
-  return (
-    <div className="chat-row chat-row--assistant animate-slide-up">
-      <div className="chat-inline-status chat-inline-status--live">
-        <span className="text-shimmer">{label}</span>
-        {detail && <span className="chat-inline-status__meta">{detail}</span>}
-      </div>
     </div>
   );
 }

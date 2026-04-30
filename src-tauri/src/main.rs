@@ -159,6 +159,17 @@ async fn check_app_update(
                     release_url: None,
                 });
             }
+            // Nightly channel: treat check failures as "no release yet" rather than errors,
+            // since the nightly tag may simply not exist or have no build for this platform.
+            if channel == Some("nightly") {
+                return Ok(AppUpdatePayload {
+                    current_version,
+                    latest_version: None,
+                    status: "no-release".to_string(),
+                    download_path: None,
+                    release_url: None,
+                });
+            }
             return Err(message);
         }
     };
@@ -354,6 +365,15 @@ async fn update_workspace_settings(
         state.preferences.effort = effort.clone();
         state.preferences.fast_mode = fast_mode;
     }
+    state.preferences.provider_model_memory.insert(
+        provider_id.clone(),
+        SessionModelSelection {
+            provider_id,
+            model_id,
+            effort,
+            fast_mode,
+        },
+    );
     storage::save(&app, &state).map_err(|error| error.to_string())?;
     Ok(state.clone())
 }

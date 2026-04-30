@@ -524,6 +524,8 @@ fn common_install_locations() -> Vec<PathBuf> {
         if let Some(home) = env::var_os("HOME") {
             let home = PathBuf::from(home);
             paths.push(home.join(".bun").join("bin").join("pi"));
+            paths.push(PathBuf::from("/opt/homebrew/bin/pi"));
+            paths.push(PathBuf::from("/usr/local/bin/pi"));
             paths.push(home.join(".local").join("bin").join("pi"));
             paths.push(home.join(".npm-global").join("bin").join("pi"));
             paths.push(home.join(".volta").join("bin").join("pi"));
@@ -546,8 +548,6 @@ fn common_install_locations() -> Vec<PathBuf> {
         if let Some(prefix) = env::var_os("npm_config_prefix") {
             paths.push(PathBuf::from(prefix).join("bin").join("pi"));
         }
-        paths.push(PathBuf::from("/opt/homebrew/bin/pi"));
-        paths.push(PathBuf::from("/usr/local/bin/pi"));
         paths
     }
 }
@@ -660,10 +660,10 @@ fn choose_candidate_paths(
         return candidates;
     }
 
-    for candidate in path_candidates {
+    for candidate in common_candidates {
         push_candidate(&mut candidates, candidate.clone());
     }
-    for candidate in common_candidates {
+    for candidate in path_candidates {
         push_candidate(&mut candidates, candidate.clone());
     }
 
@@ -1098,6 +1098,43 @@ fn map_models_to_provider_options(models: Vec<PiModel>) -> Vec<ProviderOption> {
             }
         })
         .collect()
+}
+
+fn merge_cached_provider_models(
+    mut providers: Vec<ProviderOption>,
+    cached_providers: &[ProviderOption],
+    provider_id: &str,
+) -> Vec<ProviderOption> {
+    let Some(cached_provider) = cached_providers
+        .iter()
+        .find(|provider| provider.id == provider_id)
+    else {
+        return providers;
+    };
+
+    let Some(provider) = providers
+        .iter_mut()
+        .find(|provider| provider.id == provider_id)
+    else {
+        providers.push(cached_provider.clone());
+        providers.sort_by(|left, right| left.label.cmp(&right.label));
+        return providers;
+    };
+
+    for cached_model in &cached_provider.models {
+        if !provider
+            .models
+            .iter()
+            .any(|model| model.id == cached_model.id)
+        {
+            provider.models.push(cached_model.clone());
+        }
+    }
+    provider
+        .models
+        .sort_by(|left, right| left.label.cmp(&right.label));
+
+    providers
 }
 
 fn normalize_workspace_selection(
@@ -2557,13 +2594,15 @@ async fn fetch_workspace_catalog_and_normalize(
     };
     let workspace_path = expand_user_path(&workspace_path);
 
-    let providers = map_models_to_provider_options(
+    let fetched_providers = map_models_to_provider_options(
         fetch_available_models(binary_path, Path::new(&workspace_path)).await?,
     );
 
-    let (selected_provider_id, selected_model_id) = {
+    let (providers, selected_provider_id, selected_model_id) = {
         let mut state = shared.state.lock().await;
         let global_selection = state.preferences.model_selection_scope == "global";
+        let providers =
+            merge_cached_provider_models(fetched_providers, &state.providers, "openai-codex");
 
         let providers_changed = state.providers != providers;
         if providers_changed {
@@ -2607,7 +2646,7 @@ async fn fetch_workspace_catalog_and_normalize(
             storage::save(app, &state)?;
         }
 
-        (selected_provider_id, selected_model_id)
+        (providers, selected_provider_id, selected_model_id)
     };
 
     Ok(WorkspaceRuntimeCatalogPayload {
@@ -2870,6 +2909,14 @@ pub async fn launch_prompt_stream(
         let mut state = shared.state.lock().await;
         let should_commit_used_selection = state.preferences.model_selection_scope == "thread"
             && state.preferences.thread_model_memory == "used";
+        if let Some(selection) = payload.selection.clone() {
+            if should_commit_used_selection {
+                state
+                    .preferences
+                    .provider_model_memory
+                    .insert(selection.provider_id.clone(), selection);
+            }
+        }
         let workspace = state
             .workspaces
             .iter_mut()
@@ -3030,6 +3077,15 @@ async fn run_prompt_stream(app: AppHandle, shared: AppState, payload: SendPrompt
             session.updated_at = now_iso();
 
             let workspace_path = expand_user_path(&workspace.path);
+            state.preferences.provider_model_memory.insert(
+                provider_id.clone(),
+                SessionModelSelection {
+                    provider_id: provider_id.clone(),
+                    model_id: model_id.clone(),
+                    effort: effort.clone(),
+                    fast_mode,
+                },
+            );
             storage::save(&app, &state)?;
 
             (workspace_path, provider_id, model_id, effort, fast_mode)
@@ -3263,9 +3319,9 @@ mod tests {
         assert_eq!(
             choose_candidate_paths(None, &[PathBuf::from("/path/pi")], &common),
             vec![
-                PathBuf::from("/path/pi"),
                 PathBuf::from("/opt/homebrew/bin/pi"),
                 PathBuf::from("/usr/local/bin/pi"),
+                PathBuf::from("/path/pi"),
             ]
         );
     }
@@ -3521,6 +3577,33 @@ mod tests {
         }]);
 
         assert_eq!(providers[0].models[0].label, "GPT-OSS 120B Medium");
+    }
+
+    #[test]
+    fn codex_catalog_refresh_preserves_cached_models() {
+        let fetched = map_models_to_provider_options(vec![PiModel {
+            id: "gpt-5.4-mini".to_string(),
+            name: "GPT-5.4 Mini".to_string(),
+            provider: "openai-codex".to_string(),
+            reasoning: true,
+            context_window: Some(131_072),
+        }]);
+        let cached = map_models_to_provider_options(vec![PiModel {
+            id: "gpt-5.5".to_string(),
+            name: "GPT-5.5".to_string(),
+            provider: "openai-codex".to_string(),
+            reasoning: true,
+            context_window: Some(262_144),
+        }]);
+
+        let merged = merge_cached_provider_models(fetched, &cached, "openai-codex");
+        let codex = merged
+            .iter()
+            .find(|provider| provider.id == "openai-codex")
+            .expect("codex provider should exist");
+
+        assert!(codex.models.iter().any(|model| model.id == "gpt-5.4-mini"));
+        assert!(codex.models.iter().any(|model| model.id == "gpt-5.5"));
     }
 
     #[test]

@@ -1,5 +1,6 @@
 import type { WorkspaceRecord } from "../../domains/types";
 import { useAppStore } from "../../state/useAppStore";
+import { resolveProviderSwitchModel } from "../chat/chatRuntime";
 
 interface ModelProviderPickerProps {
   workspace: WorkspaceRecord | null;
@@ -7,6 +8,9 @@ interface ModelProviderPickerProps {
 
 export function ModelProviderPicker({ workspace }: ModelProviderPickerProps) {
   const state = useAppStore((store) => store.state);
+  const providerModelMemory = useAppStore(
+    (store) => store.state?.preferences.providerModelMemory ?? {},
+  );
   const workspaceCatalogs = useAppStore((store) => store.workspaceCatalogs);
   const updateWorkspaceSettings = useAppStore(
     (store) => store.updateWorkspaceSettings,
@@ -68,7 +72,12 @@ export function ModelProviderPicker({ workspace }: ModelProviderPickerProps) {
               workspaceId: workspace.id,
               approvalMode: workspace.approvalMode,
               providerId,
-              modelId: nextProvider?.models[0]?.id ?? workspace.modelId,
+              modelId: resolveProviderSwitchModel({
+                provider: nextProvider,
+                currentProviderId: workspace.providerId,
+                currentModelId: workspace.modelId,
+                providerModelMemory,
+              }),
               policy: workspace.policy,
             });
           }}

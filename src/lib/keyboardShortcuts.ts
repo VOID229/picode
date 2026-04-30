@@ -19,6 +19,7 @@ export type ShortcutId =
   | "settings"
   | "addProject"
   | "openWorkspace"
+  | "toggleTerminalPane"
   | "newTerminalTab"
   | "closeTerminalTab"
   | "renameTerminalTab"
@@ -58,6 +59,12 @@ export const shortcutDefinitions: ShortcutDefinition[] = [
     label: "Open project",
     description: "Open the active project in the selected target.",
     defaultBinding: "Meta+O",
+  },
+  {
+    id: "toggleTerminalPane",
+    label: "Toggle terminal pane",
+    description: "Open or close the terminal pane.",
+    defaultBinding: "Meta+J",
   },
   {
     id: "newTerminalTab",

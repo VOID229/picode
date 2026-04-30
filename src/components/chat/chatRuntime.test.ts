@@ -271,12 +271,15 @@ describe("deriveLivePhase", () => {
     expect(deriveLivePhase(session)?.label).toBe("reading files");
   });
 
-  it("does not invent a synthetic thinking phase when nothing is active", () => {
+  it("shows thinking while a streaming turn has no visible work yet", () => {
     const session = createSession({
       status: "streaming",
     });
 
-    expect(deriveLivePhase(session)).toBeNull();
+    expect(deriveLivePhase(session)).toMatchObject({
+      phase: "thinking",
+      label: "thinking",
+    });
   });
 
   it("shows thinking while the assistant is streaming but has no visible text yet", () => {
@@ -518,7 +521,7 @@ describe("extractFileChanges", () => {
 });
 
 describe("segmentTurnItems", () => {
-  it("splits activity when the phase changes", () => {
+  it("keeps phase changes in one compact activity row", () => {
     const segments = segmentTurnItems([
       createToolActivity({
         id: "tool-1",
@@ -536,17 +539,13 @@ describe("segmentTurnItems", () => {
       }),
     ]);
 
-    expect(segments).toHaveLength(2);
+    expect(segments).toHaveLength(1);
     expect(segments[0]).toMatchObject({
-      type: "activity",
-      activityPhase: "writing-files",
-    });
-    expect(segments[1]).toMatchObject({
       type: "activity",
       activityPhase: "reading-files",
     });
     expect((segments[0].items[0] as { id: string }).id).toBe("tool-1");
-    expect((segments[1].items[0] as { id: string }).id).toBe("tool-2");
+    expect((segments[0].items[1] as { id: string }).id).toBe("tool-2");
   });
 
   it("keeps activity together within a 5000ms idle gap", () => {
@@ -574,7 +573,7 @@ describe("segmentTurnItems", () => {
     });
   });
 
-  it("splits activity after an idle gap over 5000ms", () => {
+  it("keeps activity together even after an idle gap", () => {
     const segments = segmentTurnItems([
       createToolActivity({
         id: "tool-1",
@@ -592,8 +591,49 @@ describe("segmentTurnItems", () => {
       }),
     ]);
 
-    expect(segments).toHaveLength(2);
-    expect(segments.every((segment) => segment.type === "activity")).toBe(true);
+    expect(segments).toHaveLength(1);
+    expect(segments[0]).toMatchObject({
+      type: "activity",
+      activityPhase: "reading-files",
+    });
+  });
+
+  it("splits activity when assistant text appears between tool calls", () => {
+    const segments = segmentTurnItems([
+      createToolActivity({
+        id: "tool-1",
+        toolName: "read",
+        summary:
+          'read {"path":"src/components/chat/ConversationView.tsx","limit":120}',
+        createdAt: "2026-04-22T09:00:00.000Z",
+      }),
+      {
+        id: "assistant-1",
+        kind: "assistant-message",
+        content: "I found the relevant renderer.",
+        createdAt: "2026-04-22T09:00:01.000Z",
+      },
+      createToolActivity({
+        id: "tool-2",
+        toolName: "apply_patch",
+        summary:
+          'apply_patch "*** Update File: src/components/chat/ToolActivityGroup.tsx"',
+        createdAt: "2026-04-22T09:00:02.000Z",
+      }),
+    ]);
+
+    expect(segments).toHaveLength(3);
+    expect(segments[0]).toMatchObject({
+      type: "activity",
+      activityPhase: "reading-files",
+    });
+    expect(segments[1]).toMatchObject({
+      type: "text",
+    });
+    expect(segments[2]).toMatchObject({
+      type: "activity",
+      activityPhase: "writing-files",
+    });
   });
 
   it("keeps earlier activity groups and appends live thinking at the end", () => {
@@ -624,16 +664,12 @@ describe("segmentTurnItems", () => {
       },
     );
 
-    expect(segments).toHaveLength(3);
+    expect(segments).toHaveLength(2);
     expect(segments[0]).toMatchObject({
-      type: "activity",
-      activityPhase: "writing-files",
-    });
-    expect(segments[1]).toMatchObject({
       type: "activity",
       activityPhase: "reading-files",
     });
-    expect(segments[2]).toMatchObject({
+    expect(segments[1]).toMatchObject({
       type: "activity",
       activityPhase: "thinking",
       isLive: true,

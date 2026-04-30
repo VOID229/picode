@@ -8,14 +8,19 @@ interface PromptModalProps {
   onCancel: () => void;
 }
 
-export function PromptModal({ title, initialValue = "", onConfirm, onCancel }: PromptModalProps) {
+export function PromptModal({
+  title,
+  initialValue = "",
+  onConfirm,
+  onCancel,
+}: PromptModalProps) {
   const [value, setValue] = useState(initialValue);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     inputRef.current?.focus();
     inputRef.current?.select();
-    
+
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") onCancel();
     };
@@ -43,7 +48,7 @@ export function PromptModal({ title, initialValue = "", onConfirm, onCancel }: P
       <div
         onClick={(e) => e.stopPropagation()}
         style={{
-          background: "#1C1C1E",
+          background: "var(--surface)",
           border: "1px solid #333",
           borderRadius: "12px",
           padding: "20px",
@@ -52,7 +57,9 @@ export function PromptModal({ title, initialValue = "", onConfirm, onCancel }: P
           animation: "promptFadeIn 0.15s ease-out",
         }}
       >
-        <h3 style={{ margin: "0 0 16px 0", color: "#eee", fontSize: "1rem" }}>{title}</h3>
+        <h3 style={{ margin: "0 0 16px 0", color: "#eee", fontSize: "1rem" }}>
+          {title}
+        </h3>
         <input
           ref={inputRef}
           value={value}
@@ -65,9 +72,9 @@ export function PromptModal({ title, initialValue = "", onConfirm, onCancel }: P
           style={{
             width: "100%",
             boxSizing: "border-box",
-            background: "#000",
+            background: "var(--bg)",
             border: "1px solid #444",
-            color: "#fff",
+            color: "var(--text)",
             padding: "8px 12px",
             borderRadius: "6px",
             fontSize: "0.95rem",
@@ -75,7 +82,9 @@ export function PromptModal({ title, initialValue = "", onConfirm, onCancel }: P
             marginBottom: "20px",
           }}
         />
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px" }}>
+        <div
+          style={{ display: "flex", justifyContent: "flex-end", gap: "8px" }}
+        >
           <button
             onClick={onCancel}
             style={{
@@ -92,8 +101,8 @@ export function PromptModal({ title, initialValue = "", onConfirm, onCancel }: P
           <button
             onClick={() => onConfirm(value)}
             style={{
-              background: "#2563eb",
-              color: "#fff",
+              background: "var(--accent)",
+              color: "var(--text)",
               border: "none",
               padding: "6px 14px",
               borderRadius: "6px",
@@ -112,6 +121,6 @@ export function PromptModal({ title, initialValue = "", onConfirm, onCancel }: P
         }
       `}</style>
     </div>,
-    document.body
+    document.body,
   );
 }

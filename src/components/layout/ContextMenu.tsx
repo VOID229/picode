@@ -30,7 +30,7 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
         onClose();
       }
     };
-    
+
     const handleScroll = () => onClose();
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -59,7 +59,7 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
         top: adjustedY,
         left: adjustedX,
         zIndex: 1000,
-        background: "#1C1C1E",
+        background: "var(--surface)",
         border: "1px solid #333",
         borderRadius: "12px",
         padding: "6px",
@@ -79,7 +79,7 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
               style={{
                 fontSize: "0.7rem",
                 fontWeight: 600,
-                color: "#666",
+                color: "var(--text-dim)",
                 padding: "8px 12px 4px 12px",
                 textTransform: "capitalize",
                 letterSpacing: "0.02em",
@@ -104,7 +104,8 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
                 borderRadius: "6px",
                 border: "none",
                 background: "transparent",
-                color: item.variant === "danger" ? "#ff453a" : "#ddd",
+                color:
+                  item.variant === "danger" ? "#ff453a" : "var(--text-muted)",
                 fontSize: "0.9rem",
                 cursor: "pointer",
                 textAlign: "left",
@@ -114,17 +115,24 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
                 e.currentTarget.style.background =
                   item.variant === "danger"
                     ? "rgba(255, 69, 58, 0.15)"
-                    : "#2563eb";
+                    : "var(--accent)";
                 if (item.variant !== "danger")
                   e.currentTarget.style.color = "white";
               }}
               onMouseLeave={(e) => {
                 e.currentTarget.style.background = "transparent";
                 e.currentTarget.style.color =
-                  item.variant === "danger" ? "#ff453a" : "#ddd";
+                  item.variant === "danger" ? "#ff453a" : "var(--text-muted)";
               }}
             >
-              <div style={{ width: "16px", display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <div
+                style={{
+                  width: "16px",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
                 {item.isChecked && <Check size={14} />}
               </div>
               <span style={{ flex: 1 }}>{item.label}</span>
@@ -133,7 +141,11 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
           )}
           {item.separator && (
             <div
-              style={{ height: "1px", background: "#333", margin: "4px 0" }}
+              style={{
+                height: "1px",
+                background: "var(--line)",
+                margin: "4px 0",
+              }}
             />
           )}
         </React.Fragment>
@@ -146,6 +158,6 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
         }
       `}</style>
     </div>,
-    document.body
+    document.body,
   );
 }

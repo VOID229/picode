@@ -81,6 +81,7 @@ function createState(): PersistedAppState {
       gitMessageModelFallbackId: "gpt-5.4",
       gitMessageModelEffort: "high",
       showRawToolCalls: false,
+      providerModelMemory: {},
       layout: {
         diffMode: "split",
         gitPanelOpen: false,

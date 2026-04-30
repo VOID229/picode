@@ -44,11 +44,11 @@ function ToastItem({
 
   const icon =
     toast.type === "success" ? (
-      <CheckCircle size={16} color="#4ade80" />
+      <CheckCircle size={16} color="var(--success)" />
     ) : toast.type === "error" ? (
-      <AlertCircle size={16} color="#f87171" />
+      <AlertCircle size={16} color="var(--danger)" />
     ) : (
-      <Info size={16} color="#60a5fa" />
+      <Info size={16} color="var(--accent)" />
     );
 
   const borderColor =
@@ -62,7 +62,7 @@ function ToastItem({
     <div
       style={{
         pointerEvents: "auto",
-        background: "#1c1c1e",
+        background: "var(--surface)",
         border: `1px solid ${borderColor}`,
         borderRadius: "10px",
         padding: "12px 14px",
@@ -80,7 +80,7 @@ function ToastItem({
         style={{
           flex: 1,
           fontSize: "0.85rem",
-          color: "#e5e5e5",
+          color: "var(--text)",
           lineHeight: 1.4,
         }}
       >
@@ -91,7 +91,7 @@ function ToastItem({
         style={{
           background: "transparent",
           border: "none",
-          color: "#888",
+          color: "var(--text-muted)",
           cursor: "pointer",
           padding: "2px",
           display: "flex",

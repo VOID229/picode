@@ -1,30 +1,54 @@
 import { useEffect } from "react";
 import type { PropsWithChildren } from "react";
 import { useAppStore } from "../../state/useAppStore";
+import { getThemeColors, getThemeIsDark } from "../../lib/themes";
 
 const THEME_STORAGE_KEY = "picode.theme";
 
 export function ThemeController({ children }: PropsWithChildren) {
-  const theme = useAppStore(
-    (state) => state.state?.preferences.theme ?? "dark",
-  );
+  const state = useAppStore((s) => s.state);
+  const theme = state?.preferences.theme ?? "dark";
+  const customColors = state?.preferences.customThemeColors;
 
   useEffect(() => {
-    document.documentElement.dataset.theme = theme;
+    const colors = getThemeColors(theme, customColors);
+    const isDark = getThemeIsDark(theme);
+    const root = document.documentElement;
 
-    const backgroundColor = theme === "light" ? "#ffffff" : "#121212";
-    const textColor = theme === "light" ? "#09090b" : "#eaeaea";
+    root.dataset.theme = isDark ? "dark" : "light";
 
-    document.documentElement.style.backgroundColor = backgroundColor;
-    document.body.style.backgroundColor = backgroundColor;
-    document.body.style.color = textColor;
+    root.style.setProperty("--bg", colors.bg);
+    root.style.setProperty("--surface", colors.surface);
+    root.style.setProperty("--surface-elevated", colors.surfaceElevated);
+    root.style.setProperty("--surface-strong", colors.surfaceStrong);
+    root.style.setProperty("--line", colors.line);
+    root.style.setProperty("--accent", colors.accent);
+    root.style.setProperty("--accent-soft", colors.accentSoft);
+    root.style.setProperty("--accent-glow", colors.accentGlow);
+    root.style.setProperty("--success", colors.success);
+    root.style.setProperty("--danger", colors.danger);
+    root.style.setProperty("--warning", colors.warning);
+    root.style.setProperty("--text", colors.text);
+    root.style.setProperty("--text-muted", colors.textMuted);
+    root.style.setProperty("--text-dim", colors.textDim);
+    root.style.setProperty("--glass-bg", colors.glassBg);
+    root.style.setProperty("--glass-border", colors.glassBorder);
+    root.style.setProperty("--chat-bubble", colors.chatBubble);
+    root.style.setProperty("--composer", colors.composer);
+    root.style.setProperty("--composer-border", colors.composerBorder);
+
+    root.style.backgroundColor = colors.bg;
+    document.body.style.backgroundColor = colors.bg;
+    document.body.style.color = colors.text;
+
+    root.style.colorScheme = isDark ? "dark" : "light";
 
     try {
       window.localStorage.setItem(THEME_STORAGE_KEY, theme);
     } catch {
       // Ignore storage failures in constrained environments.
     }
-  }, [theme]);
+  }, [theme, customColors]);
 
   return children;
 }
