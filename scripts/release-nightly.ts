@@ -41,12 +41,12 @@ writeUpdaterManifest(
 );
 
 await run(["git", "tag", "-f", "nightly"]);
-await run(["git", "push", "origin", "nightly", "--force"]);
+await run(["git", "push", "origin", "refs/tags/nightly", "--force"]);
 
 if (await succeeds(["gh", "release", "view", "nightly"])) {
   await run(["gh", "release", "delete", "nightly", "--yes", "--cleanup-tag"]);
   await run(["git", "tag", "-f", "nightly"]);
-  await run(["git", "push", "origin", "nightly", "--force"]);
+  await run(["git", "push", "origin", "refs/tags/nightly", "--force"]);
 }
 
 await run([
