@@ -20,7 +20,9 @@ const commitMessage =
 const baseVersion = packageVersion();
 const buildId = new Date().toISOString().replace(/\D/g, "").slice(0, 14);
 const nightlyVersion = `${baseVersion}+nightly.${buildId}`;
+const releaseTag = `nightly-${buildId}`;
 const manifestPath = path.join(bundleRoot, "nightly.json");
+const notes = `Automated nightly build ${buildId}.`;
 
 requireMacosReleaseHost("Nightly");
 await requireBranch("nightly");
@@ -34,7 +36,38 @@ const { dmgPath, updaterPath, signaturePath } = await buildSignedMacosRelease();
 writeUpdaterManifest(
   manifestPath,
   nightlyVersion,
-  "Automated nightly build.",
+  notes,
+  releaseTag,
+  updaterPath,
+  signaturePath,
+);
+
+await run(["git", "tag", releaseTag]);
+await run(["git", "push", "origin", `refs/tags/${releaseTag}`]);
+
+await run([
+  "gh",
+  "release",
+  "create",
+  releaseTag,
+  dmgPath,
+  updaterPath,
+  signaturePath,
+  manifestPath,
+  "--target",
+  "nightly",
+  "--title",
+  `picode nightly ${buildId}`,
+  "--notes",
+  notes,
+  "--prerelease",
+  "--latest=false",
+]);
+
+writeUpdaterManifest(
+  manifestPath,
+  nightlyVersion,
+  notes,
   "nightly",
   updaterPath,
   signaturePath,
@@ -63,9 +96,10 @@ await run([
   "--title",
   "picode nightly",
   "--notes",
-  "Automated nightly build.",
+  `${notes}\n\nMoving release used by the app updater. Historical release: ${releaseTag}.`,
   "--prerelease",
   "--latest=false",
 ]);
 
-console.log("Published nightly pre-release.");
+console.log(`Published nightly pre-release ${releaseTag}.`);
+console.log("Updated moving nightly release for updater compatibility.");
