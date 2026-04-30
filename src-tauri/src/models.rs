@@ -351,6 +351,31 @@ pub struct LayoutPreferences {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct CustomThemeColors {
+    pub bg: String,
+    pub surface: String,
+    pub surface_elevated: String,
+    pub surface_strong: String,
+    pub line: String,
+    pub accent: String,
+    pub accent_soft: String,
+    pub accent_glow: String,
+    pub success: String,
+    pub danger: String,
+    pub warning: String,
+    pub text: String,
+    pub text_muted: String,
+    pub text_dim: String,
+    pub glass_bg: String,
+    pub glass_border: String,
+    pub chat_bubble: String,
+    pub composer: String,
+    pub composer_border: String,
+    pub nav_hover: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AppPreferences {
     pub theme: String,
     #[serde(default = "default_model_selection_scope")]
@@ -393,12 +418,16 @@ pub struct AppPreferences {
     #[serde(default = "default_fast_mode")]
     pub fast_mode: bool,
     #[serde(default)]
+    pub provider_model_memory: std::collections::HashMap<String, SessionModelSelection>,
+    #[serde(default)]
     pub pi_binary_path: Option<String>,
     #[serde(default = "default_update_channel")]
     pub update_channel: String,
     #[serde(default)]
     pub shortcuts: std::collections::HashMap<String, Option<String>>,
     pub layout: LayoutPreferences,
+    #[serde(default)]
+    pub custom_theme_colors: Option<CustomThemeColors>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1043,9 +1072,11 @@ pub fn default_preferences() -> AppPreferences {
         approval_mode: ApprovalMode::Supervised,
         effort: default_effort(),
         fast_mode: default_fast_mode(),
+        provider_model_memory: std::collections::HashMap::new(),
         pi_binary_path: None,
         update_channel: default_update_channel(),
         shortcuts: std::collections::HashMap::new(),
+        custom_theme_colors: None,
         layout: LayoutPreferences {
             diff_mode: "split".to_string(),
             git_panel_open: true,

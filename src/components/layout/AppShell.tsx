@@ -1,10 +1,4 @@
-import {
-  useDeferredValue,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useLocation, Outlet } from "react-router-dom";
 import type { WorkspaceRecord } from "../../domains/types";
 import {
@@ -102,11 +96,29 @@ export function AppShell() {
         event.preventDefault();
         navigate("/settings");
       }
+
+      if (
+        matchesShortcut(
+          event,
+          getShortcutBinding(
+            state?.preferences.shortcuts,
+            "toggleTerminalPane",
+          ),
+        )
+      ) {
+        event.preventDefault();
+        setTerminalPaneOpen(!terminalPaneOpen);
+      }
     };
 
     window.addEventListener("keydown", handleShortcut);
     return () => window.removeEventListener("keydown", handleShortcut);
-  }, [navigate, state?.preferences.shortcuts]);
+  }, [
+    navigate,
+    state?.preferences.shortcuts,
+    terminalPaneOpen,
+    setTerminalPaneOpen,
+  ]);
 
   useEffect(() => {
     const handleMouseMove = (event: MouseEvent) => {
@@ -333,13 +345,17 @@ export function AppShell() {
             padding: "0 16px",
             height: "54px",
             borderBottom: "none",
-            background: "var(--bg)",
+            background: "var(--glass-bg)",
             backdropFilter: "none",
           }}
         >
           <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
             <span
-              style={{ fontWeight: 600, fontSize: "0.9rem", color: "#fff" }}
+              style={{
+                fontWeight: 600,
+                fontSize: "0.9rem",
+                color: "var(--text)",
+              }}
             >
               {deferredSession?.timeline.some(
                 (item) => item.kind === "user-message",
@@ -354,9 +370,9 @@ export function AppShell() {
                 style={{
                   padding: "2px 8px",
                   borderRadius: "12px",
-                  border: "1px solid #333",
+                  border: "1px solid var(--line)",
                   fontSize: "0.75rem",
-                  color: "#ccc",
+                  color: "var(--text-muted)",
                 }}
               >
                 {activeWorkspace.name}
@@ -369,7 +385,7 @@ export function AppShell() {
                   borderRadius: "12px",
                   border: "1px solid #4a3721",
                   fontSize: "0.75rem",
-                  color: "#c59b6d",
+                  color: "var(--warning)",
                   background: "rgba(197,155,109,0.08)",
                 }}
               >
@@ -467,7 +483,7 @@ export function AppShell() {
                       <div
                         style={{
                           height: "1px",
-                          background: "#333",
+                          background: "var(--line)",
                           margin: "6px 0",
                         }}
                       />
@@ -689,10 +705,7 @@ export function AppShell() {
               }}
             />
           )}
-          <TerminalPane
-            workspace={activeWorkspace}
-            height={terminalHeight}
-          />
+          <TerminalPane workspace={activeWorkspace} height={terminalHeight} />
         </section>
       </main>
 
@@ -732,8 +745,8 @@ export function AppShell() {
       <style>{`
         .topbar-btn {
           background: transparent;
-          border: 1px solid #333;
-          color: #ccc;
+          border: 1px solid var(--line);
+          color: var(--text-muted);
           border-radius: 6px;
           padding: 0 10px;
           height: 28px;
@@ -747,8 +760,8 @@ export function AppShell() {
           -webkit-app-region: no-drag;
         }
         .topbar-btn:hover {
-          background: #222;
-          color: #fff;
+          background: var(--surface-elevated);
+          color: var(--text);
         }
         .topbar-btn:disabled {
           opacity: 0.45;
@@ -768,8 +781,8 @@ export function AppShell() {
           top: 100%;
           right: 0;
           margin-top: 8px;
-          background: #1c1c1e;
-          border: 1px solid #333;
+          background: var(--surface);
+          border: 1px solid var(--line);
           border-radius: 12px;
           padding: 8px;
           min-width: 200px;
@@ -782,7 +795,7 @@ export function AppShell() {
         .dropdown-item {
           background: transparent;
           border: none;
-          color: #ccc;
+          color: var(--text-muted);
           padding: 8px 12px;
           border-radius: 6px;
           display: flex;
@@ -796,14 +809,14 @@ export function AppShell() {
           cursor: default;
         }
         .dropdown-item:hover {
-          background: #2a2a2c;
-          color: white;
+          background: var(--surface-elevated);
+          color: var(--text);
         }
         .dropdown-item.group .edit-action-btn {
           opacity: 0;
           background: transparent;
           border: none;
-          color: #ccc;
+          color: var(--text-muted);
           border-radius: 6px;
           width: 24px;
           height: 24px;
@@ -818,7 +831,7 @@ export function AppShell() {
           opacity: 1;
         }
         .dropdown-item.group .edit-action-btn:hover {
-          background: rgba(255,255,255,0.15) !important;
+          background: var(--surface-elevated) !important;
           color: #fff !important;
         }
       `}</style>

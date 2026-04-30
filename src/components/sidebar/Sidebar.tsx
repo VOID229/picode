@@ -278,8 +278,8 @@ export function Sidebar({ state, onAddProject }: SidebarProps) {
     <aside
       className="sidebar"
       style={{
-        backgroundColor: "#111",
-        color: "#ccc",
+        backgroundColor: "var(--surface)",
+        color: "var(--text-muted)",
         fontSize: "0.85rem",
         minHeight: 0,
         overflow: "hidden",
@@ -307,7 +307,13 @@ export function Sidebar({ state, onAddProject }: SidebarProps) {
             marginTop: "-16px",
           }}
         >
-          <span style={{ fontWeight: 600, color: "#fff", fontSize: "1.05rem" }}>
+          <span
+            style={{
+              fontWeight: 600,
+              color: "var(--text)",
+              fontSize: "1.05rem",
+            }}
+          >
             picode
           </span>
           <span
@@ -315,14 +321,16 @@ export function Sidebar({ state, onAddProject }: SidebarProps) {
               fontSize: "0.6rem",
               fontWeight: 700,
               letterSpacing: "0.05em",
-              color: "#888",
-              background: "rgba(255,255,255,0.08)",
+              color: "var(--text-muted)",
+              background: "var(--surface-elevated)",
               padding: "2px 6px",
               borderRadius: "10px",
               marginTop: "1px",
             }}
           >
-            ALPHA
+            {state.preferences.updateChannel === "nightly"
+              ? "NIGHTLY"
+              : "ALPHA"}
           </span>
         </div>
       </div>
@@ -345,10 +353,10 @@ export function Sidebar({ state, onAddProject }: SidebarProps) {
             background: "transparent",
             padding: "6px 8px",
             borderRadius: "6px",
-            border: "1px solid #333",
+            border: "1px solid var(--line)",
           }}
         >
-          <Search size={14} color="#666" />
+          <Search size={14} color="var(--text-dim)" />
           <input
             id="sidebar-search-input"
             value={query}
@@ -366,8 +374,8 @@ export function Sidebar({ state, onAddProject }: SidebarProps) {
           <div
             style={{
               fontSize: "0.7rem",
-              color: "#666",
-              background: "#222",
+              color: "var(--text-dim)",
+              background: "var(--surface-elevated)",
               padding: "2px 4px",
               borderRadius: "4px",
             }}
@@ -401,13 +409,15 @@ export function Sidebar({ state, onAddProject }: SidebarProps) {
             style={{
               fontSize: "0.7rem",
               fontWeight: 600,
-              color: "#666",
+              color: "var(--text-dim)",
               letterSpacing: "0.05em",
             }}
           >
             PROJECTS
           </span>
-          <div style={{ display: "flex", gap: "12px", color: "#666" }}>
+          <div
+            style={{ display: "flex", gap: "12px", color: "var(--text-dim)" }}
+          >
             <ArrowDownUp
               size={12}
               className="pointer action-icon"
@@ -500,7 +510,7 @@ export function Sidebar({ state, onAddProject }: SidebarProps) {
             display: "flex",
             alignItems: "center",
             gap: "8px",
-            color: "#888",
+            color: "var(--text-muted)",
             textDecoration: "none",
             fontSize: "0.85rem",
             padding: "6px 8px",
@@ -508,12 +518,12 @@ export function Sidebar({ state, onAddProject }: SidebarProps) {
             transition: "background 0.2s, color 0.2s",
           }}
           onMouseEnter={(e) => {
-            e.currentTarget.style.background = "#222";
-            e.currentTarget.style.color = "#ccc";
+            e.currentTarget.style.background = "var(--surface-elevated)";
+            e.currentTarget.style.color = "var(--text)";
           }}
           onMouseLeave={(e) => {
             e.currentTarget.style.background = "transparent";
-            e.currentTarget.style.color = "#888";
+            e.currentTarget.style.color = "var(--text-muted)";
           }}
         >
           <Settings size={16} />
@@ -770,7 +780,10 @@ function ProjectNode({
           gap: "6px",
           padding: "6px 8px",
           borderRadius: "6px",
-          color: workspace.id === state.activeWorkspaceId ? "#fff" : "#aaa",
+          color:
+            workspace.id === state.activeWorkspaceId
+              ? "var(--text)"
+              : "var(--text-muted)",
           cursor: projectSortOrder === "manual" ? "grab" : "pointer",
           opacity: isDraggingWorkspace ? 0.55 : 1,
         }}
@@ -793,20 +806,22 @@ function ProjectNode({
           event.stopPropagation();
           onWorkspaceDrop(dropBeforeWorkspaceId);
         }}
-        onMouseEnter={(e) => (e.currentTarget.style.background = "#222")}
+        onMouseEnter={(e) =>
+          (e.currentTarget.style.background = "var(--surface-elevated)")
+        }
         onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
       >
         <div
           style={{ display: "flex", alignItems: "center", gap: "4px", flex: 1 }}
         >
           {projectSortOrder === "manual" && (
-            <GripVertical size={12} color="#666" />
+            <GripVertical size={12} color="var(--text-dim)" />
           )}
           {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
           {isExpanded ? (
-            <FolderOpen size={14} color="#666" />
+            <FolderOpen size={14} color="var(--text-dim)" />
           ) : (
-            <Folder size={14} color="#666" />
+            <Folder size={14} color="var(--text-dim)" />
           )}
           <span
             style={{
@@ -837,7 +852,7 @@ function ProjectNode({
             display: "flex",
             flexDirection: "column",
             marginLeft: "12px",
-            borderLeft: "1px solid #333",
+            borderLeft: "1px solid var(--line)",
             paddingLeft: "8px",
             paddingTop: "4px",
             paddingBottom: "8px",
@@ -863,7 +878,11 @@ function ProjectNode({
         >
           {visibleSessions.length === 0 ? (
             <div
-              style={{ fontSize: "0.75rem", color: "#555", padding: "4px 8px" }}
+              style={{
+                fontSize: "0.75rem",
+                color: "var(--text-dim)",
+                padding: "4px 8px",
+              }}
             >
               No threads yet
             </div>
@@ -1002,7 +1021,7 @@ function ProjectNode({
                   display: none;
                 }
                 .archive-btn:hover {
-                  color: #fff !important;
+                  color: var(--text) !important;
                 }
               `}</style>
     </div>
@@ -1174,7 +1193,7 @@ function SessionItem({
               left: "8px",
               right: "8px",
               height: "2px",
-              background: "#2563eb",
+              background: "var(--accent)",
               borderRadius: "999px",
               pointerEvents: "none",
               zIndex: 1,
@@ -1208,7 +1227,11 @@ function SessionItem({
             userSelect: "none",
             padding: "6px 8px",
             borderRadius: "6px",
-            color: isMultiSelected ? "#fff" : isActive ? "#fff" : "#888",
+            color: isMultiSelected
+              ? "var(--text)"
+              : isActive
+                ? "var(--text)"
+                : "var(--text-muted)",
             background: isMultiSelected
               ? "#274377"
               : isActive
@@ -1239,7 +1262,7 @@ function SessionItem({
               e.currentTarget.style.background = isActive
                 ? "rgba(255,255,255,0.05)"
                 : "transparent";
-              if (!isActive) e.currentTarget.style.color = "#888";
+              if (!isActive) e.currentTarget.style.color = "var(--text-muted)";
             }
           }}
         >
@@ -1258,7 +1281,7 @@ function SessionItem({
                 title="Drag to rearrange thread"
                 style={{ display: "inline-flex", cursor: "grab" }}
               >
-                <GripVertical size={12} color="#666" />
+                <GripVertical size={12} color="var(--text-dim)" />
               </span>
             )}
             <TruncatedSessionTitle title={session.title} />
@@ -1268,16 +1291,17 @@ function SessionItem({
             style={{ display: "flex", alignItems: "center", gap: "6px" }}
           >
             <span
-              style={{ fontSize: "0.65rem", color: "#555" }}
+              style={{ fontSize: "0.65rem", color: "var(--text-dim)" }}
               className="session-status"
             >
-              {isModifierHeld && shortcutKey &&
+              {isModifierHeld &&
+              shortcutKey &&
               document.activeElement?.getAttribute("data-composer") !==
                 "true" ? (
                 <span
                   style={{
-                    background: "rgba(255,255,255,0.1)",
-                    color: "#fff",
+                    background: "var(--surface-elevated)",
+                    color: "var(--text)",
                     padding: "1px 4px",
                     borderRadius: "4px",
                     fontFamily: "monospace",
@@ -1296,7 +1320,7 @@ function SessionItem({
               size={14}
               className="archive-btn action-icon"
               style={{
-                color: "#666",
+                color: "var(--text-dim)",
                 display: "none",
               }}
               onClick={(e) => {
@@ -1448,7 +1472,7 @@ function DropIndicator() {
       style={{
         height: "2px",
         margin: "2px 8px",
-        background: "#2563eb",
+        background: "var(--accent)",
         borderRadius: "999px",
         pointerEvents: "none",
         boxShadow: "0 0 0 1px rgba(37, 99, 235, 0.2)",

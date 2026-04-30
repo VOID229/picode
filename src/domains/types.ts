@@ -4,7 +4,31 @@ export type ThemeId =
   | "catppuccin"
   | "nord"
   | "gruvbox"
-  | "solarized";
+  | "solarized"
+  | "custom";
+
+export interface CustomThemeColors {
+  bg: string;
+  surface: string;
+  surfaceElevated: string;
+  surfaceStrong: string;
+  line: string;
+  accent: string;
+  accentSoft: string;
+  accentGlow: string;
+  success: string;
+  danger: string;
+  warning: string;
+  text: string;
+  textMuted: string;
+  textDim: string;
+  glassBg: string;
+  glassBorder: string;
+  chatBubble: string;
+  composer: string;
+  composerBorder: string;
+  navHover: string;
+}
 
 export type ApprovalMode = "supervised" | "auto-accept-edits" | "full-access";
 export type PromptMode = "plan" | "build";
@@ -259,6 +283,7 @@ export interface LayoutPreferences {
 
 export interface AppPreferences {
   theme: ThemeId;
+  customThemeColors?: CustomThemeColors;
   modelSelectionScope: ModelSelectionScope;
   threadModelMemory: ThreadModelMemory;
   providerId: string;
@@ -279,6 +304,7 @@ export interface AppPreferences {
   approvalMode: ApprovalMode;
   effort: string;
   fastMode: boolean;
+  providerModelMemory: Record<string, SessionModelSelection>;
   piBinaryPath?: string;
   updateChannel?: "stable" | "nightly";
   shortcuts?: Record<string, string | null>;

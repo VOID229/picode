@@ -399,17 +399,30 @@ export function deriveLivePhase(session: ChatSession | null): LivePhase | null {
   }
 
   const lastAssistantMessage = recentItems.find(
+    (item) => item.kind === "assistant-message",
+  );
+
+  if (
+    lastAssistantMessage &&
+    lastAssistantMessage.kind === "assistant-message" &&
+    lastAssistantMessage.streaming &&
+    lastAssistantMessage.content.trim().length > 0
+  ) {
+    return null;
+  }
+
+  const emptyStreamingAssistantMessage = recentItems.find(
     (item) =>
       item.kind === "assistant-message" &&
       item.streaming &&
       item.content.trim().length === 0,
   );
 
-  if (lastAssistantMessage) {
+  if (emptyStreamingAssistantMessage) {
     return buildLivePhase("thinking");
   }
 
-  return null;
+  return buildLivePhase("thinking");
 }
 
 export function isTransientTimelineItem(item: TimelineItem) {
@@ -874,8 +887,6 @@ export function segmentTurnItems(
   const segments: TurnSegment[] = [];
   let currentActivityItems: TimelineItem[] = [];
   let currentActivityPhase: ActivityPhase | null = null;
-  let lastActivityTimestamp: number | null = null;
-  const idleGapMs = options?.idleGapMs ?? 5000;
 
   const flushActivity = () => {
     if (currentActivityItems.length > 0 && currentActivityPhase) {
@@ -886,7 +897,6 @@ export function segmentTurnItems(
       });
       currentActivityItems = [];
       currentActivityPhase = null;
-      lastActivityTimestamp = null;
     }
   };
 
@@ -894,23 +904,8 @@ export function segmentTurnItems(
     const phase = classifyActivityPhaseForItem(item);
 
     if (phase) {
-      const timestamp = getTimelineItemTimestamp(item);
-      const hasIdleGap =
-        timestamp !== null &&
-        lastActivityTimestamp !== null &&
-        timestamp - lastActivityTimestamp > idleGapMs;
-      const hasPhaseChange =
-        currentActivityPhase !== null && currentActivityPhase !== phase;
-
-      if (hasIdleGap || hasPhaseChange) {
-        flushActivity();
-      }
-
       currentActivityItems.push(item);
       currentActivityPhase = phase;
-      if (timestamp !== null) {
-        lastActivityTimestamp = timestamp;
-      }
     } else if (item.kind === "assistant-message") {
       flushActivity();
       segments.push({ type: "text", items: [item] });
@@ -924,12 +919,17 @@ export function segmentTurnItems(
 
   if (options?.livePhase) {
     const lastSegment = segments[segments.length - 1];
+    const lastSegmentHasRunningTool = lastSegment?.items.some(
+      (item) =>
+        item.kind === "tool-activity" && item.activity.status === "running",
+    );
     if (
       lastSegment?.type === "activity" &&
-      lastSegment.activityPhase === options.livePhase.phase
+      (options.livePhase.phase !== "thinking" || lastSegmentHasRunningTool)
     ) {
       lastSegment.isLive = true;
       lastSegment.livePhase = options.livePhase;
+      lastSegment.activityPhase = options.livePhase.phase;
       return segments;
     }
 
@@ -1123,6 +1123,34 @@ function normalizeSelectionAgainstProviders(
   };
 }
 
+export function resolveProviderSwitchModel(options: {
+  provider: ProviderOption | undefined;
+  currentProviderId: string;
+  currentModelId: string;
+  providerModelMemory?: Record<string, SessionModelSelection>;
+}) {
+  const { provider, currentProviderId, currentModelId, providerModelMemory } =
+    options;
+
+  if (!provider) {
+    return currentModelId;
+  }
+
+  if (provider.id === currentProviderId) {
+    return currentModelId;
+  }
+
+  const rememberedModelId = providerModelMemory?.[provider.id]?.modelId;
+  if (
+    rememberedModelId &&
+    provider.models.some((model) => model.id === rememberedModelId)
+  ) {
+    return rememberedModelId;
+  }
+
+  return provider.models[0]?.id ?? currentModelId;
+}
+
 function resolveAntigravityPair(provider: ProviderOption, modelId: string) {
   const current = provider.models.find((entry) => entry.id === modelId);
   if (!current) {
@@ -1159,10 +1187,16 @@ export type CompactToolPhase =
   | "editing"
   | "running"
   | "reviewing"
+  | "thinking"
   | "done"
   | "error";
 
-export type CompactToolItemType = "search" | "read" | "edit" | "command" | "other";
+export type CompactToolItemType =
+  | "search"
+  | "read"
+  | "edit"
+  | "command"
+  | "other";
 
 export interface CompactToolItem {
   id: string;
@@ -1197,7 +1231,7 @@ export function mapActivityPhaseToCompact(
     case "verifying":
       return "reviewing";
     case "thinking":
-      return "reviewing";
+      return "thinking";
     default:
       return "reading";
   }
@@ -1240,8 +1274,33 @@ function extractCommandString(item: ToolActivityItem): string | undefined {
   if (args && typeof args.command === "string" && args.command.trim()) {
     return args.command.trim();
   }
+  if (args && typeof args.cmd === "string" && args.cmd.trim()) {
+    return args.cmd.trim();
+  }
+  if (args && Array.isArray(args.command)) {
+    const command = args.command
+      .filter((part): part is string => typeof part === "string")
+      .join(" ")
+      .trim();
+    if (command) {
+      return command;
+    }
+  }
+  if (args && Array.isArray(args.cmd)) {
+    const command = args.cmd
+      .filter((part): part is string => typeof part === "string")
+      .join(" ")
+      .trim();
+    if (command) {
+      return command;
+    }
+  }
   const toolName = item.activity.toolName.trim().toLowerCase();
-  if (["bash", "shell", "run", "exec", "command"].includes(toolName)) {
+  if (
+    ["bash", "shell", "run", "exec", "command", "exec_command"].includes(
+      toolName,
+    )
+  ) {
     // Try to extract a bare command from the summary when it's not JSON-wrapped
     const summary = item.activity.summary.trim();
     const firstBrace = summary.indexOf("{");
@@ -1316,6 +1375,8 @@ export function formatCompactLiveLabel(phase: CompactToolPhase): string {
       return "Running commands…";
     case "reviewing":
       return "Reviewing…";
+    case "thinking":
+      return "Thinking…";
     case "error":
       return "Error";
     case "done":
@@ -1393,4 +1454,27 @@ export function formatCompactGroupLabelRunning(
     case "other":
       return "Working";
   }
+}
+
+export interface CompactListResult {
+  visible: CompactToolItem[];
+  hiddenCount: number;
+}
+
+export function compactItemList(
+  items: CompactToolItem[],
+  maxVisible = 6,
+): CompactListResult {
+  const seen = new Set<string>();
+  const unique: CompactToolItem[] = [];
+  for (const item of items) {
+    if (!seen.has(item.label)) {
+      seen.add(item.label);
+      unique.push(item);
+    }
+  }
+  return {
+    visible: unique.slice(0, maxVisible),
+    hiddenCount: Math.max(0, unique.length - maxVisible),
+  };
 }

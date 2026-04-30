@@ -7,8 +7,17 @@ import {
   RotateCcw,
   Trash2,
   RefreshCw,
+  Palette,
+  Check,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
+import {
+  themeDefinitions,
+  defaultCustomColors,
+  colorLabels,
+  type ThemeColors,
+} from "../../lib/themes";
+import type { ThemeId, CustomThemeColors } from "../../domains/types";
 import { Link, useNavigate } from "react-router-dom";
 import {
   checkForAppUpdate,
@@ -27,6 +36,8 @@ import {
 import { useAppStore } from "../../state/useAppStore";
 import type { AppPaths } from "../../domains/types";
 
+let lastSettingsTab = "general";
+
 function Toggle({ checked }: { checked: boolean }) {
   return (
     <div
@@ -34,7 +45,7 @@ function Toggle({ checked }: { checked: boolean }) {
         width: "36px",
         height: "20px",
         borderRadius: "10px",
-        background: checked ? "#2563eb" : "#333",
+        background: checked ? "var(--accent)" : "var(--surface-strong)",
         position: "relative",
         cursor: "pointer",
         transition: "background 0.2s",
@@ -45,7 +56,7 @@ function Toggle({ checked }: { checked: boolean }) {
           width: "16px",
           height: "16px",
           borderRadius: "50%",
-          background: "#fff",
+          background: "var(--text)",
           position: "absolute",
           top: "2px",
           left: checked ? "18px" : "2px",
@@ -73,17 +84,19 @@ function SettingRow({
         justifyContent: "space-between",
         alignItems: "center",
         padding: "16px 20px",
-        borderBottom: "1px solid #222",
+        borderBottom: "1px solid var(--line)",
       }}
     >
       <div style={{ maxWidth: "70%" }}>
-        <div style={{ fontSize: "0.9rem", fontWeight: 600, color: "#fff" }}>
+        <div
+          style={{ fontSize: "0.9rem", fontWeight: 600, color: "var(--text)" }}
+        >
           {label}
         </div>
         <div
           style={{
             fontSize: "0.8rem",
-            color: "#888",
+            color: "var(--text-muted)",
             marginTop: "4px",
             lineHeight: "1.4",
           }}
@@ -106,12 +119,14 @@ function SettingsSection({
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
       <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-        <div style={{ width: "16px", height: "1px", background: "#333" }} />
+        <div
+          style={{ width: "16px", height: "1px", background: "var(--line)" }}
+        />
         <span
           style={{
             fontSize: "0.7rem",
             fontWeight: 600,
-            color: "#666",
+            color: "var(--text-dim)",
             letterSpacing: "0.05em",
           }}
         >
@@ -120,8 +135,8 @@ function SettingsSection({
       </div>
       <div
         style={{
-          background: "rgba(255,255,255,0.02)",
-          border: "1px solid #222",
+          background: "var(--surface)",
+          border: "1px solid var(--line)",
           borderRadius: "12px",
           overflow: "hidden",
         }}
@@ -174,7 +189,7 @@ function ShortcutRecorder({
       style={{
         minWidth: "112px",
         background: "transparent",
-        color: recording ? "#fff" : "#ddd",
+        color: recording ? "var(--text)" : "var(--text-muted)",
         border: "none",
         padding: "6px 8px",
         outline: "none",
@@ -211,9 +226,9 @@ function ShortcutActionButton({
       }}
       onMouseUp={() => setPressed(false)}
       style={{
-        background: hovered ? "rgba(255,255,255,0.08)" : "transparent",
-        color: pressed ? "#fff" : "#ddd",
-        border: "1px solid #3a3a3a",
+        background: hovered ? "var(--accent-soft)" : "transparent",
+        color: pressed ? "var(--text)" : "var(--text-muted)",
+        border: "1px solid var(--line)",
         padding: "6px 10px",
         borderRadius: "6px",
         outline: "none",
@@ -229,9 +244,308 @@ function ShortcutActionButton({
   );
 }
 
+function ThemePicker({
+  currentTheme,
+  customColors,
+  updatePreferences,
+  state,
+}: {
+  currentTheme: ThemeId;
+  customColors?: CustomThemeColors;
+  updatePreferences: (prefs: any) => Promise<void>;
+  state: any;
+}) {
+  const [editingCustom, setEditingCustom] = useState<CustomThemeColors>(
+    customColors ?? defaultCustomColors,
+  );
+
+  useEffect(() => {
+    if (currentTheme === "custom" && customColors) {
+      setEditingCustom(customColors);
+    }
+  }, [currentTheme, customColors]);
+
+  const handleSelectTheme = useCallback(
+    (themeId: ThemeId) => {
+      if (!state) return;
+      const next = { ...state.preferences, theme: themeId };
+      if (themeId === "custom") {
+        next.customThemeColors = editingCustom;
+      }
+      void updatePreferences(next);
+    },
+    [state, updatePreferences, editingCustom],
+  );
+
+  const handleCustomColorChange = useCallback(
+    (key: keyof ThemeColors, value: string) => {
+      const next = { ...editingCustom, [key]: value };
+      setEditingCustom(next);
+      if (state && currentTheme === "custom") {
+        void updatePreferences({
+          ...state.preferences,
+          theme: "custom",
+          customThemeColors: next,
+        });
+      }
+    },
+    [editingCustom, state, updatePreferences, currentTheme],
+  );
+
+  const allThemes = [
+    ...themeDefinitions,
+    {
+      id: "custom" as ThemeId,
+      label: "Custom",
+      isDark: true,
+      colors: editingCustom,
+    },
+  ];
+
+  return (
+    <div
+      style={{
+        width: "100%",
+        display: "flex",
+        flexDirection: "column",
+        gap: "32px",
+      }}
+    >
+      <SettingsSection title="THEME">
+        <div
+          style={{
+            padding: "20px",
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
+            gap: "16px",
+          }}
+        >
+          {allThemes.map((theme) => {
+            const isSelected = currentTheme === theme.id;
+            const c = theme.colors;
+            return (
+              <button
+                key={theme.id}
+                onClick={() => handleSelectTheme(theme.id)}
+                style={{
+                  position: "relative",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "12px",
+                  padding: "16px",
+                  borderRadius: "12px",
+                  border: isSelected
+                    ? `2px solid ${c.accent}`
+                    : "1px solid rgba(255,255,255,0.08)",
+                  background: c.surface,
+                  cursor: "pointer",
+                  textAlign: "left",
+                  transition: "border-color 0.2s, transform 0.15s",
+                  transform: isSelected ? "scale(1.02)" : "scale(1)",
+                }}
+              >
+                {isSelected && (
+                  <div
+                    style={{
+                      position: "absolute",
+                      top: "10px",
+                      right: "10px",
+                      width: "22px",
+                      height: "22px",
+                      borderRadius: "50%",
+                      background: c.accent,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                  >
+                    <Check size={13} color={c.bg} strokeWidth={3} />
+                  </div>
+                )}
+
+                {/* Preview bar */}
+                <div
+                  style={{
+                    display: "flex",
+                    height: "28px",
+                    borderRadius: "6px",
+                    overflow: "hidden",
+                    border: `1px solid ${c.line}`,
+                  }}
+                >
+                  <div
+                    style={{ flex: 1, background: c.bg }}
+                    title={`Background: ${c.bg}`}
+                  />
+                  <div
+                    style={{ flex: 1, background: c.surface }}
+                    title={`Surface: ${c.surface}`}
+                  />
+                  <div
+                    style={{ flex: 1, background: c.surfaceElevated }}
+                    title={`Surface Elevated: ${c.surfaceElevated}`}
+                  />
+                  <div
+                    style={{ flex: 1, background: c.accent }}
+                    title={`Accent: ${c.accent}`}
+                  />
+                  <div
+                    style={{ flex: 1, background: c.text }}
+                    title={`Text: ${c.text}`}
+                  />
+                  <div
+                    style={{ flex: 1, background: c.success }}
+                    title={`Success: ${c.success}`}
+                  />
+                  <div
+                    style={{ flex: 0.5, background: c.danger }}
+                    title={`Danger: ${c.danger}`}
+                  />
+                </div>
+
+                <div
+                  style={{
+                    fontSize: "0.9rem",
+                    fontWeight: 600,
+                    color: c.text,
+                  }}
+                >
+                  {theme.label}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </SettingsSection>
+
+      {/* Color Details */}
+      <SettingsSection title="COLOR REFERENCE">
+        <div
+          style={{
+            padding: "20px",
+            display: "flex",
+            flexDirection: "column",
+            gap: "16px",
+          }}
+        >
+          <div
+            style={{
+              fontSize: "0.84rem",
+              color: "var(--text-muted)",
+              marginBottom: "4px",
+            }}
+          >
+            {currentTheme === "custom"
+              ? "Edit any color below. Changes apply in real time."
+              : `Hex values for the ${allThemes.find((t) => t.id === currentTheme)?.label ?? ""} theme.`}
+          </div>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))",
+              gap: "8px",
+            }}
+          >
+            {(Object.keys(colorLabels) as Array<keyof ThemeColors>).map(
+              (key) => {
+                const colors =
+                  currentTheme === "custom"
+                    ? editingCustom
+                    : (allThemes.find((t) => t.id === currentTheme)?.colors ??
+                      editingCustom);
+                const value = colors[key];
+                const isEditing = currentTheme === "custom";
+
+                return (
+                  <div
+                    key={key}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "10px",
+                      padding: "8px 10px",
+                      borderRadius: "8px",
+                      background: "var(--surface)",
+                      border: "1px solid rgba(255,255,255,0.05)",
+                    }}
+                  >
+                    <div
+                      style={{
+                        width: "28px",
+                        height: "28px",
+                        borderRadius: "6px",
+                        background: value,
+                        border: "1px solid rgba(255,255,255,0.1)",
+                        flexShrink: 0,
+                      }}
+                    />
+                    <div
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: "2px",
+                        minWidth: 0,
+                        flex: 1,
+                      }}
+                    >
+                      <span
+                        style={{
+                          fontSize: "0.76rem",
+                          fontWeight: 600,
+                          color: "var(--text-muted)",
+                        }}
+                      >
+                        {colorLabels[key]}
+                      </span>
+                      {isEditing ? (
+                        <input
+                          type="text"
+                          value={value}
+                          onChange={(e) =>
+                            handleCustomColorChange(key, e.target.value)
+                          }
+                          style={{
+                            width: "100%",
+                            background: "rgba(0,0,0,0.3)",
+                            border: "1px solid rgba(255,255,255,0.1)",
+                            borderRadius: "4px",
+                            padding: "2px 6px",
+                            color: "var(--text)",
+                            fontSize: "0.78rem",
+                            fontFamily: "monospace",
+                            outline: "none",
+                          }}
+                        />
+                      ) : (
+                        <span
+                          style={{
+                            fontSize: "0.78rem",
+                            fontFamily: "monospace",
+                            color: "var(--text-dim)",
+                          }}
+                        >
+                          {value}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                );
+              },
+            )}
+          </div>
+        </div>
+      </SettingsSection>
+    </div>
+  );
+}
+
 export function SettingsScreen() {
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState("general");
+  const [activeTab, setActiveTab] = useState(lastSettingsTab);
+
+  useEffect(() => {
+    lastSettingsTab = activeTab;
+  }, [activeTab]);
   const [piBinaryInput, setPiBinaryInput] = useState("");
   const [appPaths, setAppPaths] = useState<AppPaths | null>(null);
   const [updateStatus, setUpdateStatus] = useState<string>("");
@@ -243,9 +557,9 @@ export function SettingsScreen() {
   const [updateInstalled, setUpdateInstalled] = useState(false);
 
   const controlStyle = {
-    background: "#111",
-    color: "#fff",
-    border: "1px solid #333",
+    background: "var(--surface)",
+    color: "var(--text)",
+    border: "1px solid var(--line)",
     padding: "8px 12px",
     borderRadius: "6px",
     outline: "none",
@@ -255,8 +569,8 @@ export function SettingsScreen() {
 
   const btnStyle = {
     background: "transparent",
-    color: "#fff",
-    border: "1px solid #333",
+    color: "var(--text)",
+    border: "1px solid var(--line)",
     padding: "6px 12px",
     borderRadius: "6px",
     outline: "none",
@@ -274,6 +588,7 @@ export function SettingsScreen() {
   const restoreSession = useAppStore((store) => store.restoreSession);
   const deleteSession = useAppStore((store) => store.deleteSession);
   const updatePreferences = useAppStore((store) => store.updatePreferences);
+  const addToast = useAppStore((store) => store.addToast);
   const refreshRuntimeHealth = useAppStore(
     (store) => store.refreshRuntimeHealth,
   );
@@ -546,18 +861,18 @@ export function SettingsScreen() {
         display: "flex",
         width: "100%",
         height: "100vh",
-        backgroundColor: "#0a0a0a",
-        color: "#fff",
+        backgroundColor: "var(--bg)",
+        color: "var(--text)",
       }}
     >
       {/* Sidebar */}
       <div
         style={{
           width: "260px",
-          borderRight: "1px solid #222",
+          borderRight: "1px solid var(--line)",
           display: "flex",
           flexDirection: "column",
-          backgroundColor: "#111",
+          backgroundColor: "var(--surface)",
         }}
       >
         <div
@@ -582,7 +897,11 @@ export function SettingsScreen() {
             }}
           >
             <span
-              style={{ fontWeight: 600, color: "#fff", fontSize: "1.05rem" }}
+              style={{
+                fontWeight: 600,
+                color: "var(--text)",
+                fontSize: "1.05rem",
+              }}
             >
               picode
             </span>
@@ -591,14 +910,16 @@ export function SettingsScreen() {
                 fontSize: "0.6rem",
                 fontWeight: 700,
                 letterSpacing: "0.05em",
-                color: "#888",
-                background: "rgba(255,255,255,0.08)",
+                color: "var(--text-muted)",
+                background: "var(--surface-elevated)",
                 padding: "2px 6px",
                 borderRadius: "10px",
                 marginTop: "1px",
               }}
             >
-              ALPHA
+              {state?.preferences.updateChannel === "nightly"
+                ? "NIGHTLY"
+                : "ALPHA"}
             </span>
           </div>
         </div>
@@ -621,22 +942,23 @@ export function SettingsScreen() {
               borderRadius: "6px",
               background:
                 activeTab === "general"
-                  ? "rgba(255,255,255,0.08)"
+                  ? "var(--surface-elevated)"
                   : "transparent",
-              color: activeTab === "general" ? "#fff" : "#888",
+              color:
+                activeTab === "general" ? "var(--text)" : "var(--text-muted)",
               cursor: "pointer",
               transition: "background 0.2s, color 0.2s",
             }}
             onMouseEnter={(e) => {
               if (activeTab !== "general") {
-                e.currentTarget.style.background = "#222";
-                e.currentTarget.style.color = "#ccc";
+                e.currentTarget.style.background = "var(--surface-elevated)";
+                e.currentTarget.style.color = "var(--text)";
               }
             }}
             onMouseLeave={(e) => {
               if (activeTab !== "general") {
                 e.currentTarget.style.background = "transparent";
-                e.currentTarget.style.color = "#888";
+                e.currentTarget.style.color = "var(--text-muted)";
               }
             }}
           >
@@ -655,22 +977,25 @@ export function SettingsScreen() {
               borderRadius: "6px",
               background:
                 activeTab === "connections"
-                  ? "rgba(255,255,255,0.08)"
+                  ? "var(--surface-elevated)"
                   : "transparent",
-              color: activeTab === "connections" ? "#fff" : "#888",
+              color:
+                activeTab === "connections"
+                  ? "var(--text)"
+                  : "var(--text-muted)",
               cursor: "pointer",
               transition: "background 0.2s, color 0.2s",
             }}
             onMouseEnter={(e) => {
               if (activeTab !== "connections") {
-                e.currentTarget.style.background = "#222";
-                e.currentTarget.style.color = "#ccc";
+                e.currentTarget.style.background = "var(--surface-elevated)";
+                e.currentTarget.style.color = "var(--text)";
               }
             }}
             onMouseLeave={(e) => {
               if (activeTab !== "connections") {
                 e.currentTarget.style.background = "transparent";
-                e.currentTarget.style.color = "#888";
+                e.currentTarget.style.color = "var(--text-muted)";
               }
             }}
           >
@@ -689,22 +1014,23 @@ export function SettingsScreen() {
               borderRadius: "6px",
               background:
                 activeTab === "shortcuts"
-                  ? "rgba(255,255,255,0.08)"
+                  ? "var(--surface-elevated)"
                   : "transparent",
-              color: activeTab === "shortcuts" ? "#fff" : "#888",
+              color:
+                activeTab === "shortcuts" ? "var(--text)" : "var(--text-muted)",
               cursor: "pointer",
               transition: "background 0.2s, color 0.2s",
             }}
             onMouseEnter={(e) => {
               if (activeTab !== "shortcuts") {
-                e.currentTarget.style.background = "#222";
-                e.currentTarget.style.color = "#ccc";
+                e.currentTarget.style.background = "var(--surface-elevated)";
+                e.currentTarget.style.color = "var(--text)";
               }
             }}
             onMouseLeave={(e) => {
               if (activeTab !== "shortcuts") {
                 e.currentTarget.style.background = "transparent";
-                e.currentTarget.style.color = "#888";
+                e.currentTarget.style.color = "var(--text-muted)";
               }
             }}
           >
@@ -712,6 +1038,39 @@ export function SettingsScreen() {
             <span style={{ fontSize: "0.85rem", fontWeight: 500 }}>
               Shortcuts
             </span>
+          </div>
+          <div
+            onClick={() => setActiveTab("theme")}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "8px",
+              padding: "8px 12px",
+              borderRadius: "6px",
+              background:
+                activeTab === "theme"
+                  ? "var(--surface-elevated)"
+                  : "transparent",
+              color:
+                activeTab === "theme" ? "var(--text)" : "var(--text-muted)",
+              cursor: "pointer",
+              transition: "background 0.2s, color 0.2s",
+            }}
+            onMouseEnter={(e) => {
+              if (activeTab !== "theme") {
+                e.currentTarget.style.background = "var(--surface-elevated)";
+                e.currentTarget.style.color = "var(--text)";
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (activeTab !== "theme") {
+                e.currentTarget.style.background = "transparent";
+                e.currentTarget.style.color = "var(--text-muted)";
+              }
+            }}
+          >
+            <Palette size={14} />
+            <span style={{ fontSize: "0.85rem", fontWeight: 500 }}>Theme</span>
           </div>
           <div
             onClick={() => setActiveTab("archive")}
@@ -723,22 +1082,23 @@ export function SettingsScreen() {
               borderRadius: "6px",
               background:
                 activeTab === "archive"
-                  ? "rgba(255,255,255,0.08)"
+                  ? "var(--surface-elevated)"
                   : "transparent",
-              color: activeTab === "archive" ? "#fff" : "#888",
+              color:
+                activeTab === "archive" ? "var(--text)" : "var(--text-muted)",
               cursor: "pointer",
               transition: "background 0.2s, color 0.2s",
             }}
             onMouseEnter={(e) => {
               if (activeTab !== "archive") {
-                e.currentTarget.style.background = "#222";
-                e.currentTarget.style.color = "#ccc";
+                e.currentTarget.style.background = "var(--surface-elevated)";
+                e.currentTarget.style.color = "var(--text)";
               }
             }}
             onMouseLeave={(e) => {
               if (activeTab !== "archive") {
                 e.currentTarget.style.background = "transparent";
-                e.currentTarget.style.color = "#888";
+                e.currentTarget.style.color = "var(--text-muted)";
               }
             }}
           >
@@ -756,7 +1116,7 @@ export function SettingsScreen() {
               display: "flex",
               alignItems: "center",
               gap: "8px",
-              color: "#888",
+              color: "var(--text-muted)",
               textDecoration: "none",
               fontSize: "0.85rem",
               padding: "6px 8px",
@@ -764,12 +1124,12 @@ export function SettingsScreen() {
               transition: "background 0.2s, color 0.2s",
             }}
             onMouseEnter={(e) => {
-              e.currentTarget.style.background = "#222";
-              e.currentTarget.style.color = "#ccc";
+              e.currentTarget.style.background = "var(--surface-elevated)";
+              e.currentTarget.style.color = "var(--text)";
             }}
             onMouseLeave={(e) => {
               e.currentTarget.style.background = "transparent";
-              e.currentTarget.style.color = "#888";
+              e.currentTarget.style.color = "var(--text-muted)";
             }}
           >
             <ArrowLeft size={16} />
@@ -798,25 +1158,36 @@ export function SettingsScreen() {
               justifyContent: "space-between",
               alignItems: "center",
               WebkitAppRegion: "drag",
-              borderBottom: "1px solid #222",
+              borderBottom: "1px solid var(--line)",
             } as React.CSSProperties
           }
         >
-          <div style={{ fontSize: "0.85rem", color: "#888" }}>Settings</div>
+          <div style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>
+            Settings
+          </div>
           <button
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = "var(--surface-elevated)";
+              e.currentTarget.style.color = "var(--text)";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = "transparent";
+              e.currentTarget.style.color = "var(--text-muted)";
+            }}
             style={
               {
                 display: "flex",
                 alignItems: "center",
                 gap: "6px",
                 background: "transparent",
-                border: "1px solid #333",
-                color: "#ccc",
+                border: "1px solid var(--line)",
+                color: "var(--text-muted)",
                 padding: "6px 12px",
                 borderRadius: "6px",
                 fontSize: "0.75rem",
                 cursor: "pointer",
                 WebkitAppRegion: "no-drag",
+                transition: "background 0.15s, color 0.15s",
               } as React.CSSProperties
             }
           >
@@ -847,17 +1218,6 @@ export function SettingsScreen() {
             {activeTab === "general" && (
               <>
                 <SettingsSection title="GENERAL">
-                  <SettingRow
-                    label="Theme"
-                    description="Choose how picode looks across the app."
-                    control={
-                      <select style={controlStyle} defaultValue="System">
-                        <option>System</option>
-                        <option>Dark</option>
-                        <option>Light</option>
-                      </select>
-                    }
-                  />
                   <SettingRow
                     label="Add project starts in"
                     description='Leave empty to use "~/" when the Add Project browser opens.'
@@ -1287,7 +1647,7 @@ export function SettingsScreen() {
                         <span
                           style={{
                             fontFamily: "monospace",
-                            color: "#888",
+                            color: "var(--text-muted)",
                             marginLeft: "6px",
                             fontWeight: 400,
                           }}
@@ -1298,7 +1658,13 @@ export function SettingsScreen() {
                     }
                     description="Current version of the application."
                     control={
-                      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "8px",
+                        }}
+                      >
                         <button
                           disabled={checkingUpdate || installingUpdate}
                           onClick={() => {
@@ -1314,17 +1680,31 @@ export function SettingsScreen() {
                                   setUpdateStatus(
                                     `picode ${result.currentVersion} is up to date on ${channel}!`,
                                   );
+                                  addToast({
+                                    message: `picode ${result.currentVersion} is up to date.`,
+                                    type: "success",
+                                  });
                                 } else if (result.status === "no-release") {
                                   setUpdateStatus(
                                     `No updates for picode ${result.currentVersion} on ${channel} yet!`,
                                   );
-                                } else if (result.status === "update-available") {
+                                  addToast({
+                                    message: `No updates available on ${channel} yet.`,
+                                    type: "info",
+                                  });
+                                } else if (
+                                  result.status === "update-available"
+                                ) {
                                   setUpdateStatus(
                                     `picode ${result.latestVersion} is available on ${channel}.`,
                                   );
                                   setUpdateAvailableVersion(
                                     result.latestVersion ?? null,
                                   );
+                                  addToast({
+                                    message: `picode ${result.latestVersion} is available!`,
+                                    type: "info",
+                                  });
                                 }
                               })
                               .catch((error) => {
@@ -1333,6 +1713,10 @@ export function SettingsScreen() {
                                     ? error.message
                                     : String(error);
                                 setUpdateStatus(message);
+                                addToast({
+                                  message: `Update check failed: ${message}`,
+                                  type: "error",
+                                });
                               })
                               .finally(() => setCheckingUpdate(false));
                           }}
@@ -1371,9 +1755,9 @@ export function SettingsScreen() {
                             }}
                             style={{
                               ...btnStyle,
-                              background: "#2563eb",
-                              borderColor: "#2563eb",
-                              color: "#fff",
+                              background: "var(--accent)",
+                              borderColor: "var(--accent)",
+                              color: "var(--text)",
                             }}
                             type="button"
                           >
@@ -1387,9 +1771,9 @@ export function SettingsScreen() {
                             onClick={() => restartApp()}
                             style={{
                               ...btnStyle,
-                              background: "#16a34a",
-                              borderColor: "#16a34a",
-                              color: "#fff",
+                              background: "var(--success)",
+                              borderColor: "var(--success)",
+                              color: "var(--text)",
                             }}
                             type="button"
                           >
@@ -1399,13 +1783,6 @@ export function SettingsScreen() {
                       </div>
                     }
                   />
-                  {updateStatus ? (
-                    <SettingRow
-                      label="Update status"
-                      description={updateStatus}
-                      control={<span />}
-                    />
-                  ) : null}
                   <SettingRow
                     label="Update track"
                     description="Stable follows full releases. Nightly follows the prerelease tagged nightly."
@@ -1418,12 +1795,45 @@ export function SettingsScreen() {
                             return;
                           }
 
+                          const newChannel = event.target.value as
+                            | "stable"
+                            | "nightly";
                           void updatePreferences({
                             ...state.preferences,
-                            updateChannel: event.target.value as
-                              | "stable"
-                              | "nightly",
+                            updateChannel: newChannel,
                           });
+
+                          const channelLabel =
+                            newChannel === "nightly" ? "Nightly" : "Stable";
+                          void checkForAppUpdate(newChannel)
+                            .then((result) => {
+                              if (result.status === "up-to-date") {
+                                addToast({
+                                  message: `Switched to ${channelLabel} — picode ${result.currentVersion} is up to date.`,
+                                  type: "success",
+                                });
+                              } else if (result.status === "no-release") {
+                                addToast({
+                                  message: `Switched to ${channelLabel} — no updates available yet.`,
+                                  type: "info",
+                                });
+                              } else if (result.status === "update-available") {
+                                addToast({
+                                  message: `Switched to ${channelLabel} — picode ${result.latestVersion} is available.`,
+                                  type: "info",
+                                });
+                              }
+                            })
+                            .catch((error) => {
+                              const message =
+                                error instanceof Error
+                                  ? error.message
+                                  : String(error);
+                              addToast({
+                                message: `Switched to ${channelLabel} — check failed: ${message}`,
+                                type: "error",
+                              });
+                            });
                         }}
                       >
                         <option value="stable">Stable</option>
@@ -1439,7 +1849,7 @@ export function SettingsScreen() {
                         <div
                           style={{
                             fontFamily: "monospace",
-                            color: "#888",
+                            color: "var(--text-muted)",
                             marginTop: "4px",
                           }}
                         >
@@ -1481,16 +1891,16 @@ export function SettingsScreen() {
                     control={
                       <div
                         style={{
-                          border: "1px solid #333",
+                          border: "1px solid var(--line)",
                           borderRadius: "999px",
                           padding: "6px 10px",
                           fontSize: "0.78rem",
                           color:
                             runtimeInstall?.status === "ready"
-                              ? "#d4d4d8"
+                              ? "var(--text-muted)"
                               : runtimeInstall?.status === "broken"
-                                ? "#fca5a5"
-                                : "#facc15",
+                                ? "var(--danger)"
+                                : "var(--warning)",
                         }}
                       >
                         {runtimeInstall?.status === "ready"
@@ -1508,7 +1918,12 @@ export function SettingsScreen() {
                       "No Pi binary has been detected yet."
                     }
                     control={
-                      <div style={{ fontSize: "0.8rem", color: "#888" }}>
+                      <div
+                        style={{
+                          fontSize: "0.8rem",
+                          color: "var(--text-muted)",
+                        }}
+                      >
                         {runtimeInstall?.version ?? "No version"}
                       </div>
                     }
@@ -1592,11 +2007,11 @@ export function SettingsScreen() {
                   <SettingsSection title="INSTALLATION HELP">
                     <div
                       style={{
-                        background: "rgba(255,255,255,0.02)",
-                        border: "1px solid #222",
+                        background: "var(--surface)",
+                        border: "1px solid var(--line)",
                         borderRadius: "12px",
                         padding: "20px",
-                        color: "#d4d4d8",
+                        color: "var(--text-muted)",
                         fontSize: "0.88rem",
                         lineHeight: 1.6,
                       }}
@@ -1604,7 +2019,7 @@ export function SettingsScreen() {
                       <div
                         style={{
                           marginBottom: "12px",
-                          color: "#fff",
+                          color: "var(--text)",
                           fontWeight: 600,
                         }}
                       >
@@ -1613,21 +2028,24 @@ export function SettingsScreen() {
                       <div
                         style={{
                           fontFamily: "monospace",
-                          color: "#f4f4f5",
+                          color: "var(--text)",
                           marginBottom: "10px",
                         }}
                       >
                         {runtimeInstall.installCommand}
                       </div>
                       <div
-                        style={{ fontFamily: "monospace", color: "#a1a1aa" }}
+                        style={{
+                          fontFamily: "monospace",
+                          color: "var(--text-muted)",
+                        }}
                       >
                         pi
                       </div>
                       <div
                         style={{
                           fontFamily: "monospace",
-                          color: "#a1a1aa",
+                          color: "var(--text-muted)",
                           marginBottom: "12px",
                         }}
                       >
@@ -1648,34 +2066,37 @@ export function SettingsScreen() {
                 <SettingsSection title="DIAGNOSTICS">
                   <div
                     style={{
-                      background: "rgba(255,255,255,0.02)",
-                      border: "1px solid #222",
+                      background: "var(--surface)",
+                      border: "1px solid var(--line)",
                       borderRadius: "12px",
                       padding: "20px",
                       display: "flex",
                       flexDirection: "column",
                       gap: "10px",
-                      color: "#b4b4b8",
+                      color: "var(--text-muted)",
                       fontSize: "0.84rem",
                     }}
                   >
                     <div>
                       Resolved binary path:{" "}
                       <span
-                        style={{ color: "#e4e4e7", fontFamily: "monospace" }}
+                        style={{
+                          color: "var(--text)",
+                          fontFamily: "monospace",
+                        }}
                       >
                         {runtimeInstall?.binaryPath ?? "none"}
                       </span>
                     </div>
                     <div>
                       Last runtime error:{" "}
-                      <span style={{ color: "#e4e4e7" }}>
+                      <span style={{ color: "var(--text)" }}>
                         {runtimeInstall?.error ?? runtimeGlobalError ?? "none"}
                       </span>
                     </div>
                     <div>
                       Active workspace catalog:{" "}
-                      <span style={{ color: "#e4e4e7" }}>
+                      <span style={{ color: "var(--text)" }}>
                         {!activeWorkspace
                           ? "No active workspace"
                           : workspaceCatalogErrors[activeWorkspace.id]
@@ -1688,6 +2109,15 @@ export function SettingsScreen() {
                   </div>
                 </SettingsSection>
               </div>
+            )}
+
+            {activeTab === "theme" && (
+              <ThemePicker
+                currentTheme={state?.preferences.theme ?? "dark"}
+                customColors={state?.preferences.customThemeColors}
+                updatePreferences={updatePreferences}
+                state={state}
+              />
             )}
 
             {activeTab === "shortcuts" && (
@@ -1763,12 +2193,12 @@ export function SettingsScreen() {
                 {archivedSessions.length === 0 ? (
                   <div
                     style={{
-                      color: "#888",
+                      color: "var(--text-muted)",
                       fontSize: "0.9rem",
                       textAlign: "center",
                       padding: "40px",
-                      background: "rgba(255,255,255,0.02)",
-                      border: "1px dashed #333",
+                      background: "var(--surface)",
+                      border: "1px dashed var(--line)",
                       borderRadius: "12px",
                     }}
                   >
@@ -1780,8 +2210,8 @@ export function SettingsScreen() {
                       display: "flex",
                       flexDirection: "column",
                       gap: "1px",
-                      background: "#222",
-                      border: "1px solid #222",
+                      background: "var(--surface-elevated)",
+                      border: "1px solid var(--line)",
                       borderRadius: "12px",
                       overflow: "hidden",
                     }}
@@ -1795,7 +2225,7 @@ export function SettingsScreen() {
                             alignItems: "center",
                             justifyContent: "space-between",
                             padding: "12px 20px",
-                            background: "#0f0f0f",
+                            background: "var(--bg)",
                           }}
                         >
                           <div
@@ -1809,12 +2239,17 @@ export function SettingsScreen() {
                               style={{
                                 fontSize: "0.9rem",
                                 fontWeight: 500,
-                                color: "#fff",
+                                color: "var(--text)",
                               }}
                             >
                               {session.title}
                             </div>
-                            <div style={{ fontSize: "0.75rem", color: "#666" }}>
+                            <div
+                              style={{
+                                fontSize: "0.75rem",
+                                color: "var(--text-dim)",
+                              }}
+                            >
                               {workspaceName} • Archived on{" "}
                               {new Date(
                                 session.archivedAt,
@@ -1837,7 +2272,7 @@ export function SettingsScreen() {
                                 display: "flex",
                                 alignItems: "center",
                                 gap: "6px",
-                                borderColor: "#333",
+                                borderColor: "var(--line)",
                                 padding: "6px 10px",
                               }}
                             >
@@ -1864,8 +2299,8 @@ export function SettingsScreen() {
                                 display: "flex",
                                 alignItems: "center",
                                 gap: "6px",
-                                borderColor: "#333",
-                                color: "#f87171",
+                                borderColor: "var(--line)",
+                                color: "var(--danger)",
                                 padding: "6px 10px",
                               }}
                             >

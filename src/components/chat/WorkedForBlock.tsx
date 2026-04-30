@@ -80,6 +80,23 @@ export function WorkedForBlock({
     return () => window.clearInterval(interval);
   }, [endTime, isLive, paused]);
 
+  if (isLive && !endTime) {
+    return (
+      <div className="worked-for-block worked-for-block--live">
+        <div className="worked-for-block__header worked-for-block__header--static">
+          <span className="worked-for-block__label">
+            working for {duration}
+          </span>
+        </div>
+        {children && (
+          <div className="worked-for-block__content worked-for-block__content--expanded">
+            <div className="worked-for-block__content-inner">{children}</div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="worked-for-block">
       <button
