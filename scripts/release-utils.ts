@@ -159,7 +159,7 @@ export async function commitIfDirty(message: string) {
 
 export async function pushCurrentBranch() {
   const branch = await currentBranch();
-  await run(["git", "push", "-u", "origin", branch]);
+  await run(["git", "push", "-u", "origin", `HEAD:refs/heads/${branch}`]);
 }
 
 export async function buildSignedMacosRelease() {
