@@ -5,6 +5,7 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
+import { homedir } from "node:os";
 import path from "node:path";
 
 export const root = path.resolve(import.meta.dir, "..");
@@ -97,6 +98,15 @@ export function requireMacosReleaseHost(channel: string) {
 }
 
 export function requireTauriSigningKey() {
+  const defaultKeyPath = path.join(homedir(), ".tauri", "picode-updater.key");
+  if (
+    !process.env.TAURI_SIGNING_PRIVATE_KEY &&
+    !process.env.TAURI_SIGNING_PRIVATE_KEY_PATH &&
+    existsSync(defaultKeyPath)
+  ) {
+    process.env.TAURI_SIGNING_PRIVATE_KEY_PATH = defaultKeyPath;
+  }
+
   if (
     !process.env.TAURI_SIGNING_PRIVATE_KEY &&
     !process.env.TAURI_SIGNING_PRIVATE_KEY_PATH
