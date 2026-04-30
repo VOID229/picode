@@ -110,6 +110,8 @@ export function requireTauriSigningKey() {
     );
   }
 
+  process.env.TAURI_SIGNING_PRIVATE_KEY_PASSWORD ??= "";
+
   if (
     !process.env.TAURI_SIGNING_PRIVATE_KEY &&
     !process.env.TAURI_SIGNING_PRIVATE_KEY_PATH
