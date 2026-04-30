@@ -28,6 +28,7 @@ export async function run(cmd: string[], options: { quiet?: boolean } = {}) {
   const child = Bun.spawn({
     cmd,
     cwd: root,
+    env: process.env,
     stdout: options.quiet ? "pipe" : "inherit",
     stderr: options.quiet ? "pipe" : "inherit",
   });
@@ -42,6 +43,7 @@ export async function output(cmd: string[]) {
   const child = Bun.spawn({
     cmd,
     cwd: root,
+    env: process.env,
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -60,6 +62,7 @@ export async function succeeds(cmd: string[]) {
   const child = Bun.spawn({
     cmd,
     cwd: root,
+    env: process.env,
     stdout: "ignore",
     stderr: "ignore",
   });
