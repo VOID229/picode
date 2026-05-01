@@ -1,6 +1,6 @@
 import type { WorkspaceRecord } from "../../domains/types";
 import { useAppStore } from "../../state/useAppStore";
-import { resolveProviderSwitchModel } from "../chat/chatRuntime";
+import { resolveProviderSwitchSelection } from "../chat/chatRuntime";
 
 interface ModelProviderPickerProps {
   workspace: WorkspaceRecord | null;
@@ -79,16 +79,24 @@ export function ModelProviderPicker({ workspace }: ModelProviderPickerProps) {
               (item) => item.id === providerId,
             );
 
+            const nextSelection = resolveProviderSwitchSelection({
+              provider: nextProvider,
+              currentSelection: {
+                providerId: workspace.providerId,
+                modelId: workspace.modelId,
+                effort: workspace.effort,
+                fastMode: workspace.fastMode,
+              },
+              providerModelMemory: currentProviderMemory,
+            });
+
             void updateWorkspaceSettings({
               workspaceId: workspace.id,
               approvalMode: workspace.approvalMode,
-              providerId,
-              modelId: resolveProviderSwitchModel({
-                provider: nextProvider,
-                currentProviderId: workspace.providerId,
-                currentModelId: workspace.modelId,
-                providerModelMemory: currentProviderMemory,
-              }),
+              providerId: nextSelection.providerId,
+              modelId: nextSelection.modelId,
+              effort: nextSelection.effort,
+              fastMode: nextSelection.fastMode,
               policy: workspace.policy,
             });
           }}

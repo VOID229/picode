@@ -1108,32 +1108,54 @@ function normalizeSelectionAgainstProviders(
   };
 }
 
+export function resolveProviderSwitchSelection(options: {
+  provider: ProviderOption | undefined;
+  currentSelection: SessionModelSelection;
+  providerModelMemory?: Record<string, SessionModelSelection>;
+}): SessionModelSelection {
+  const { provider, currentSelection, providerModelMemory } = options;
+
+  if (!provider || provider.id === currentSelection.providerId) {
+    return currentSelection;
+  }
+
+  const rememberedSelection = providerModelMemory?.[provider.id];
+  if (
+    rememberedSelection?.modelId &&
+    provider.models.some((model) => model.id === rememberedSelection.modelId)
+  ) {
+    return {
+      providerId: provider.id,
+      modelId: rememberedSelection.modelId,
+      effort: rememberedSelection.effort || currentSelection.effort,
+      fastMode: Boolean(rememberedSelection.fastMode),
+    };
+  }
+
+  return {
+    providerId: provider.id,
+    modelId: provider.models[0]?.id ?? currentSelection.modelId,
+    effort: currentSelection.effort,
+    fastMode: currentSelection.fastMode,
+  };
+}
+
 export function resolveProviderSwitchModel(options: {
   provider: ProviderOption | undefined;
   currentProviderId: string;
   currentModelId: string;
   providerModelMemory?: Record<string, SessionModelSelection>;
 }) {
-  const { provider, currentProviderId, currentModelId, providerModelMemory } =
-    options;
-
-  if (!provider) {
-    return currentModelId;
-  }
-
-  if (provider.id === currentProviderId) {
-    return currentModelId;
-  }
-
-  const rememberedModelId = providerModelMemory?.[provider.id]?.modelId;
-  if (
-    rememberedModelId &&
-    provider.models.some((model) => model.id === rememberedModelId)
-  ) {
-    return rememberedModelId;
-  }
-
-  return provider.models[0]?.id ?? currentModelId;
+  return resolveProviderSwitchSelection({
+    provider: options.provider,
+    currentSelection: {
+      providerId: options.currentProviderId,
+      modelId: options.currentModelId,
+      effort: DEFAULT_EFFORT,
+      fastMode: false,
+    },
+    providerModelMemory: options.providerModelMemory,
+  }).modelId;
 }
 
 function resolveAntigravityPair(provider: ProviderOption, modelId: string) {

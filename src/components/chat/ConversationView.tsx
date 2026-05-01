@@ -27,6 +27,7 @@ import {
   deriveLivePhase,
   extractFileChanges,
   resolveComposerCapabilities,
+  resolveProviderSwitchSelection,
   resolveSessionSelection,
   segmentTurnItems,
   type ActivitySegment,
@@ -110,6 +111,9 @@ export function ConversationView({
   );
   const globalFastMode = useAppStore(
     (store) => store.state?.preferences.fastMode ?? false,
+  );
+  const providerModelMemory = useAppStore(
+    (store) => store.state?.preferences.providerModelMemory ?? {},
   );
   const workspaceCatalogs = useAppStore((store) => store.workspaceCatalogs);
   const workspaceCatalogStatus = useAppStore(
@@ -491,6 +495,10 @@ export function ConversationView({
       return;
     }
 
+    if (draftSelection && modelSelectionScope === "thread" && threadModelMemory === "used") {
+      return;
+    }
+
     void updateWorkspaceSettings({
       workspaceId: workspace.id,
       sessionId: modelSelectionScope === "global" ? undefined : session.id,
@@ -509,6 +517,7 @@ export function ConversationView({
     globalProviderId,
     draftSelection,
     modelSelectionScope,
+    threadModelMemory,
     stateProviders,
     updateWorkspaceSettings,
     workspace,
@@ -829,14 +838,17 @@ export function ConversationView({
                             onClick={(event) => {
                               event.stopPropagation();
                               closeComposerMenus();
-                              handleSelectionChange({
-                                providerId: provider.id,
-                                modelId:
-                                  provider.models[0]?.id ??
-                                  normalizedSelection.modelId,
-                                effort: normalizedSelection.effort,
-                                fastMode: normalizedSelection.fastMode,
-                              });
+                              handleSelectionChange(
+                                resolveProviderSwitchSelection({
+                                  provider,
+                                  currentSelection: normalizedSelection,
+                                  providerModelMemory: {
+                                    ...providerModelMemory,
+                                    [normalizedSelection.providerId]:
+                                      normalizedSelection,
+                                  },
+                                }),
+                              );
                             }}
                           >
                             <span>{provider.label}</span>
