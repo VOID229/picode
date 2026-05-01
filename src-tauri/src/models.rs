@@ -425,9 +425,22 @@ pub struct AppPreferences {
     pub update_channel: String,
     #[serde(default)]
     pub shortcuts: std::collections::HashMap<String, Option<String>>,
+    #[serde(default)]
+    pub custom_actions: Vec<CustomAction>,
     pub layout: LayoutPreferences,
     #[serde(default)]
     pub custom_theme_colors: Option<CustomThemeColors>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomAction {
+    pub id: String,
+    pub name: String,
+    pub icon: String,
+    pub command: String,
+    #[serde(default)]
+    pub keybinding: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1076,6 +1089,7 @@ pub fn default_preferences() -> AppPreferences {
         pi_binary_path: None,
         update_channel: default_update_channel(),
         shortcuts: std::collections::HashMap::new(),
+        custom_actions: Vec::new(),
         custom_theme_colors: None,
         layout: LayoutPreferences {
             diff_mode: "split".to_string(),

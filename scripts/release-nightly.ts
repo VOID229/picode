@@ -11,15 +11,16 @@ import {
   requireTauriSigningKey,
   run,
   succeeds,
+  withReleaseVersion,
   writeUpdaterManifest,
 } from "./release-utils";
 
 const commitMessage =
   Bun.argv.find((arg) => arg.startsWith("--message="))?.slice(10) ??
   "Prepare nightly build";
-const baseVersion = packageVersion();
+const baseVersion = packageVersion().split(/[+-]/, 1)[0];
 const buildId = new Date().toISOString().replace(/\D/g, "").slice(0, 14);
-const nightlyVersion = `${baseVersion}+nightly.${buildId}`;
+const nightlyVersion = `${baseVersion}-nightly.${buildId}`;
 const releaseTag = `nightly-${buildId}`;
 const manifestPath = path.join(bundleRoot, "nightly.json");
 const notes = `Automated nightly build ${buildId}.`;
@@ -32,7 +33,10 @@ await requireGhAuth();
 await commitIfDirty(commitMessage);
 await pushCurrentBranch();
 
-const { dmgPath, updaterPath, signaturePath } = await buildSignedMacosRelease();
+const { dmgPath, updaterPath, signaturePath } = await withReleaseVersion(
+  nightlyVersion,
+  () => buildSignedMacosRelease(),
+);
 writeUpdaterManifest(
   manifestPath,
   nightlyVersion,

@@ -281,6 +281,14 @@ export interface LayoutPreferences {
   diffPanelOpen: boolean;
 }
 
+export interface CustomAction {
+  id: string;
+  name: string;
+  icon: string;
+  command: string;
+  keybinding?: string;
+}
+
 export interface AppPreferences {
   theme: ThemeId;
   customThemeColors?: CustomThemeColors;
@@ -308,6 +316,7 @@ export interface AppPreferences {
   piBinaryPath?: string;
   updateChannel?: "stable" | "nightly";
   shortcuts?: Record<string, string | null>;
+  customActions?: CustomAction[];
   layout: LayoutPreferences;
 }
 

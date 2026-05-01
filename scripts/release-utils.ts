@@ -94,6 +94,46 @@ export function packageVersion() {
     .version as string;
 }
 
+function writeJsonFile(filePath: string, value: unknown) {
+  writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`);
+}
+
+export async function withReleaseVersion<T>(
+  version: string,
+  callback: () => Promise<T>,
+) {
+  const packageJsonPath = path.join(root, "package.json");
+  const tauriConfigPath = path.join(root, "src-tauri", "tauri.conf.json");
+  const cargoTomlPath = path.join(root, "src-tauri", "Cargo.toml");
+  const cargoLockPath = path.join(root, "src-tauri", "Cargo.lock");
+  const originalPackageJson = readFileSync(packageJsonPath, "utf8");
+  const originalTauriConfig = readFileSync(tauriConfigPath, "utf8");
+  const originalCargoToml = readFileSync(cargoTomlPath, "utf8");
+  const originalCargoLock = readFileSync(cargoLockPath, "utf8");
+
+  try {
+    const packageJson = JSON.parse(originalPackageJson);
+    packageJson.version = version;
+    writeJsonFile(packageJsonPath, packageJson);
+
+    const tauriConfig = JSON.parse(originalTauriConfig);
+    tauriConfig.version = version;
+    writeJsonFile(tauriConfigPath, tauriConfig);
+
+    writeFileSync(
+      cargoTomlPath,
+      originalCargoToml.replace(/^version = ".*"$/m, `version = "${version}"`),
+    );
+
+    return await callback();
+  } finally {
+    writeFileSync(packageJsonPath, originalPackageJson);
+    writeFileSync(tauriConfigPath, originalTauriConfig);
+    writeFileSync(cargoTomlPath, originalCargoToml);
+    writeFileSync(cargoLockPath, originalCargoLock);
+  }
+}
+
 export function requireMacosReleaseHost(channel: string) {
   if (process.platform !== "darwin") {
     fail(`${channel} DMG releases must be created on macOS.`);

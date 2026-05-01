@@ -110,6 +110,32 @@ fn updater_endpoint(channel: Option<&str>) -> &'static str {
     }
 }
 
+fn installed_update_marker_path(
+    app: &AppHandle,
+    channel: &str,
+) -> Result<std::path::PathBuf, String> {
+    storage::app_data_dir(app)
+        .map(|dir| dir.join(format!("installed-{channel}-update-version")))
+        .map_err(|error| error.to_string())
+}
+
+fn read_installed_update_marker(app: &AppHandle, channel: &str) -> Option<String> {
+    let path = installed_update_marker_path(app, channel).ok()?;
+    fs::read_to_string(path)
+        .ok()
+        .map(|version| version.trim().to_string())
+        .filter(|version| !version.is_empty())
+}
+
+fn write_installed_update_marker(
+    app: &AppHandle,
+    channel: &str,
+    version: &str,
+) -> Result<(), String> {
+    let path = installed_update_marker_path(app, channel)?;
+    fs::write(path, version).map_err(|error| error.to_string())
+}
+
 async fn check_app_update(
     app: &AppHandle,
     channel: Option<&str>,
@@ -140,6 +166,21 @@ async fn check_app_update(
             });
         }
         Ok(Some(update)) => {
+            if let Some(channel) = channel {
+                let update_version = update.version.to_string();
+                if read_installed_update_marker(app, channel).as_deref()
+                    == Some(update_version.as_str())
+                {
+                    return Ok(AppUpdatePayload {
+                        current_version,
+                        latest_version: None,
+                        status: "up-to-date".to_string(),
+                        download_path: None,
+                        release_url: None,
+                    });
+                }
+            }
+
             return Ok(AppUpdatePayload {
                 current_version: current_version.clone(),
                 latest_version: Some(update.version.to_string()),
@@ -205,6 +246,9 @@ async fn do_install_app_update(
         .download_and_install(|_, _| {}, || {})
         .await
         .map_err(|error| error.to_string())?;
+    if let Some(channel) = channel {
+        write_installed_update_marker(app, channel, &latest_version)?;
+    }
 
     Ok(AppUpdatePayload {
         current_version,

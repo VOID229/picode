@@ -11,10 +11,12 @@ export function ModelProviderPicker({ workspace }: ModelProviderPickerProps) {
   const providerModelMemory = useAppStore(
     (store) => store.state?.preferences.providerModelMemory ?? {},
   );
+  const preferences = useAppStore((store) => store.state?.preferences);
   const workspaceCatalogs = useAppStore((store) => store.workspaceCatalogs);
   const updateWorkspaceSettings = useAppStore(
     (store) => store.updateWorkspaceSettings,
   );
+  const updatePreferences = useAppStore((store) => store.updatePreferences);
   const refreshWorkspaceRuntimeCatalog = useAppStore(
     (store) => store.refreshWorkspaceRuntimeCatalog,
   );
@@ -94,15 +96,33 @@ export function ModelProviderPicker({ workspace }: ModelProviderPickerProps) {
         <select
           style={selectStyle}
           value={workspace.modelId}
-          onChange={(event) =>
+          onChange={(event) => {
+            const newModelId = event.target.value;
+
             void updateWorkspaceSettings({
               workspaceId: workspace.id,
               approvalMode: workspace.approvalMode,
               providerId: workspace.providerId,
-              modelId: event.target.value,
+              modelId: newModelId,
               policy: workspace.policy,
-            })
-          }
+            });
+
+            if (preferences) {
+              const currentMemory = preferences.providerModelMemory ?? {};
+              void updatePreferences({
+                ...preferences,
+                providerModelMemory: {
+                  ...currentMemory,
+                  [workspace.providerId]: {
+                    providerId: workspace.providerId,
+                    modelId: newModelId,
+                    effort: workspace.effort,
+                    fastMode: workspace.fastMode,
+                  },
+                },
+              });
+            }
+          }}
         >
           {provider?.models.map((item) => (
             <option key={item.id} value={item.id}>

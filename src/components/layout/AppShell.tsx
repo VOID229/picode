@@ -161,10 +161,7 @@ export function AppShell() {
     [activeWorkspace, state?.activeSessionId],
   );
 
-  const activeWorkspaceActions = useMemo(
-    () => (activeWorkspace ? (customActions[activeWorkspace.id] ?? []) : []),
-    [activeWorkspace, customActions],
-  );
+  const activeWorkspaceActions = useMemo(() => customActions, [customActions]);
 
   const gitSnapshot = activeWorkspace ? git[activeWorkspace.id] : undefined;
   const hasGit = Boolean(gitSnapshot?.isRepo);
@@ -709,9 +706,8 @@ export function AppShell() {
         </section>
       </main>
 
-      {showActionModal && activeWorkspace && (
+      {showActionModal && (
         <AddActionModal
-          workspaceId={activeWorkspace.id}
           editingActionId={editingActionId}
           onClose={() => {
             setShowActionModal(false);

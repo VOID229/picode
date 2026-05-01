@@ -1395,7 +1395,8 @@ function TruncatedSessionTitle({ title }: { title: string }) {
     const updateTitle = () => {
       frameId = 0;
 
-      const availableWidth = container.clientWidth;
+      const availableWidth =
+        container.parentElement?.clientWidth ?? container.clientWidth;
       if (availableWidth <= 0) {
         return;
       }
@@ -1441,6 +1442,9 @@ function TruncatedSessionTitle({ title }: { title: string }) {
 
     const observer = new ResizeObserver(scheduleUpdate);
     observer.observe(container);
+    if (container.parentElement) {
+      observer.observe(container.parentElement);
+    }
 
     return () => {
       if (frameId) {
@@ -1455,6 +1459,8 @@ function TruncatedSessionTitle({ title }: { title: string }) {
       ref={containerRef}
       style={{
         display: "block",
+        flex: "1 1 0",
+        width: "100%",
         overflow: "hidden",
         whiteSpace: "nowrap",
         minWidth: 0,

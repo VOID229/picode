@@ -86,6 +86,7 @@ export function ConversationView({
     ChatSession["selection"] | null
   >(null);
   const [sessionStats, setSessionStats] = useState<SessionStats | null>(null);
+  const sessionStatsRef = useRef<SessionStats | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const timelineRef = useRef<HTMLDivElement>(null);
   const shouldStickToBottomRef = useRef(true);
@@ -202,11 +203,13 @@ export function ConversationView({
     setLastUndoneChange(null);
     setDraftSelection(null);
     setSessionStats(null);
+    sessionStatsRef.current = null;
   }, [workspace?.id, session?.id]);
 
   useEffect(() => {
     if (!workspace || !session) {
       setSessionStats(null);
+      sessionStatsRef.current = null;
       return;
     }
 
@@ -219,11 +222,21 @@ export function ConversationView({
           sessionId: session.id,
         });
         if (isActive) {
+          // The backend may return empty stats for completed sessions.
+          // Keep the last known good value instead of wiping the display.
+          if (
+            nextStats?.contextUsage?.tokens == null &&
+            sessionStatsRef.current?.contextUsage?.tokens != null
+          ) {
+            return;
+          }
           setSessionStats(nextStats);
+          sessionStatsRef.current = nextStats;
         }
       } catch {
         if (isActive) {
           setSessionStats(null);
+          sessionStatsRef.current = null;
         }
       }
     };
@@ -580,7 +593,7 @@ export function ConversationView({
               100,
           ),
         )
-      : null;
+      : 0;
   const isContextOverLimit = Boolean(
     sessionStats?.contextUsage?.tokens != null &&
     sessionStats?.contextUsage &&
@@ -1014,35 +1027,33 @@ export function ConversationView({
                   paddingLeft: "12px",
                 }}
               >
-                {contextUsageTitle && contextUsagePercent !== null && (
-                  <div
-                    title={contextUsageTitle}
-                    aria-label={`Context usage ${contextUsageTitle}`}
+                <div
+                  title={contextUsageTitle ?? "Context usage"}
+                  aria-label={`Context usage ${contextUsageTitle ?? "0 / 0"}`}
+                  style={{
+                    width: "20px",
+                    height: "20px",
+                    borderRadius: "50%",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    background: `conic-gradient(${contextUsageColor} 0 ${contextUsagePercent}%, rgba(255,255,255,0.08) ${contextUsagePercent}% 100%)`,
+                    boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.08)",
+                    flexShrink: 0,
+                    transform: "rotate(-90deg)",
+                  }}
+                >
+                  <span
+                    aria-hidden="true"
                     style={{
-                      width: "20px",
-                      height: "20px",
+                      width: "10px",
+                      height: "10px",
                       borderRadius: "50%",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      background: `conic-gradient(${contextUsageColor} 0 ${contextUsagePercent}%, rgba(255,255,255,0.08) ${contextUsagePercent}% 100%)`,
-                      boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.08)",
-                      flexShrink: 0,
-                      transform: "rotate(-90deg)",
+                      background: "var(--composer)",
+                      boxShadow: "0 0 0 1px rgba(255,255,255,0.04)",
                     }}
-                  >
-                    <span
-                      aria-hidden="true"
-                      style={{
-                        width: "10px",
-                        height: "10px",
-                        borderRadius: "50%",
-                        background: "var(--composer)",
-                        boxShadow: "0 0 0 1px rgba(255,255,255,0.04)",
-                      }}
-                    />
-                  </div>
-                )}
+                  />
+                </div>
 
                 <button
                   style={{

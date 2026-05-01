@@ -3,6 +3,7 @@ import { create } from "zustand";
 import type {
   ChatSession,
   ComposerImageDraft,
+  CustomAction,
   GitAction,
   GitSnapshot,
   MessageImageAttachment,
@@ -56,16 +57,30 @@ import {
 } from "../lib/tauri";
 import { getUndoComposerMessage } from "./sessionUndo";
 
+const CUSTOM_ACTIONS_STORAGE_KEY = "picode_custom_actions";
+
+function loadCustomActions(): CustomAction[] {
+  try {
+    const raw = localStorage.getItem(CUSTOM_ACTIONS_STORAGE_KEY);
+    if (raw) {
+      return JSON.parse(raw) as CustomAction[];
+    }
+  } catch {
+    // ignore
+  }
+  return [];
+}
+
+function saveCustomActions(actions: CustomAction[]) {
+  try {
+    localStorage.setItem(CUSTOM_ACTIONS_STORAGE_KEY, JSON.stringify(actions));
+  } catch {
+    // ignore
+  }
+}
+
 let initializePromise: Promise<void> | null = null;
 let hasInitialized = false;
-
-export interface CustomAction {
-  id: string;
-  name: string;
-  icon: string;
-  command: string;
-  keybinding?: string;
-}
 
 interface Toast {
   id: string;
@@ -82,7 +97,7 @@ interface AppStoreState {
   git: Record<string, GitSnapshot>;
   pendingQuestions: PendingQuestionRequest | null;
   terminals: Record<string, WorkspaceTerminalState>;
-  customActions: Record<string, CustomAction[]>; // workspaceId -> CustomAction[]
+  customActions: CustomAction[];
   currentMode: "plan" | "build";
   runtimeInstall?: PiInstallStatus;
   runtimeGlobalStatus?: string;
@@ -101,16 +116,12 @@ interface AppStoreState {
   setCurrentMode: (mode: "plan" | "build") => void;
   addToast: (toast: Omit<Toast, "id">) => void;
   removeToast: (id: string) => void;
-  addCustomAction: (
-    workspaceId: string,
-    action: Omit<CustomAction, "id">,
-  ) => void;
+  addCustomAction: (action: Omit<CustomAction, "id">) => void;
   updateCustomAction: (
-    workspaceId: string,
     actionId: string,
     action: Omit<CustomAction, "id">,
   ) => void;
-  removeCustomAction: (workspaceId: string, actionId: string) => void;
+  removeCustomAction: (actionId: string) => void;
   selectWorkspaceSession: (
     workspaceId: string,
     sessionId: string | null,
@@ -362,7 +373,7 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
   git: {},
   pendingQuestions: null,
   terminals: {},
-  customActions: {},
+  customActions: loadCustomActions(),
   currentMode: "build",
   workspaceCatalogs: {},
   workspaceCatalogStatus: {},
@@ -399,9 +410,22 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
       set({
         isBootstrapping: false,
         state: payload.state,
+        customActions: payload.state.preferences.customActions?.length
+          ? payload.state.preferences.customActions
+          : loadCustomActions(),
         git: payload.git,
         connectionReady: true,
       });
+
+      if (
+        !payload.state.preferences.customActions?.length &&
+        get().customActions.length > 0
+      ) {
+        await get().updatePreferences({
+          ...payload.state.preferences,
+          customActions: get().customActions,
+        });
+      }
 
       let runtimePayload:
         | Awaited<ReturnType<typeof bootstrapRuntime>>
@@ -450,39 +474,48 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
   setCurrentMode(currentMode) {
     set({ currentMode });
   },
-  addCustomAction(workspaceId, action) {
+  addCustomAction(action) {
     set((store) => {
-      const actions = store.customActions[workspaceId] ?? [];
-      return {
-        customActions: {
-          ...store.customActions,
-          [workspaceId]: [...actions, { ...action, id: crypto.randomUUID() }],
-        },
-      };
+      const next = [
+        ...store.customActions,
+        { ...action, id: crypto.randomUUID() },
+      ];
+      saveCustomActions(next);
+      if (store.state) {
+        void get().updatePreferences({
+          ...store.state.preferences,
+          customActions: next,
+        });
+      }
+      return { customActions: next };
     });
   },
-  updateCustomAction(workspaceId, actionId, updatedAction) {
+  updateCustomAction(actionId, updatedAction) {
     set((store) => {
-      const actions = store.customActions[workspaceId] ?? [];
-      return {
-        customActions: {
-          ...store.customActions,
-          [workspaceId]: actions.map((a) =>
-            a.id === actionId ? { ...updatedAction, id: actionId } : a,
-          ),
-        },
-      };
+      const next = store.customActions.map((a) =>
+        a.id === actionId ? { ...updatedAction, id: actionId } : a,
+      );
+      saveCustomActions(next);
+      if (store.state) {
+        void get().updatePreferences({
+          ...store.state.preferences,
+          customActions: next,
+        });
+      }
+      return { customActions: next };
     });
   },
-  removeCustomAction(workspaceId, actionId) {
+  removeCustomAction(actionId) {
     set((store) => {
-      const actions = store.customActions[workspaceId] ?? [];
-      return {
-        customActions: {
-          ...store.customActions,
-          [workspaceId]: actions.filter((a) => a.id !== actionId),
-        },
-      };
+      const next = store.customActions.filter((a) => a.id !== actionId);
+      saveCustomActions(next);
+      if (store.state) {
+        void get().updatePreferences({
+          ...store.state.preferences,
+          customActions: next,
+        });
+      }
+      return { customActions: next };
     });
   },
   async selectWorkspaceSession(workspaceId, sessionId) {
