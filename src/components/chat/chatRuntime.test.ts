@@ -12,6 +12,7 @@ import {
   groupToolActivities,
   parseAssistantContent,
   resolveComposerCapabilities,
+  resolveProviderSwitchModel,
   resolveAssistantLabel,
   resolveSessionSelection,
   segmentTurnItems,
@@ -256,6 +257,94 @@ describe("resolveComposerCapabilities", () => {
         fastMode: false,
       },
     });
+  });
+});
+
+describe("resolveProviderSwitchModel", () => {
+  const providers: ProviderOption[] = [
+    {
+      id: "openai-codex",
+      label: "Codex",
+      status: "ready",
+      authKind: "oauth",
+      available: true,
+      models: [
+        {
+          id: "gpt-5.4-mini",
+          label: "GPT-5.4 Mini",
+          providerId: "openai-codex",
+          contextWindow: "256k",
+          reasoning: true,
+          available: true,
+          providerSource: "pi",
+        },
+        {
+          id: "gpt-5.4",
+          label: "GPT-5.4",
+          providerId: "openai-codex",
+          contextWindow: "256k",
+          reasoning: true,
+          available: true,
+          providerSource: "pi",
+        },
+      ],
+    },
+    {
+      id: "anthropic",
+      label: "Claude",
+      status: "ready",
+      authKind: "oauth",
+      available: true,
+      models: [
+        {
+          id: "claude-haiku",
+          label: "Claude Haiku",
+          providerId: "anthropic",
+          contextWindow: "200k",
+          reasoning: false,
+          available: true,
+          providerSource: "pi",
+        },
+        {
+          id: "claude-sonnet",
+          label: "Claude Sonnet",
+          providerId: "anthropic",
+          contextWindow: "200k",
+          reasoning: true,
+          available: true,
+          providerSource: "pi",
+        },
+      ],
+    },
+  ];
+
+  it("keeps the current model when the same provider is selected", () => {
+    expect(
+      resolveProviderSwitchModel({
+        provider: providers[0],
+        currentProviderId: "openai-codex",
+        currentModelId: "gpt-5.4",
+        providerModelMemory: {},
+      }),
+    ).toBe("gpt-5.4");
+  });
+
+  it("restores the target provider's last selected model", () => {
+    expect(
+      resolveProviderSwitchModel({
+        provider: providers[1],
+        currentProviderId: "openai-codex",
+        currentModelId: "gpt-5.4",
+        providerModelMemory: {
+          anthropic: {
+            providerId: "anthropic",
+            modelId: "claude-sonnet",
+            effort: "high",
+            fastMode: false,
+          },
+        },
+      }),
+    ).toBe("claude-sonnet");
   });
 });
 

@@ -58,6 +58,15 @@ export function ModelProviderPicker({ workspace }: ModelProviderPickerProps) {
           onChange={async (event) => {
             const providerId = event.target.value;
             let nextProviders = providers;
+            const currentProviderMemory = {
+              ...providerModelMemory,
+              [workspace.providerId]: {
+                providerId: workspace.providerId,
+                modelId: workspace.modelId,
+                effort: workspace.effort,
+                fastMode: workspace.fastMode,
+              },
+            };
 
             if (providerId === "openai-codex") {
               const refreshed = await refreshWorkspaceRuntimeCatalog(
@@ -78,7 +87,7 @@ export function ModelProviderPicker({ workspace }: ModelProviderPickerProps) {
                 provider: nextProvider,
                 currentProviderId: workspace.providerId,
                 currentModelId: workspace.modelId,
-                providerModelMemory,
+                providerModelMemory: currentProviderMemory,
               }),
               policy: workspace.policy,
             });

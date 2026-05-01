@@ -1095,13 +1095,6 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
 
         const nextState = structuredClone(store.state);
         nextState.providers = payload.providers;
-        const workspace = nextState.workspaces.find(
-          (item) => item.id === workspaceId,
-        );
-        if (workspace) {
-          workspace.providerId = payload.selectedProviderId;
-          workspace.modelId = payload.selectedModelId;
-        }
 
         return {
           state: nextState,
