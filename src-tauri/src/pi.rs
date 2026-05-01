@@ -2594,40 +2594,26 @@ async fn fetch_workspace_catalog_and_normalize(
             state.providers = providers.clone();
         }
 
-        let (selected_provider_id, selected_model_id, selection_changed) = if global_selection {
+        let (selected_provider_id, selected_model_id) = if global_selection {
             state
                 .workspaces
                 .iter()
                 .find(|workspace| workspace.id == workspace_id)
                 .context("workspace not found")?;
-            let mut provider_id = state.preferences.provider_id.clone();
-            let mut model_id = state.preferences.model_id.clone();
-            let changed =
-                normalize_workspace_selection(&mut provider_id, &mut model_id, &providers);
-            if changed {
-                state.preferences.provider_id = provider_id.clone();
-                state.preferences.model_id = model_id.clone();
-            }
-            (provider_id, model_id, changed)
+            (
+                state.preferences.provider_id.clone(),
+                state.preferences.model_id.clone(),
+            )
         } else {
             let workspace = state
                 .workspaces
-                .iter_mut()
+                .iter()
                 .find(|workspace| workspace.id == workspace_id)
                 .context("workspace not found")?;
-            let changed = normalize_workspace_selection(
-                &mut workspace.provider_id,
-                &mut workspace.model_id,
-                &providers,
-            );
-            (
-                workspace.provider_id.clone(),
-                workspace.model_id.clone(),
-                changed,
-            )
+            (workspace.provider_id.clone(), workspace.model_id.clone())
         };
 
-        if providers_changed || selection_changed {
+        if providers_changed {
             storage::save(app, &state)?;
         }
 
