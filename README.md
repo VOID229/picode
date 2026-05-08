@@ -11,7 +11,7 @@
 > [!IMPORTANT]
 > **This project is archived.**
 >
-> I accidentally started using the Pi TUI and it's too good. I don't see a reason anymore to build a GUI for it — it only removes the customizability of Pi.
+> I accidentally started using the Pi TUI and it's too good. I don't see a reason anymore to build a GUI for it as it only removes the customizability of Pi.
 >
 > Feel free to fork and continue this project if you're convinced otherwise, as long as you give credit to the original creator & repo.
 
