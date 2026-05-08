@@ -318,12 +318,30 @@ async fn create_session(
 
     let selection = {
         let workspace = &state.workspaces[workspace_index];
-        SessionModelSelection {
-            provider_id: workspace.provider_id.clone(),
-            model_id: workspace.model_id.clone(),
-            effort: workspace.effort.clone(),
-            fast_mode: workspace.fast_mode,
-        }
+        let base_selection = if state.preferences.model_selection_scope == "global" {
+            SessionModelSelection {
+                provider_id: state.preferences.provider_id.clone(),
+                model_id: state.preferences.model_id.clone(),
+                effort: state.preferences.effort.clone(),
+                fast_mode: state.preferences.fast_mode,
+            }
+        } else {
+            SessionModelSelection {
+                provider_id: workspace.provider_id.clone(),
+                model_id: workspace.model_id.clone(),
+                effort: workspace.effort.clone(),
+                fast_mode: workspace.fast_mode,
+            }
+        };
+
+        let mut selection = state
+            .preferences
+            .provider_model_memory
+            .get(&base_selection.provider_id)
+            .cloned()
+            .unwrap_or(base_selection);
+        selection.effort = state.preferences.effort.clone();
+        selection
     };
     let session = new_session("New thread", selection);
     let workspace_id = state.workspaces[workspace_index].id.clone();
@@ -371,7 +389,10 @@ async fn update_workspace_settings(
     let global_selection = state.preferences.model_selection_scope == "global";
     let provider_id = payload.provider_id;
     let model_id = payload.model_id;
-    let (effort, fast_mode) = {
+    let effort = payload
+        .effort
+        .unwrap_or_else(|| state.preferences.effort.clone());
+    let fast_mode = {
         let workspace = state
             .workspaces
             .iter_mut()
@@ -379,7 +400,6 @@ async fn update_workspace_settings(
             .context("workspace not found")
             .map_err(|error| error.to_string())?;
         workspace.approval_mode = payload.approval_mode;
-        let effort = payload.effort.unwrap_or(workspace.effort.clone());
         let fast_mode = payload.fast_mode.unwrap_or(workspace.fast_mode);
         workspace.provider_id = provider_id.clone();
         workspace.model_id = model_id.clone();
@@ -400,15 +420,17 @@ async fn update_workspace_settings(
             }
         }
 
-        (effort, fast_mode)
+        fast_mode
     };
 
     if global_selection {
         state.preferences.provider_id = provider_id.clone();
         state.preferences.model_id = model_id.clone();
-        state.preferences.effort = effort.clone();
         state.preferences.fast_mode = fast_mode;
     }
+    state.preferences.effort = effort.clone();
+    state.preferences.title_model_effort = effort.clone();
+    state.preferences.git_message_model_effort = effort.clone();
     state.preferences.provider_model_memory.insert(
         provider_id.clone(),
         SessionModelSelection {
@@ -617,21 +639,25 @@ async fn undo_user_turn(
             .map_err(|error| error.to_string())?
     };
 
-    if let Some(checkpoint) = checkpoint.as_ref() {
-        if let Ok(Some(redo_checkpoint)) = git::capture_undo_checkpoint(
+    let captured_redo_checkpoint = if checkpoint.is_some() {
+        git::capture_undo_checkpoint(
             &payload.workspace_id,
             &payload.session_id,
             &payload.user_message_id,
             &workspace_path,
-        ) {
-            let _ = storage::save_redo_checkpoint(&app, &redo_checkpoint);
-        }
+        )
+        .ok()
+        .flatten()
+    } else {
+        None
+    };
 
+    if let Some(checkpoint) = checkpoint.as_ref() {
         git::restore_undo_checkpoint(&workspace_path, checkpoint)
             .map_err(|error| error.to_string())?;
     }
 
-    let (removed_user_ids, session_file_to_remove) = {
+    let (removed_user_ids, session_file_to_remove, removed_timeline_items) = {
         let mut state = shared.state.lock().await;
         let session = state
             .workspaces
@@ -656,6 +682,7 @@ async fn undo_user_turn(
         };
 
         let removed = session.timeline.split_off(index);
+        let removed_timeline_items = removed.clone();
         session.status = models::SessionStatus::Idle;
         let session_file_to_remove = session.runtime.pi_session_file.take();
         session.updated_at = models::now_iso();
@@ -669,8 +696,22 @@ async fn undo_user_turn(
             .collect::<Vec<_>>();
 
         storage::save(&app, &state).map_err(|error| error.to_string())?;
-        (removed_user_ids, session_file_to_remove)
+        (removed_user_ids, session_file_to_remove, removed_timeline_items)
     };
+
+    let mut redo_checkpoint = captured_redo_checkpoint.unwrap_or_else(|| git::UndoCheckpoint {
+        workspace_id: payload.workspace_id.clone(),
+        session_id: payload.session_id.clone(),
+        user_message_id: payload.user_message_id.clone(),
+        branch: String::new(),
+        head_sha: String::new(),
+        working_tree_patch: String::new(),
+        staged_patch: String::new(),
+        untracked_files: Vec::new(),
+        timeline_items: Vec::new(),
+    });
+    redo_checkpoint.timeline_items = removed_timeline_items;
+    let _ = storage::save_redo_checkpoint(&app, &redo_checkpoint);
 
     for user_message_id in removed_user_ids {
         let _ = storage::delete_undo_checkpoint(
@@ -725,6 +766,37 @@ async fn redo_user_turn(
 
     git::restore_undo_checkpoint(&workspace_path, &checkpoint)
         .map_err(|error| error.to_string())?;
+
+    {
+        let mut state = shared.state.lock().await;
+        let session = state
+            .workspaces
+            .iter_mut()
+            .find(|workspace| workspace.id == payload.workspace_id)
+            .and_then(|workspace| {
+                workspace
+                    .sessions
+                    .iter_mut()
+                    .find(|session| session.id == payload.session_id)
+            })
+            .context("session not found")
+            .map_err(|error| error.to_string())?;
+
+        if !checkpoint.timeline_items.is_empty()
+            && !session.timeline.iter().any(|item| {
+                matches!(
+                    item,
+                    models::TimelineItem::UserMessage { id, .. } if id == &payload.user_message_id
+                )
+            })
+        {
+            session.timeline.extend(checkpoint.timeline_items.clone());
+            session.status = models::SessionStatus::Idle;
+            session.updated_at = models::now_iso();
+            storage::save(&app, &state).map_err(|error| error.to_string())?;
+        }
+    }
+
     let _ = storage::delete_redo_checkpoint(
         &app,
         &payload.workspace_id,

@@ -1,4 +1,4 @@
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, X } from "lucide-react";
 import { useState } from "react";
 import { cn } from "../../lib/cn";
 import type { FileChange } from "./chatRuntime";
@@ -11,6 +11,7 @@ interface FilesChangedBlockProps {
   gitFiles?: DiffFile[];
   onUndo?: () => void;
   onRedo?: () => void;
+  onClose?: () => void;
 }
 
 interface DisplayFile {
@@ -28,6 +29,7 @@ export function FilesChangedBlock({
   gitFiles,
   onUndo,
   onRedo,
+  onClose,
 }: FilesChangedBlockProps) {
   const [expanded, setExpanded] = useState(true);
 
@@ -81,6 +83,16 @@ export function FilesChangedBlock({
               title="Redo changes"
             >
               Redo
+            </button>
+          )}
+          {onClose && (
+            <button
+              className="files-changed-block__undo"
+              onClick={onClose}
+              title="Close"
+              aria-label="Close redo prompt"
+            >
+              <X size={13} />
             </button>
           )}
         </div>

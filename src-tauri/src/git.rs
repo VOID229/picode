@@ -1,5 +1,6 @@
 use crate::models::{
-    DiffFile, GitAction, GitSnapshot, PreparedGitAction, RunGitActionResult, expand_user_path,
+    DiffFile, GitAction, GitSnapshot, PreparedGitAction, RunGitActionResult, TimelineItem,
+    expand_user_path,
 };
 use anyhow::{Context, Result, anyhow};
 use serde::{Deserialize, Serialize};
@@ -20,6 +21,8 @@ pub struct UndoCheckpoint {
     pub working_tree_patch: String,
     pub staged_patch: String,
     pub untracked_files: Vec<UntrackedFileSnapshot>,
+    #[serde(default)]
+    pub timeline_items: Vec<TimelineItem>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -491,10 +494,14 @@ pub fn capture_undo_checkpoint(
             ],
         )?,
         untracked_files: list_untracked_files(&path)?,
+        timeline_items: Vec::new(),
     }))
 }
 
 pub fn restore_undo_checkpoint(path: &str, checkpoint: &UndoCheckpoint) -> Result<()> {
+    if checkpoint.head_sha.is_empty() {
+        return Ok(());
+    }
     let path = expand_user_path(path);
     let current_head = git_output_lines(&path, &["rev-parse", "HEAD"])?
         .into_iter()

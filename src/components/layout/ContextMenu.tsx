@@ -68,7 +68,7 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
         display: "flex",
         flexDirection: "column",
         gap: "2px",
-        animation: "contextMenuItemFadeIn 0.1s ease-out",
+        animation: "contextMenuItemFadeIn 0.12s ease-out",
       }}
       onContextMenu={(e) => e.preventDefault()}
     >
@@ -153,8 +153,8 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
 
       <style>{`
         @keyframes contextMenuItemFadeIn {
-          from { opacity: 0; transform: scale(0.95); }
-          to { opacity: 1; transform: scale(1); }
+          from { opacity: 0; }
+          to { opacity: 1; }
         }
       `}</style>
     </div>,

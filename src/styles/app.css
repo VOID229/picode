@@ -1959,23 +1959,23 @@ body {
 
 .git-modal {
   position: relative;
-  width: min(520px, calc(100vw - 32px));
-  max-height: 70vh;
-  overflow-y: auto;
+  width: min(390px, calc(100vw - 32px));
+  max-height: none;
+  overflow: hidden;
   border: 1px solid #333;
-  border-radius: 16px;
+  border-radius: 12px;
   background: #161616;
-  padding: 22px 24px 20px;
+  padding: 16px 18px 14px;
   color: #f0f0ed;
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.5);
 }
 
 .git-modal__close {
   position: absolute;
-  top: 18px;
-  right: 18px;
-  width: 30px;
-  height: 30px;
+  top: 12px;
+  right: 12px;
+  width: 28px;
+  height: 28px;
   border-radius: 7px;
   border: none;
   background: transparent;
@@ -1991,20 +1991,20 @@ body {
 }
 
 .git-modal__mark {
-  width: 42px;
-  height: 42px;
-  border-radius: 10px;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
   background: rgba(0, 0, 0, 0.13);
   color: #e9e9e6;
-  margin-bottom: 18px;
+  margin-bottom: 10px;
 }
 
 .git-modal h2 {
-  margin: 0 0 20px;
-  font-size: 1.45rem;
+  margin: 0 0 12px;
+  font-size: 1.12rem;
   line-height: 1.1;
   letter-spacing: 0;
 }
@@ -2014,8 +2014,8 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  margin: 14px 0;
-  font-size: 1rem;
+  margin: 8px 0;
+  font-size: 0.88rem;
 }
 
 .git-modal__row strong,
@@ -2049,9 +2049,9 @@ body {
 .git-modal__draft {
   display: flex;
   align-items: center;
-  gap: 12px;
-  margin: 16px 0 18px;
-  font-size: 0.98rem;
+  gap: 10px;
+  margin: 10px 0 12px;
+  font-size: 0.86rem;
   font-weight: 650;
 }
 
@@ -2111,8 +2111,8 @@ body {
 .git-modal__field {
   display: flex;
   flex-direction: column;
-  gap: 9px;
-  margin: 16px 0;
+  gap: 7px;
+  margin: 10px 0;
 }
 
 .git-modal__field-head {
@@ -2120,7 +2120,7 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 14px;
-  font-size: 1rem;
+  font-size: 0.88rem;
   font-weight: 750;
 }
 
@@ -2144,15 +2144,15 @@ body {
 
 .git-modal__field textarea {
   width: 100%;
-  min-height: 78px;
-  resize: vertical;
+  height: 48px;
+  resize: none;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 10px;
   background: #202020;
   color: #f0f0ed;
-  padding: 12px 14px;
+  padding: 8px 10px;
   font: inherit;
-  font-size: 0.92rem;
+  font-size: 0.84rem;
   outline: none;
 }
 
@@ -2166,10 +2166,10 @@ body {
 }
 
 .git-modal__steps {
-  margin-top: 16px;
+  margin-top: 10px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
 
 .git-modal__step-list {
@@ -2182,16 +2182,16 @@ body {
 
 .git-modal__step {
   display: grid;
-  grid-template-columns: 34px 1fr 24px;
+  grid-template-columns: 28px 1fr 20px;
   align-items: center;
-  min-height: 48px;
+  min-height: 38px;
   border: none;
   border-bottom: 1px solid rgba(255, 255, 255, 0.05);
   background: transparent;
   color: #f0f0ed;
-  padding: 0 16px;
+  padding: 0 12px;
   font: inherit;
-  font-size: 0.98rem;
+  font-size: 0.86rem;
   font-weight: 700;
   text-align: left;
   cursor: pointer;

@@ -706,6 +706,8 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
       userMessageId,
     });
     set({ state });
+    get().clearComposerDraft(sessionId);
+    get().clearComposerImages(sessionId);
     await get().refreshGit(workspaceId);
   },
   async sendPrompt(

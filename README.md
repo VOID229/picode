@@ -1,5 +1,6 @@
 # Picode
 
+![Archived](https://img.shields.io/badge/status-archived-inactive)
 ![Open Source](https://img.shields.io/badge/open_source-AGPL--3.0-2ea44f)
 ![Tauri](https://img.shields.io/badge/Tauri-v2-24c8db)
 ![Agent Manager](https://img.shields.io/badge/agent-manager-7c3aed)
@@ -7,9 +8,16 @@
 ![Linux](https://img.shields.io/badge/Linux-experimental-f59e0b)
 
 
-Picode is a minimal desktop GUI for coding agents using Pi.
+> [!IMPORTANT]
+> **This project is archived.**
+>
+> I accidentally started using the Pi TUI and it's too good. I don't see a reason anymore to build a GUI for it — it only removes the customizability of Pi.
+>
+> Feel free to fork and continue this project if you're convinced otherwise, as long as you give credit to the original creator & repo.
 
-Built with Tauri v2, React, and TypeScript, it provides a native shell for managing your agents and projects.
+Picode was a minimal desktop GUI for coding agents using Pi.
+
+Built with Tauri v2, React, and TypeScript, it provided a native shell for managing your agents and projects.
 
 ## Install
 

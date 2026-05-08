@@ -1,4 +1,4 @@
-import { ArrowUp, Bot, Check, FileText, Square, Zap } from "lucide-react";
+import { ArrowUp, Bot, Check, FileText, GitBranch, Square, Zap } from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -79,7 +79,8 @@ export function ConversationView({
   const [isFocused, setIsFocused] = useState(false);
   const [providerDropdownOpen, setProviderDropdownOpen] = useState(false);
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
-  const [effortDropdownOpen, setEffortDropdownOpen] = useState(false);
+  const [reasoningDropdownOpen, setReasoningDropdownOpen] = useState(false);
+  const [branchDropdownOpen, setBranchDropdownOpen] = useState(false);
   const [lastUndoneChange, setLastUndoneChange] = useState<UndoneChange | null>(
     null,
   );
@@ -146,6 +147,9 @@ export function ConversationView({
   const updateWorkspaceSettings = useAppStore(
     (store) => store.updateWorkspaceSettings,
   );
+  const selectWorkspaceSession = useAppStore(
+    (store) => store.selectWorkspaceSession,
+  );
 
   const handleSelectionChange = useCallback(
     (nextSelection: ChatSession["selection"]) => {
@@ -153,23 +157,28 @@ export function ConversationView({
         return;
       }
 
+      const selection = {
+        ...nextSelection,
+        effort: nextSelection.effort || globalEffort,
+      };
+
       if (modelSelectionScope === "thread" && threadModelMemory === "used") {
-        setDraftSelection(nextSelection);
-        return;
+        setDraftSelection(selection);
       }
 
       void updateWorkspaceSettings({
         workspaceId: workspace.id,
         sessionId: modelSelectionScope === "global" ? undefined : session.id,
         approvalMode: workspace.approvalMode,
-        providerId: nextSelection.providerId,
-        modelId: nextSelection.modelId,
-        effort: nextSelection.effort,
-        fastMode: nextSelection.fastMode,
+        providerId: selection.providerId,
+        modelId: selection.modelId,
+        effort: selection.effort,
+        fastMode: selection.fastMode,
         policy: workspace.policy,
       });
     },
     [
+      globalEffort,
       modelSelectionScope,
       session,
       threadModelMemory,
@@ -181,16 +190,32 @@ export function ConversationView({
   const closeComposerMenus = () => {
     setProviderDropdownOpen(false);
     setModelDropdownOpen(false);
-    setEffortDropdownOpen(false);
+    setReasoningDropdownOpen(false);
+    setBranchDropdownOpen(false);
   };
 
-  const toggleComposerMenu = (menu: "provider" | "model" | "effort") => {
+  const toggleComposerMenu = (menu: "provider" | "model" | "reasoning" | "branch") => {
     setProviderDropdownOpen((current) =>
       menu === "provider" ? !current : false,
     );
     setModelDropdownOpen((current) => (menu === "model" ? !current : false));
-    setEffortDropdownOpen((current) => (menu === "effort" ? !current : false));
+    setReasoningDropdownOpen((current) =>
+      menu === "reasoning" ? !current : false,
+    );
+    setBranchDropdownOpen((current) => (menu === "branch" ? !current : false));
   };
+
+  const branchThreads = useMemo(
+    () =>
+      workspace?.sessions
+        .filter((item) => !item.archivedAt)
+        .map((item) => ({
+          id: item.id,
+          title: item.title,
+          branch: item.branchLabel || "main",
+        })) ?? [],
+    [workspace?.sessions],
+  );
 
   const sessionDraft = session ? (composerDrafts[session.id] ?? "") : "";
   const sessionImages = session ? (composerImageDrafts[session.id] ?? []) : [];
@@ -238,10 +263,8 @@ export function ConversationView({
           sessionStatsRef.current = nextStats;
         }
       } catch {
-        if (isActive) {
-          setSessionStats(null);
-          sessionStatsRef.current = null;
-        }
+        // Completed threads may no longer have an active runtime session.
+        // Keep the last thread-specific reading instead of flashing the ring empty.
       }
     };
 
@@ -434,16 +457,8 @@ export function ConversationView({
       return;
     }
 
-    const git = useAppStore.getState().git[workspace.id];
-    if (!git?.isRepo) {
-      window.alert(
-        "Redo is only available for git workspaces with a saved checkpoint for this turn.",
-      );
-      return;
-    }
-
     const confirmed = window.confirm(
-      "Redo this change and restore the reverted working tree checkpoint?",
+      "Redo this change and restore the reverted files and messages?",
     );
     if (!confirmed) return;
 
@@ -480,7 +495,10 @@ export function ConversationView({
             effort: globalEffort,
             fastMode: globalFastMode,
           }
-        : resolveSessionSelection(session, workspace));
+        : {
+            ...resolveSessionSelection(session, workspace),
+            effort: globalEffort,
+          });
     const capabilities = resolveComposerCapabilities({
       providers: displayProviders,
       selection,
@@ -489,13 +507,18 @@ export function ConversationView({
     if (
       selection.providerId === capabilities.normalizedSelection.providerId &&
       selection.modelId === capabilities.normalizedSelection.modelId &&
-      selection.effort === capabilities.normalizedSelection.effort &&
+      selection.effort === globalEffort &&
+      capabilities.normalizedSelection.effort === globalEffort &&
       selection.fastMode === capabilities.normalizedSelection.fastMode
     ) {
       return;
     }
 
-    if (draftSelection && modelSelectionScope === "thread" && threadModelMemory === "used") {
+    if (
+      draftSelection &&
+      modelSelectionScope === "thread" &&
+      threadModelMemory === "used"
+    ) {
       return;
     }
 
@@ -505,7 +528,7 @@ export function ConversationView({
       approvalMode: workspace.approvalMode,
       providerId: capabilities.normalizedSelection.providerId,
       modelId: capabilities.normalizedSelection.modelId,
-      effort: capabilities.normalizedSelection.effort,
+      effort: globalEffort,
       fastMode: capabilities.normalizedSelection.fastMode,
       policy: workspace.policy,
     });
@@ -551,7 +574,10 @@ export function ConversationView({
           effort: globalEffort,
           fastMode: globalFastMode,
         }
-      : resolveSessionSelection(session, workspace));
+      : {
+          ...resolveSessionSelection(session, workspace),
+          effort: globalEffort,
+        });
   const activeProvider = displayProviders.find(
     (provider) => provider.id === selection.providerId,
   );
@@ -564,7 +590,7 @@ export function ConversationView({
     providers: displayProviders,
     selection,
   });
-  const effortLabels = Object.fromEntries(
+  const reasoningLabels = Object.fromEntries(
     composerCapabilities.effortOptions.map((entry) => [entry.id, entry.label]),
   );
   const normalizedSelection = composerCapabilities.normalizedSelection;
@@ -589,7 +615,8 @@ export function ConversationView({
             : undefined;
   const sendDisabled = Boolean(sendDisabledReason);
 
-  const currentEffortLabel = effortLabels[normalizedSelection.effort] || "High";
+  const currentReasoningLabel =
+    reasoningLabels[normalizedSelection.effort] || "high";
   const contextUsageTitle = parseContextWindowTitle(sessionStats);
   const contextUsagePercent =
     sessionStats?.contextUsage?.tokens != null
@@ -710,6 +737,7 @@ export function ConversationView({
             <FilesChangedBlock
               toolFileChanges={lastUndoneChange.toolFileChanges}
               onRedo={handleRedo}
+              onClose={() => setLastUndoneChange(null)}
             />
           </div>
         )}
@@ -838,8 +866,8 @@ export function ConversationView({
                             onClick={(event) => {
                               event.stopPropagation();
                               closeComposerMenus();
-                              handleSelectionChange(
-                                resolveProviderSwitchSelection({
+                              handleSelectionChange({
+                                ...resolveProviderSwitchSelection({
                                   provider,
                                   currentSelection: normalizedSelection,
                                   providerModelMemory: {
@@ -848,7 +876,8 @@ export function ConversationView({
                                       normalizedSelection,
                                   },
                                 }),
-                              );
+                                effort: globalEffort,
+                              });
                             }}
                           >
                             <span>{provider.label}</span>
@@ -943,13 +972,13 @@ export function ConversationView({
 
                 <div
                   className="composer-select-wrapper pointer"
-                  onClick={() => toggleComposerMenu("effort")}
+                  onClick={() => toggleComposerMenu("reasoning")}
                 >
                   <span style={{ paddingRight: "4px" }}>
-                    {currentEffortLabel.split(" ")[0]}
+                    {currentReasoningLabel}
                   </span>
                   <ChevronIcon />
-                  {effortDropdownOpen &&
+                  {reasoningDropdownOpen &&
                     composerCapabilities.effortOptions.length > 0 && (
                       <>
                         <div
@@ -968,7 +997,6 @@ export function ConversationView({
                           className="custom-dropdown"
                           style={{ minWidth: "160px" }}
                         >
-                          <div className="dropdown-section-label">Effort</div>
                           {composerCapabilities.effortOptions.map(
                             ({ id, label }) => (
                               <div
@@ -1028,6 +1056,51 @@ export function ConversationView({
                     background: "var(--line)",
                   }}
                 />
+
+                <div
+                  className="composer-select-wrapper pointer"
+                  onClick={() => toggleComposerMenu("branch")}
+                  title="Switch thread branch"
+                >
+                  <GitBranch size={14} />
+                  <span>{session?.branchLabel || "main"}</span>
+                  <ChevronIcon />
+                  {branchDropdownOpen && (
+                    <>
+                      <div
+                        style={{
+                          position: "fixed",
+                          inset: 0,
+                          zIndex: 10,
+                          cursor: "default",
+                        }}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          closeComposerMenus();
+                        }}
+                      />
+                      <div className="custom-dropdown" style={{ minWidth: "220px" }}>
+                        {branchThreads.map((thread) => (
+                          <div
+                            key={thread.id}
+                            className="custom-dropdown-item"
+                            style={{ justifyContent: "space-between" }}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              closeComposerMenus();
+                              if (workspace) {
+                                void selectWorkspaceSession(workspace.id, thread.id);
+                              }
+                            }}
+                          >
+                            <span>{thread.branch}</span>
+                            {session?.id === thread.id && <Check size={14} />}
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
               </div>
 
               <div

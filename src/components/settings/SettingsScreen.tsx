@@ -38,6 +38,15 @@ import type { AppPaths } from "../../domains/types";
 
 let lastSettingsTab = "general";
 
+const REASONING_OPTIONS = [
+  { value: "off", label: "off" },
+  { value: "minimal", label: "minimal" },
+  { value: "low", label: "low" },
+  { value: "medium", label: "medium" },
+  { value: "high", label: "high" },
+  { value: "xhigh", label: "xhigh" },
+];
+
 function Toggle({ checked }: { checked: boolean }) {
   return (
     <div
@@ -1426,8 +1435,8 @@ export function SettingsScreen() {
                     }
                   />
                   <SettingRow
-                    label="Title generation effort"
-                    description="Controls the reasoning depth used for automatic thread naming."
+                    label="Title generation reasoning"
+                    description="Controls the reasoning level used for automatic thread naming."
                     control={
                       <select
                         style={controlStyle}
@@ -1443,10 +1452,11 @@ export function SettingsScreen() {
                           });
                         }}
                       >
-                        <option value="low">Low</option>
-                        <option value="medium">Medium</option>
-                        <option value="high">High</option>
-                        <option value="xhigh">XHigh</option>
+                        {REASONING_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
                       </select>
                     }
                   />
@@ -1611,8 +1621,8 @@ export function SettingsScreen() {
                     }
                   />
                   <SettingRow
-                    label="Git message effort"
-                    description="Controls reasoning depth used for automatic commit and PR text."
+                    label="Git message reasoning"
+                    description="Controls the reasoning level used for automatic commit and PR text."
                     control={
                       <select
                         style={controlStyle}
@@ -1630,10 +1640,11 @@ export function SettingsScreen() {
                           });
                         }}
                       >
-                        <option value="low">Low</option>
-                        <option value="medium">Medium</option>
-                        <option value="high">High</option>
-                        <option value="xhigh">XHigh</option>
+                        {REASONING_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
                       </select>
                     }
                   />

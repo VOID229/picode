@@ -48,12 +48,12 @@ export interface ComposerCapabilities {
 const BLOCK_PATTERN = /<(proposed_plan|think|thought)>\s*([\s\S]*?)\s*<\/\1>/gi;
 const DEFAULT_EFFORT = "high";
 const GENERIC_EFFORT_OPTIONS: ComposerEffortOption[] = [
-  { id: "off", label: "Off" },
-  { id: "minimal", label: "Minimal" },
-  { id: "low", label: "Low" },
-  { id: "medium", label: "Medium" },
-  { id: "high", label: "High" },
-  { id: "xhigh", label: "XHigh" },
+  { id: "off", label: "off" },
+  { id: "minimal", label: "minimal" },
+  { id: "low", label: "low" },
+  { id: "medium", label: "medium" },
+  { id: "high", label: "high" },
+  { id: "xhigh", label: "xhigh" },
 ];
 const ANTIGRAVITY_EFFORT_OPTIONS: ComposerEffortOption[] = [
   { id: "fast", label: "Fast" },

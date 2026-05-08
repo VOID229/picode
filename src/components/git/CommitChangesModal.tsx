@@ -50,7 +50,6 @@ export function CommitChangesModal({
   );
   const [includeUnstaged, setIncludeUnstaged] = useState(true);
   const [message, setMessage] = useState("");
-  const [autoGenerateMessage, setAutoGenerateMessage] = useState(false);
   const [showCustomInstructions, setShowCustomInstructions] = useState(false);
   const [customInstructions, setCustomInstructions] = useState("");
   const [draft, setDraft] = useState(initialAction === "create-pr");
@@ -85,6 +84,9 @@ export function CommitChangesModal({
 
   const canCreatePr = prepared?.canCreatePr ?? false;
   const hasChanges = Boolean(prepared?.hasStaged || prepared?.hasUnstaged);
+  const hasCommittableChanges = Boolean(
+    prepared?.hasStaged || (includeUnstaged && prepared?.hasUnstaged),
+  );
   const commitFieldVisible = normalizedAction !== "push" && hasChanges;
   const commitMessageId = "git-commit-message";
   const customInstructionsId = "git-custom-instructions";
@@ -92,8 +94,7 @@ export function CommitChangesModal({
   const canSubmit =
     !error &&
     prepared &&
-    (normalizedAction === "push" || hasChanges) &&
-    (normalizedAction === "push" || autoGenerateMessage || message.trim().length > 0);
+    (normalizedAction === "push" || hasCommittableChanges);
 
   const handleContinue = async () => {
     if (!canSubmit) return;
@@ -115,7 +116,7 @@ export function CommitChangesModal({
         workspaceId: workspace.id,
         action: normalizedAction,
         includeUnstaged,
-        message: autoGenerateMessage ? message.trim() || undefined : message.trim(),
+        message: message.trim() || undefined,
         customInstructions,
         draft,
       });
@@ -200,55 +201,26 @@ export function CommitChangesModal({
         )}
 
         {commitFieldVisible && (
-          <>
-            <label className="git-modal__toggle-row">
-              <span
-                className={cn(
-                  "git-modal__switch",
-                  autoGenerateMessage && "git-modal__switch--on",
-                )}
-              >
-                <input
-                  checked={autoGenerateMessage}
-                  type="checkbox"
-                  onChange={(event) =>
-                    setAutoGenerateMessage(event.target.checked)
-                  }
-                />
-                <span />
-              </span>
-              Auto-generate commit message
-            </label>
-
-            <div className="git-modal__field">
-              <div className="git-modal__field-head">
-                <label htmlFor={commitMessageId}>
-                  {autoGenerateMessage
-                    ? "Commit message (optional)"
-                    : "Commit message"}
-                </label>
-                <button
-                  type="button"
-                  onClick={() =>
-                    setShowCustomInstructions((current) => !current)
-                  }
-                >
-                  Custom instructions
-                </button>
-              </div>
-              <textarea
-                id={commitMessageId}
-                value={message}
-                onChange={(event) => setMessage(event.target.value)}
-                placeholder={
-                  autoGenerateMessage
-                    ? "Leave blank to autogenerate a commit message"
-                    : "Enter your commit message"
+          <div className="git-modal__field">
+            <div className="git-modal__field-head">
+              <label htmlFor={commitMessageId}>Commit message</label>
+              <button
+                type="button"
+                onClick={() =>
+                  setShowCustomInstructions((current) => !current)
                 }
-                rows={2}
-              />
+              >
+                Custom instructions
+              </button>
             </div>
-          </>
+            <textarea
+              id={commitMessageId}
+              value={message}
+              onChange={(event) => setMessage(event.target.value)}
+              placeholder="Leave blank to autogenerate"
+              rows={2}
+            />
+          </div>
         )}
 
         {showCustomInstructions && (

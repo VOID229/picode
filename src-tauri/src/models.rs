@@ -1251,6 +1251,9 @@ pub fn normalize_state(mut state: PersistedAppState) -> PersistedAppState {
         &mut state.preferences.git_message_model_fallback_id,
     );
     normalize_effort(&mut state.preferences.git_message_model_effort);
+    for selection in state.preferences.provider_model_memory.values_mut() {
+        normalize_session_selection(selection);
+    }
 
     for workspace in &mut state.workspaces {
         normalize_workspace_path(&mut workspace.path);
